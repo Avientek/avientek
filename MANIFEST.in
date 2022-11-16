@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include avientek *.css
+recursive-include avientek *.csv
+recursive-include avientek *.html
+recursive-include avientek *.ico
+recursive-include avientek *.js
+recursive-include avientek *.json
+recursive-include avientek *.md
+recursive-include avientek *.png
+recursive-include avientek *.py
+recursive-include avientek *.svg
+recursive-include avientek *.txt
+recursive-exclude avientek *.pyc
