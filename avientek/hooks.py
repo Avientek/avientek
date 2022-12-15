@@ -97,9 +97,9 @@ doctype_js = {
 # ---------------
 # Override standard doctype classes
 
-override_doctype_class = {
-	"Purchase Order": "avientek.events.purchase_order.CustomPurchaseOrder"
-}
+# override_doctype_class = {
+# 	"Purchase Order": "avientek.events.purchase_order.CustomPurchaseOrder"
+# }
 
 # Document Events
 # ---------------
