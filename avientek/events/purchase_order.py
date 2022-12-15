@@ -27,7 +27,7 @@ class CustomPurchaseOrder(BuyingController):
 				if not d.get(frappe.scrub(ref_doctype)):
 					posting_time = self.get("posting_time")
 					if not posting_time and self.doctype == "Purchase Order":
-						posting_time = nowtime()
+						posting_time = frappe.utils.nowtime()
 
 					outgoing_rate = get_incoming_rate(
 						{
