@@ -10,6 +10,15 @@ app_license = "MIT"
 # Includes in <head>
 # ------------------
 
+fixtures = [{'dt':'Custom Field',
+				'filters': [
+					['name', 'in', (
+						'Purchase Order Item-avientek_eta', 'Sales Order Item-avientek_eta',
+						'Sales Order Item-eta_history', 'Purchase Order Item-eta_history',
+						'Purchase Order Item-eta_history_text', 'Purchase Order Item-eta_history_text',
+						'Purchase Order Item-swap_so', 'Purchase Order Item-set_so_eta')]
+                ]
+			}]
 # include js, css files in header of desk.html
 # app_include_css = "/assets/avientek/css/avientek.css"
 # app_include_js = "/assets/avientek/js/avientek.js"
@@ -31,7 +40,7 @@ app_license = "MIT"
 # include js in doctype views
 doctype_js = {
 	"Quotation" : "public/js/quotation.js",
-	# "Purchase Order" : "public/js/purchase_order.js"
+	"Purchase Order" : "public/js/purchase_order.js"
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -105,13 +114,11 @@ doctype_js = {
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-#	"*": {
-#		"on_update": "method",
-#		"on_cancel": "method",
-#		"on_trash": "method"
-#	}
-# }
+doc_events = {
+	"Purchase Order": {
+		"before_update_after_submit": "avientek.events.purchase_order.po_validate"
+	}
+}
 
 # Scheduled Tasks
 # ---------------
