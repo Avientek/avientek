@@ -1,4 +1,5 @@
 function update_rates(frm,cdt,cdn){
+    console.log("update rates")
     var row = locals[cdt][cdn]
     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
     if (frm.doc.currency == company_currency){
@@ -48,6 +49,7 @@ function update_rates(frm,cdt,cdn){
 }
 
 function rate_calculation(frm,cdt,cdn){
+    console.log("rate calc")
     var row = locals[cdt][cdn]
     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
     if (frm.doc.currency == company_currency){
@@ -91,6 +93,7 @@ function rate_calculation(frm,cdt,cdn){
 
 frappe.ui.form.on('Quotation Item',{
     item_code:function(frm, cdt,cdn){
+        console.log("item_code")
         var row = locals[cdt][cdn]
         setTimeout(() => {
             var row = locals[cdt][cdn]
@@ -256,7 +259,19 @@ frappe.ui.form.on('Quotation',{
         toggle_item_grid_columns(frm);
     },
     refresh:function(frm){ 
-        console.log("Workingggg")       
+        console.log("Workingggg",frm.doc.__islocal,frm.doc.selling_price_list)  
+        if(frm.doc.__islocal === 1){
+            if(frm.doc.selling_price_list){
+                setTimeout(() => {
+                    frm.doc.items.forEach((item) =>{
+                        if(item.brand && item.base_price_list_rate){
+                            frappe.model.set_value(item.doctype,item.name,'price_list_rate_copy',item.base_price_list_rate)
+                            rate_calculation(frm,item.doctype,item.name)
+                        }
+                    });
+                },100)
+            }
+        }     
         frm.set_query("selling_price_list", function() {
             return {
                 "filters": {
