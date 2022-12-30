@@ -15,7 +15,7 @@ fixtures = [{'dt':'Custom Field',
 					['name', 'in', (
 						'Purchase Order Item-avientek_eta', 'Sales Order Item-avientek_eta',
 						'Sales Order Item-eta_history', 'Purchase Order Item-eta_history',
-						'Purchase Order Item-eta_history_text', 'Purchase Order Item-eta_history_text',
+						'Purchase Order Item-eta_history_text', 'Sales Order Item-eta_history_text',
 						'Purchase Order Item-swap_so', 'Purchase Order Item-set_so_eta')]
                 ]
 			}]
