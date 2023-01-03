@@ -101,7 +101,7 @@ frappe.ui.form.on('Quotation Item',{
                 frappe.model.set_value(row.doctype,row.name,'price_list_rate_copy',row.base_price_list_rate)
                 rate_calculation(frm,cdt,cdn)
             }
-        },100)
+        },1000)
     },
     price_list_rate_copy:function(frm,cdt,cdn){
         var row = locals[cdt][cdn]
