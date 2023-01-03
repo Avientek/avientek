@@ -103,13 +103,22 @@ frappe.ui.form.on('Quotation Item',{
             }
         },100)
     },
-    // base_price_list_rate:function(frm,cdt,cdn){
-    //     var row = locals[cdt][cdn]
-    //     if(row.brand && row.base_price_list_rate){
-    //         frappe.model.set_value(row.doctype,row.name,'price_list_rate_copy',row.base_price_list_rate)
-    //         rate_calculation(frm,cdt,cdn)
-    //     }
-    // },
+    price_list_rate_copy:function(frm,cdt,cdn){
+        var row = locals[cdt][cdn]
+        if(row.brand && row.price_list_rate_copy){
+            row.shipping = flt(row.price_list_rate_copy) * flt(row.shipping_per) / 100;
+            row.base_shipping = row.shipping*frm.doc.conversion_rate;
+            row.processing_charges = flt(row.price_list_rate_copy) * flt(row.processing_charges_per) / 100;
+            row.base_processing_charges = row.processing_charges*frm.doc.conversion_rate;
+            row.reward = flt(row.price_list_rate_copy) * flt(row.reward_per) / 100;
+            row.base_reward = row.reward*frm.doc.conversion_rate;
+            row.levee = flt(row.price_list_rate_copy) * flt(row.levee_per) / 100;
+            row.base_levee = row.levee*frm.doc.conversion_rate;
+            row.std_margin = flt(row.price_list_rate_copy) * flt(row.std_margin_per) / 100;
+            row.base_std_margin = row.std_margin*frm.doc.conversion_rate;
+        }
+        update_rates(frm,cdt,cdn)
+    },
     shipping:function(frm, cdt,cdn){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){

@@ -230,3 +230,14 @@ def set_sales_order(sales_order, item_name, eta):
 			"eta_history_text": eta_history_text,
 			"eta_history" : eta_history
 			})
+
+# from erpnext.controllers.item_variant import create_variant
+
+# def execute():
+
+# 	v = create_variant('XXXXXX', {'Colour':'Green'})
+# 	# print(v)
+# 	# v.item_code = 'XXXXXX-red'
+# 	# print(v.item_code)
+# 	v.save()
+
