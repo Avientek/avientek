@@ -21,6 +21,15 @@ frappe.ui.form.on('Purchase Order',{
 		// 		}, __("Get Items From"));
 		// }
 	},
+	avientek_eta: function(frm) {
+		if (frm.doc.avientek_eta) {
+			$.each(frm.doc.items, function(x, y) {
+				frappe.model.set_value(y.doctype, y.name, {
+					"avientek_eta": frm.doc.avientek_eta
+				});
+			});
+		}
+	}
 })
 
 frappe.ui.form.on("Purchase Order Item", {
