@@ -117,6 +117,9 @@ doctype_js = {
 doc_events = {
 	"Purchase Order": {
 		"before_update_after_submit": "avientek.events.purchase_order.po_validate"
+	},
+	"Item": {
+		"validate": "avientek.events.item.validate_brand_pn"
 	}
 }
 
