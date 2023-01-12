@@ -16,7 +16,8 @@ fixtures = [{'dt':'Custom Field',
 						'Purchase Order Item-avientek_eta', 'Sales Order Item-avientek_eta',
 						'Sales Order Item-eta_history', 'Purchase Order Item-eta_history',
 						'Purchase Order Item-eta_history_text', 'Sales Order Item-eta_history_text',
-						'Purchase Order Item-swap_so', 'Purchase Order Item-set_so_eta')]
+						'Purchase Order Item-swap_so', 'Purchase Order Item-set_so_eta',
+						'Purchase Order-avientek_eta')]
                 ]
 			}]
 # include js, css files in header of desk.html
