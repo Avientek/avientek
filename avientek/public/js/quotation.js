@@ -403,6 +403,7 @@ frappe.ui.form.on('Quotation',{
         let reward_total = 0;
         let levee_total = 0;
         let std_total = 0;
+        let custom_total = 0;
 
         // let per_shipping_total = 0;
         // let per_pc_total = 0;
@@ -431,6 +432,9 @@ frappe.ui.form.on('Quotation',{
             }       
             if (doc.items[i].total_std_margin){
                 std_total += doc.items[i].total_std_margin;
+            } 
+            if (doc.items[i].custom_duty_charges){
+                custom_total += doc.items[i].custom_duty_charges;
             } 
 
             // if (doc.items[i].shipping_per){
@@ -481,11 +485,11 @@ frappe.ui.form.on('Quotation',{
         frm.set_value('total_reward_per', (reward_total/frm.doc.total)*100);
         frm.set_value('total_levee_per', (levee_total/frm.doc.total)*100);
         frm.set_value('total_std_margin_per', (std_total/frm.doc.total)*100);
+        frm.set_value('total_custom_duty_charges', (custom_total/frm.doc.total)*100);
 
         frm.set_value('base_total_shipping', base_shipping_total);
         frm.set_value('base_total_processing_charges', base_pc_total);
         frm.set_value('base_total_reward', base_reward_total);
         frm.set_value('base_total_levee', base_levee_total);
-        frm.set_value('base_total_std_margin', base_std_total);
     },
 })
