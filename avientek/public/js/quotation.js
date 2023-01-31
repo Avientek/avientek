@@ -149,6 +149,7 @@ frappe.ui.form.on('Quotation Item',{
             if(!frm.doc.conversion_rate){
                 conv =1
             }
+            
             // console.log("plc conv\n\n",plc,conv)
             // console.log("copyyyyyyyyyyyy\n\n",(row.usd_price_list_rate_with_margin*plc*conv))
             frappe.model.set_value(row.doctype,row.name,'price_list_rate_copy',(row.usd_price_list_rate_with_margin*plc*conv))
