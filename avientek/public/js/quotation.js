@@ -140,8 +140,11 @@ frappe.ui.form.on('Quotation Item',{
             let plc = frm.doc.plc_conversion_rate
             let conv = frm.doc.conversion_rate
             // console.log("plc conv\n\n",frm.doc.plc_conversion_rate,frm.doc.conversion_rate)
-            if(!frm.doc.plc_conversion_rate){
-                plc=1
+            // if(!frm.doc.plc_conversion_rate){
+            //     plc=1
+            // }
+            if(!frm.doc.plc_conversion_rate || (frm.doc.currency == frm.doc.price_list_currency)){
+                plc = 1
             }
             if(!frm.doc.conversion_rate){
                 conv =1
