@@ -14,10 +14,20 @@ fixtures = [{'dt':'Custom Field',
 				'filters': [
 					['name', 'in', (
 						'Purchase Order Item-avientek_eta', 'Sales Order Item-avientek_eta',
-						'Sales Order Item-eta_history', 'Purchase Order Item-eta_history',
+						'Sales Order Item-eta_history', 'Sales Order-avientek_display_currency',
+						'Sales Order-avientek_exchange_rate', 'Sales Order-avientek_total',
+						'Sales Order-avientek_grand_total', 'Sales Order-avientek_rounding_adjustment',
+						'Sales Order-avientek_rounded_total', 'Sales Order Item-avientek_rate',
+						'Sales Order Item-avientek_amount', 'Sales Order Item-avientek_exchange_rate',
+						'Purchase Order Item-eta_history',
 						'Purchase Order Item-eta_history_text', 'Sales Order Item-eta_history_text',
 						'Purchase Order Item-swap_so', 'Purchase Order Item-set_so_eta',
-						'Purchase Order-avientek_eta')]
+						'Purchase Order-avientek_eta', 'Purchase Order-avientek_display_currency',
+						'Purchase Order-avientek_total', 'Purchase Order-avientek_grand_total',
+						'Purchase Order-avientek_rounding_adjustment', 'Purchase Order-avientek_rounded_total',
+						'Purchase Order Item-avientek_rate', 'Purchase Order Item-avientek_amount',
+						'Purchase Order-avientek_exchange_rate', 'Purchase Order Item-avientek_exchange_rate',
+						'Supplier-avientek_display_currency', 'Customer-avientek_display_currency')]
                 ]
 			}]
 # include js, css files in header of desk.html
@@ -152,9 +162,11 @@ doc_events = {
 
 # Overriding Methods
 # ------------------------------
-#
+
 # override_whitelisted_methods = {
-#	"frappe.desk.doctype.event.event.get_events": "avientek.event.get_events"
+# 	# "frappe.desk.doctype.event.event.get_events": "avientek.event.get_events"
+# 	"erpnext.buying.doctype.purchase_order.purchase_order.make_inter_company_sales_order":"avientek.events.utils.make_inter_company_sales_order"
+
 # }
 #
 # each overriding function accepts a `data` argument;
