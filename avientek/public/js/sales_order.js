@@ -28,14 +28,15 @@ frappe.ui.form.on('Sales Order',{
 	},
 	avientek_exchange_rate: function(frm) {
 		set_display_currency(frm)
-	},
+	}
 })
 
-frappe.ui.form.on("Purchase Order Item", {
+frappe.ui.form.on("Sales Order Item", {
 	avientek_rate: function(frm, cdt, cdn) {
 		set_rate_from_avientek_rate(frm, cdt, cdn)
-	},
+	}
 })
+
 
 var set_display_currency = function(frm) {
 	let frm_value_list = [{'avientek_field': 'avientek_total', 'core_field':frm.doc.total},
@@ -64,7 +65,6 @@ var set_display_currency = function(frm) {
 }
 
 var set_display_exchange_rate = function(frm) {
-	frm.refresh();
 	if (frm.doc.currency && frm.doc.avientek_display_currency) {
 		frappe.call({
 			'method': 'erpnext.setup.utils.get_exchange_rate',
@@ -113,7 +113,7 @@ var set_new_rate = function(frm) {
 				},
 				freeze: true,
 				callback: (r) => {
-					if (r.message[0].rate == y.rate && r.message[0].currency != frm.doc.currency) {
+					if (r.message[0].currency != frm.doc.currency) {
 						if (frm.doc.currency && frm.doc.avientek_display_currency) {
 							frappe.call({
 								'method': 'erpnext.setup.utils.get_exchange_rate',
@@ -122,19 +122,20 @@ var set_new_rate = function(frm) {
 									'to_currency': frm.doc.currency
 							},
 							freeze: true,
-							callback: (r) => {
-								if(!r.exc) {
-									if (r.message) {
-										frappe.model.set_value(y.doctype, y.name, 'rate', (y.rate*r.message))
+							callback: (val) => {
+								if(!val.exc) {
+									if (val.message) {
+										frappe.model.set_value(y.doctype, y.name, 'rate', (r.message[0].rate*val.message))
 									}
 								}
 							}
-						})
+							})
+						}
 					}
-					}
+					frm.refresh_field("items")
 				}
 			});
-		}
-	})
+			}
+		})
 	}
 }
