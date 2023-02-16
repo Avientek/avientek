@@ -1,61 +1,64 @@
 function update_rates(frm,cdt,cdn){
-    console.log("update rates")
-    var row = locals[cdt][cdn]
-    var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
-    if (frm.doc.currency == company_currency){
-        var conversion_rate = 1
+    if (!frm.doc.amendded_from){
+        console.log("update rates")
+        var row = locals[cdt][cdn]
+        var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
+        if (frm.doc.currency == company_currency){
+            var conversion_rate = 1
+        }
+        else {
+            var conversion_rate = frm.doc.conversion_rate
+        }
+
+
+        // frappe.model.set_value(row.doctype,row.name,'base_shipping',(row.shipping*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'base_processing_charges',(row.processing_charges*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'base_reward',(row.reward*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'base_levee',(row.levee*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'base_std_margin',(row.std_margin*conversion_rate))
+
+        
+
+        
+
+        // frappe.model.set_value(row.doctype,row.name,'shipping_per',(((row.shipping/row.price_list_rate_copy)*100)*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'shipping',(((row.shipping_per*row.price_list_rate_copy)/100)*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'processing_charges',(row.processing_charges*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'reward',(row.reward*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'levee',(row.levee*conversion_rate))
+        // frappe.model.set_value(row.doctype,row.name,'std_margin',(row.std_margin*conversion_rate))
+
+        let tt = (row.price_list_rate_copy+row.base_shipping+row.base_processing_charges+row.base_reward+row.base_levee+row.base_std_margin)
+        let duty = flt(row.price_list_rate_copy) * flt(row.custom_duty) / 100;
+        
+        // console.log("dty",row.custom_duty)
+        // console.log("tt,duty",tt,duty)
+        setTimeout(() => {
+            frappe.model.set_value(row.doctype,row.name, 'base_price_list_rate',tt+duty)
+            frappe.model.set_value(row.doctype,row.name, 'custom_duty_charges',duty)
+        },100)
+
+        setTimeout(() => {
+            frappe.model.set_value(row.doctype,row.name, 'price_list_rate',(tt+duty)/conversion_rate)},100)
+
+        frappe.model.set_value(row.doctype,row.name,'base_total_shipping',(row.base_shipping*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'base_total_processing_charges',(row.base_processing_charges*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'base_total_reward',(row.base_reward*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'base_total_levee',(row.base_levee*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'base_total_std_margin',(row.base_std_margin*row.qty))
+
+        frappe.model.set_value(row.doctype,row.name,'total_shipping',(row.shipping*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'total_processing_charges',(row.processing_charges*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'total_reward',(row.reward*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'total_levee',(row.levee*row.qty))
+        frappe.model.set_value(row.doctype,row.name,'total_std_margin',(row.std_margin*row.qty))
+
+        frm.trigger('calculate_total')
     }
-    else {
-        var conversion_rate = frm.doc.conversion_rate
-    }
-
-
-    // frappe.model.set_value(row.doctype,row.name,'base_shipping',(row.shipping*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'base_processing_charges',(row.processing_charges*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'base_reward',(row.reward*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'base_levee',(row.levee*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'base_std_margin',(row.std_margin*conversion_rate))
-
-    
-
-    
-
-    // frappe.model.set_value(row.doctype,row.name,'shipping_per',(((row.shipping/row.price_list_rate_copy)*100)*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'shipping',(((row.shipping_per*row.price_list_rate_copy)/100)*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'processing_charges',(row.processing_charges*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'reward',(row.reward*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'levee',(row.levee*conversion_rate))
-    // frappe.model.set_value(row.doctype,row.name,'std_margin',(row.std_margin*conversion_rate))
-
-    let tt = (row.price_list_rate_copy+row.base_shipping+row.base_processing_charges+row.base_reward+row.base_levee+row.base_std_margin)
-    let duty = flt(row.price_list_rate_copy) * flt(row.custom_duty) / 100;
-    
-    // console.log("dty",row.custom_duty)
-    // console.log("tt,duty",tt,duty)
-    setTimeout(() => {
-        frappe.model.set_value(row.doctype,row.name, 'base_price_list_rate',tt+duty)
-        frappe.model.set_value(row.doctype,row.name, 'custom_duty_charges',duty)
-    },100)
-
-    setTimeout(() => {
-        frappe.model.set_value(row.doctype,row.name, 'price_list_rate',(tt+duty)/conversion_rate)},100)
-
-    frappe.model.set_value(row.doctype,row.name,'base_total_shipping',(row.base_shipping*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_processing_charges',(row.base_processing_charges*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_reward',(row.base_reward*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_levee',(row.base_levee*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_std_margin',(row.base_std_margin*row.qty))
-
-    frappe.model.set_value(row.doctype,row.name,'total_shipping',(row.shipping*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_processing_charges',(row.processing_charges*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_reward',(row.reward*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_levee',(row.levee*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_std_margin',(row.std_margin*row.qty))
-
-    frm.trigger('calculate_total')
 }
 
 function rate_calculation(frm,cdt,cdn){
+    if (!frm.doc.amended_from){
     // console.log("rate calc")
     var row = locals[cdt][cdn]
     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
@@ -112,11 +115,12 @@ function rate_calculation(frm,cdt,cdn){
 
     })
 }
+}
 
 
 frappe.ui.form.on('Quotation Item',{
     item_code:function(frm, cdt,cdn){
-        // console.log("item_code")
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         setTimeout(() => {
             var row = locals[cdt][cdn]
@@ -133,8 +137,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             rate_calculation(frm,cdt,cdn)
         },1000)
+    }
     },
     usd_price_list_rate_with_margin:function(frm,cdt,cdn) {
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.usd_price_list_rate_with_margin){
             let plc = frm.doc.plc_conversion_rate
@@ -153,9 +159,11 @@ frappe.ui.form.on('Quotation Item',{
             // console.log("plc conv\n\n",plc,conv)
             // console.log("copyyyyyyyyyyyy\n\n",(row.usd_price_list_rate_with_margin*plc*conv))
             frappe.model.set_value(row.doctype,row.name,'price_list_rate_copy',(row.usd_price_list_rate_with_margin*plc*conv))
-        }
+          }
+          }
     },
     price_list_rate_copy:function(frm,cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             row.shipping = (flt(row.price_list_rate_copy) * flt(row.shipping_per) / 100) / frm.doc.conversion_rate;
@@ -170,8 +178,10 @@ frappe.ui.form.on('Quotation Item',{
             row.base_std_margin = row.std_margin*frm.doc.conversion_rate;
         }
         update_rates(frm,cdt,cdn)
+    }
     },
     shipping:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.shipping) {
@@ -179,8 +189,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     shipping_per:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.shipping_per) {
@@ -189,8 +201,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     processing_charges:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.processing_charges) {
@@ -198,8 +212,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     processing_charges_per:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.processing_charges_per) {
@@ -208,8 +224,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     reward:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.reward) {
@@ -217,8 +235,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     reward_per:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.reward_per) {
@@ -227,8 +247,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     levee:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.levee) {
@@ -236,8 +258,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     levee_per:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.levee_per) {
@@ -246,8 +270,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     std_margin:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.std_margin) {
@@ -255,8 +281,10 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     std_margin_per:function(frm, cdt,cdn){
+        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.std_margin_per) {
@@ -265,6 +293,7 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
+    }
     },
     qty:function(frm, cdt,cdn){
         var row = locals[cdt][cdn]
