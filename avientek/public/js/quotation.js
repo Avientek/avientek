@@ -61,10 +61,10 @@ function update_rates(frm,cdt,cdn){
 }
 
 function rate_calculation(frm,cdt,cdn){
-if (!frm.doc.amended_from){
 // console.log("rate calc")
 var row = locals[cdt][cdn]
 var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
+if (!frm.doc.amended_from){
 if (frm.doc.currency == company_currency){
     var conversion_rate = 1
 }
@@ -86,6 +86,7 @@ if(!row.custom_duty){
             }
         }
     })
+}
 }
 
 frappe.db.get_value('Brand',{'brand':row.brand},['shipping','processing_charges','reward','levee','std_margin'],(b) => {
@@ -117,7 +118,7 @@ frappe.db.get_value('Brand',{'brand':row.brand},['shipping','processing_charges'
     update_rates(frm,cdt,cdn)
 
 })
-}
+
 }
 
 
