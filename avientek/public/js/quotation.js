@@ -1,5 +1,4 @@
 function update_rates(frm,cdt,cdn){
-    if (!frm.doc.amendded_from){
         console.log("update rates")
         var row = locals[cdt][cdn]
         var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
@@ -34,12 +33,16 @@ function update_rates(frm,cdt,cdn){
         // console.log("dty",row.custom_duty)
         // console.log("tt,duty",tt,duty)
         setTimeout(() => {
+            if (!frm.doc.amended_from){
             frappe.model.set_value(row.doctype,row.name, 'base_price_list_rate',tt+duty)
             frappe.model.set_value(row.doctype,row.name, 'custom_duty_charges',duty)
+            }
         },100)
 
         setTimeout(() => {
-            frappe.model.set_value(row.doctype,row.name, 'price_list_rate',(tt+duty)/conversion_rate)},100)
+            if (!frm.doc.amended_from){
+                frappe.model.set_value(row.doctype,row.name, 'price_list_rate',(tt+duty)/conversion_rate)}},100)
+            
 
         frappe.model.set_value(row.doctype,row.name,'base_total_shipping',(row.base_shipping*row.qty))
         frappe.model.set_value(row.doctype,row.name,'base_total_processing_charges',(row.base_processing_charges*row.qty))
@@ -54,7 +57,7 @@ function update_rates(frm,cdt,cdn){
         frappe.model.set_value(row.doctype,row.name,'total_std_margin',(row.std_margin*row.qty))
 
         frm.trigger('calculate_total')
-    }
+    
 }
 
 function rate_calculation(frm,cdt,cdn){
@@ -120,7 +123,6 @@ function rate_calculation(frm,cdt,cdn){
 
 frappe.ui.form.on('Quotation Item',{
     item_code:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         setTimeout(() => {
             var row = locals[cdt][cdn]
@@ -137,10 +139,8 @@ frappe.ui.form.on('Quotation Item',{
             // }
             rate_calculation(frm,cdt,cdn)
         },1000)
-    }
     },
     usd_price_list_rate_with_margin:function(frm,cdt,cdn) {
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.usd_price_list_rate_with_margin){
             let plc = frm.doc.plc_conversion_rate
@@ -158,12 +158,12 @@ frappe.ui.form.on('Quotation Item',{
             
             // console.log("plc conv\n\n",plc,conv)
             // console.log("copyyyyyyyyyyyy\n\n",(row.usd_price_list_rate_with_margin*plc*conv))
+
             frappe.model.set_value(row.doctype,row.name,'price_list_rate_copy',(row.usd_price_list_rate_with_margin*plc*conv))
-          }
-          }
+          
+        }
     },
     price_list_rate_copy:function(frm,cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             row.shipping = (flt(row.price_list_rate_copy) * flt(row.shipping_per) / 100) / frm.doc.conversion_rate;
@@ -178,10 +178,8 @@ frappe.ui.form.on('Quotation Item',{
             row.base_std_margin = row.std_margin*frm.doc.conversion_rate;
         }
         update_rates(frm,cdt,cdn)
-    }
     },
     shipping:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.shipping) {
@@ -189,10 +187,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     shipping_per:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.shipping_per) {
@@ -201,10 +198,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     processing_charges:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.processing_charges) {
@@ -212,10 +208,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     processing_charges_per:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.processing_charges_per) {
@@ -224,10 +219,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     reward:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.reward) {
@@ -235,10 +229,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     reward_per:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.reward_per) {
@@ -247,10 +240,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     levee:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.levee) {
@@ -258,10 +250,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     levee_per:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.levee_per) {
@@ -270,10 +261,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     std_margin:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.std_margin) {
@@ -281,10 +271,9 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    
     },
     std_margin_per:function(frm, cdt,cdn){
-        if (!frm.doc.amended_from){
         var row = locals[cdt][cdn]
         if(row.brand && row.price_list_rate_copy){
             // if (row.std_margin_per) {
@@ -293,7 +282,7 @@ frappe.ui.form.on('Quotation Item',{
             // }
             update_rates(frm,cdt,cdn)
         }
-    }
+    s
     },
     qty:function(frm, cdt,cdn){
         var row = locals[cdt][cdn]
@@ -350,14 +339,17 @@ frappe.ui.form.on('Quotation',{
     },
     refresh:function(frm){ 
         // console.log("Workingggg",frm.doc.__islocal,frm.doc.selling_price_list)  
+
         if(frm.doc.__islocal === 1){
             if(frm.doc.selling_price_list){
                 setTimeout(() => {
                     frm.doc.items.forEach((item) =>{
                         if(item.brand && item.base_price_list_rate){
+                            if(!frm.doc.amended_from){
                             frappe.model.set_value(item.doctype,item.name,'price_list_rate_copy',item.base_price_list_rate)
                             rate_calculation(frm,item.doctype,item.name)
                         }
+                    }
                     });
                 },100)
             }
