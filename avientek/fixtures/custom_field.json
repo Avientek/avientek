@@ -807,7 +807,7 @@
   "docstatus": 0,
   "doctype": "Custom Field",
   "dt": "Sales Order",
-  "fetch_from": "customer.display_currency",
+  "fetch_from": "customer.avientek_display_currency",
   "fetch_if_empty": 0,
   "fieldname": "avientek_display_currency",
   "fieldtype": "Link",
