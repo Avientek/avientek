@@ -133,6 +133,8 @@ doctype_js = {
 # 	"Purchase Order": "avientek.events.purchase_order.CustomPurchaseOrder"
 # }
 
+after_migrate = "avientek.migrate.after_migrate"
+
 # Document Events
 # ---------------
 # Hook on document methods and events
