@@ -29,7 +29,18 @@ fixtures = [{'dt':'Custom Field',
 						'Purchase Order-avientek_exchange_rate', 'Purchase Order Item-avientek_exchange_rate',
 						'Supplier-avientek_display_currency', 'Customer-avientek_display_currency')]
                 ]
-			}]
+			},
+			{
+	        "dt": "Property Setter",
+	        "filters": [
+	            [
+	                "name", "in", [
+	                	'Item-main-search_fields'
+	                	]
+	            ]
+	        ]
+	        }]
+
 # include js, css files in header of desk.html
 # app_include_css = "/assets/avientek/css/avientek.css"
 # app_include_js = "/assets/avientek/js/avientek.js"
