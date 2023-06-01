@@ -6,11 +6,13 @@ frappe.ui.form.on('Sales Order',{
 		})
 	},
 	onload_post_render: function(frm) {
-		frappe.run_serially([
-			() => set_new_rate(frm),
-			() => set_display_exchange_rate(frm),
-			() => set_display_currency(frm),
-		]);
+		if (frm.doc.docstatus==0) {
+			frappe.run_serially([
+				() => set_new_rate(frm),
+				() => set_display_exchange_rate(frm),
+				() => set_display_currency(frm),
+			]);
+		}
 	},
 	validate: function(frm) {
 		frappe.run_serially([
