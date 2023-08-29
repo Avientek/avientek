@@ -241,3 +241,199 @@ def set_sales_order(sales_order, item_name, eta):
 # 	# print(v.item_code)
 # 	v.save()
 
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_received_items
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_inter_company_details
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import set_purchase_references
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import update_address
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import update_taxes
+from frappe.model.mapper import get_mapped_doc
+
+@frappe.whitelist()
+def make_inter_company_sales_order(source_name, target_doc=None):
+	# from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_inter_company_transaction
+
+	return make_inter_company_transaction("Purchase Order", source_name, target_doc)
+
+@frappe.whitelist()
+def make_inter_company_purchase_order(source_name, target_doc=None):
+	# from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_inter_company_transaction
+
+	return make_inter_company_transaction("Sales Order", source_name, target_doc)
+
+
+def make_inter_company_transaction(doctype, source_name, target_doc=None):
+	if doctype in ["Sales Invoice", "Sales Order"]:
+		source_doc = frappe.get_doc(doctype, source_name)
+		target_doctype = "Purchase Invoice" if doctype == "Sales Invoice" else "Purchase Order"
+		target_detail_field = "sales_invoice_item" if doctype == "Sales Invoice" else "sales_order_item"
+		source_document_warehouse_field = "target_warehouse"
+		target_document_warehouse_field = "from_warehouse"
+		received_items = get_received_items(source_name, target_doctype, target_detail_field)
+	else:
+		source_doc = frappe.get_doc(doctype, source_name)
+		target_doctype = "Sales Invoice" if doctype == "Purchase Invoice" else "Sales Order"
+		source_document_warehouse_field = "from_warehouse"
+		target_document_warehouse_field = "target_warehouse"
+		received_items = {}
+
+	validate_inter_company_transaction(source_doc, doctype)
+	details = get_inter_company_details(source_doc, doctype)
+
+	def set_missing_values(source, target):
+		target.run_method("set_missing_values")
+		set_purchase_references(target)
+
+	def update_details(source_doc, target_doc, source_parent):
+		target_doc.inter_company_invoice_reference = source_doc.name
+		if target_doc.doctype in ["Purchase Invoice", "Purchase Order"]:
+			currency = frappe.db.get_value("Supplier", details.get("party"), "default_currency")
+			target_doc.company = details.get("company")
+			target_doc.supplier = details.get("party")
+			target_doc.is_internal_supplier = 1
+			target_doc.ignore_pricing_rule = 1
+			target_doc.buying_price_list = source_doc.selling_price_list
+
+			# Invert Addresses
+			update_address(target_doc, "supplier_address", "address_display", source_doc.company_address)
+			update_address(
+				target_doc, "shipping_address", "shipping_address_display", source_doc.customer_address
+			)
+			update_address(
+				target_doc, "billing_address", "billing_address_display", source_doc.customer_address
+			)
+
+			if currency:
+				target_doc.currency = currency
+
+			update_taxes(
+				target_doc,
+				party=target_doc.supplier,
+				party_type="Supplier",
+				company=target_doc.company,
+				doctype=target_doc.doctype,
+				party_address=target_doc.supplier_address,
+				company_address=target_doc.shipping_address,
+			)
+
+		else:
+			currency = frappe.db.get_value("Customer", details.get("party"), "default_currency")
+			target_doc.company = details.get("company")
+			target_doc.customer = details.get("party")
+			target_doc.selling_price_list = source_doc.buying_price_list
+
+			update_address(
+				target_doc, "company_address", "company_address_display", source_doc.supplier_address
+			)
+			update_address(
+				target_doc, "shipping_address_name", "shipping_address", source_doc.shipping_address
+			)
+			update_address(target_doc, "customer_address", "address_display", source_doc.shipping_address)
+
+			if currency:
+				target_doc.currency = currency
+
+			update_taxes(
+				target_doc,
+				party=target_doc.customer,
+				party_type="Customer",
+				company=target_doc.company,
+				doctype=target_doc.doctype,
+				party_address=target_doc.customer_address,
+				company_address=target_doc.company_address,
+				shipping_address_name=target_doc.shipping_address_name,
+			)
+
+	def update_item(source, target, source_parent):
+		target.qty = flt(source.qty) - received_items.get(source.name, 0.0)
+		if source.doctype == "Purchase Order Item" and target.doctype == "Sales Order Item":
+			target.purchase_order = source.parent
+			target.purchase_order_item = source.name
+			target.material_request = source.material_request
+			target.material_request_item = source.material_request_item
+
+		if (
+			source.get("purchase_order")
+			and source.get("purchase_order_item")
+			and target.doctype == "Purchase Invoice Item"
+		):
+			target.purchase_order = source.purchase_order
+			target.po_detail = source.purchase_order_item
+
+	item_field_map = {
+		"doctype": target_doctype + " Item",
+		"field_no_map": ["income_account", "expense_account", "cost_center", "warehouse"],
+		"field_map": {
+			"rate": "rate",
+		},
+		"postprocess": update_item,
+		"condition": lambda doc: doc.qty > 0,
+	}
+
+	if doctype in ["Sales Invoice", "Sales Order"]:
+		item_field_map["field_map"].update(
+			{
+				"name": target_detail_field,
+			}
+		)
+
+	if source_doc.get("update_stock"):
+		item_field_map["field_map"].update(
+			{
+				source_document_warehouse_field: target_document_warehouse_field,
+				"batch_no": "batch_no",
+				"serial_no": "serial_no",
+			}
+		)
+	elif target_doctype == "Sales Order":
+		item_field_map["field_map"].update(
+			{
+				source_document_warehouse_field: "warehouse",
+			}
+		)
+
+	doclist = get_mapped_doc(
+		doctype,
+		source_name,
+		{
+			doctype: {
+				"doctype": target_doctype,
+				"postprocess": update_details,
+				"set_target_warehouse": "set_from_warehouse",
+				"field_no_map": ["taxes_and_charges", "set_warehouse", "shipping_address"],
+			},
+			doctype + " Item": item_field_map,
+		},
+		target_doc,
+		set_missing_values,
+	)
+
+	return doclist
+
+
+def validate_inter_company_transaction(doc, doctype):
+
+	details = get_inter_company_details(doc, doctype)
+	price_list = (
+		doc.selling_price_list
+		if doctype in ["Sales Invoice", "Sales Order", "Delivery Note"]
+		else doc.buying_price_list
+	)
+	valid_price_list = frappe.db.get_value(
+		"Price List", {"name": price_list, "buying": 1, "selling": 1}
+	)
+	if not valid_price_list and not doc.is_internal_transfer():
+		frappe.throw(_("Selected Price List should have buying and selling fields checked."))
+
+	party = details.get("party")
+	if not party:
+		partytype = "Supplier" if doctype in ["Sales Invoice", "Sales Order"] else "Customer"
+		frappe.throw(_("No {0} found for Inter Company Transactions.").format(partytype))
+
+	# company = details.get("company")
+	# default_currency = frappe.get_cached_value("Company", company, "default_currency")
+	# if default_currency != doc.currency:
+	# 	frappe.throw(
+	# 		_("Company currencies of both the companies should match for Inter Company Transactions.")
+	# 	)
+
+	return

@@ -176,7 +176,10 @@ doc_events = {
 
 # Overriding Methods
 # ------------------------------
-
+override_whitelisted_methods = {
+	"erpnext.buying.doctype.purchase_order.purchase_order.make_inter_company_sales_order": "avientek.events.purchase_order.make_inter_company_sales_order",
+    "erpnext.selling.doctype.sales_order.sales_order.make_inter_company_purchase_order": "avientek.events.purchase_order.make_inter_company_purchase_order",
+}
 # override_whitelisted_methods = {
 # 	# "frappe.desk.doctype.event.event.get_events": "avientek.event.get_events"
 # 	"erpnext.buying.doctype.purchase_order.purchase_order.make_inter_company_sales_order":"avientek.events.utils.make_inter_company_sales_order"

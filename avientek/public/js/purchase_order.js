@@ -30,13 +30,13 @@ frappe.ui.form.on('Purchase Order',{
 			});
 		}
 	},
-	validate: function(frm) {
-		frappe.run_serially([
-			() => set_display_exchange_rate(frm),
-			() => set_rate_from_avientek_rate(frm),
-			() => set_display_currency(frm),
-		]);
-	},
+	// validate: function(frm) {
+	// 	frappe.run_serially([
+	// 		() => set_display_exchange_rate(frm),
+	// 		() => set_rate_from_avientek_rate(frm),
+	// 		() => set_display_currency(frm),
+	// 	]);
+	// },
 	avientek_display_currency: function(frm) {
 		if (frm.doc.avientek_display_currency) {
 			set_display_exchange_rate(frm)

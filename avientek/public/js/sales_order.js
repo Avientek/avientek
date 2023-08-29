@@ -1,26 +1,26 @@
 frappe.ui.form.on('Sales Order',{
-	onload: function(frm) {
-		frappe.db.get_value('Customer', frm.doc.customer, 'avientek_display_currency')
-		.then(r => {
-			frm.set_value('avientek_display_currency', r.message.avientek_display_currency)
-		})
-	},
-	onload_post_render: function(frm) {
-		if (frm.doc.docstatus==0) {
-			frappe.run_serially([
-				() => set_new_rate(frm),
-				() => set_display_exchange_rate(frm),
-				() => set_display_currency(frm),
-			]);
-		}
-	},
-	before_save: function(frm) {
-		frappe.run_serially([
-			() => set_new_rate(frm),
-			() => set_display_exchange_rate(frm),
-			() => set_display_currency(frm),
-		]);
-	},
+	// onload: function(frm) {
+	// 	frappe.db.get_value('Customer', frm.doc.customer, 'avientek_display_currency')
+	// 	.then(r => {
+	// 		frm.set_value('avientek_display_currency', r.message.avientek_display_currency)
+	// 	})
+	// },
+	// onload_post_render: function(frm) {
+	// 	if (frm.doc.docstatus==0) {
+	// 		frappe.run_serially([
+	// 			() => set_new_rate(frm),
+	// 			() => set_display_exchange_rate(frm),
+	// 			() => set_display_currency(frm),
+	// 		]);
+	// 	}
+	// },
+	// before_save: function(frm) {
+	// 	frappe.run_serially([
+	// 		() => set_new_rate(frm),
+	// 		() => set_display_exchange_rate(frm),
+	// 		() => set_display_currency(frm),
+	// 	]);
+	// },
 	avientek_display_currency: function(frm) {
 		if (frm.doc.avientek_display_currency) {
 			set_display_exchange_rate(frm)
@@ -115,7 +115,6 @@ var set_rate_from_avientek_rate = function(frm, cdt, cdn) {
 // 				},
 // 				freeze: true,
 // 				callback: (r) => {
-//                     console.log(r)
 // 					if (r.message[0].currency != frm.doc.currency) {
 // 						if (frm.doc.currency && frm.doc.avientek_display_currency) {
 // 							frappe.call({
@@ -172,7 +171,8 @@ var set_new_rate = function(frm) {
 						callback: (val) => {
 							if(!val.exc) {
 								if (val.message) {
-									frappe.model.set_value(y.child_doctype, y.child_name, 'rate', (y.rate*val.message))
+									// frappe.model.set_value(y.child_doctype, y.child_name, 'rate', (rounded_rate*rounded_xchange_rate))
+									frappe.model.set_value(y.child_doctype, y.child_name, 'rate', (Math.round(((y.rate*val.message)+Number.EPSILON)*1000)/1000))
 								}
 							}
 						}
