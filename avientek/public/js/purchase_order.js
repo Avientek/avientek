@@ -47,6 +47,12 @@ frappe.ui.form.on('Purchase Order',{
 	avientek_exchange_rate: function(frm) {
 		set_display_currency(frm)
 	},
+	custom_set_so_eta:function(frm) {
+		frm.doc["items"].forEach(d => {
+			var sales_order = String(d.sales_order)+ " | " + (String(d.sales_order_item))
+			set_so_eta(frm, sales_order, d);
+		});
+	}
 })
 
 frappe.ui.form.on("Purchase Order Item", {
@@ -66,7 +72,7 @@ frappe.ui.form.on("Purchase Order Item", {
 	// },
 	avientek_rate: function(frm, cdt, cdn) {
 		set_rate_from_avientek_rate(frm, cdt, cdn)
-	},
+	}
 })
 
 var add_so_dialog = function (frm, cdt, cdn) {
