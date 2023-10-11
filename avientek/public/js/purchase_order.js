@@ -20,6 +20,27 @@ frappe.ui.form.on('Purchase Order',{
 		// 			})
 		// 		}, __("Get Items From"));
 		// }
+		if (!frm.doc.__islocal && frm.doc.docstatus != 2 && frm.doc.items) {
+			let avientek_eta = []
+			frm.doc.items.map((d) => {
+				if(d.avientek_eta && d.avientek_eta != '') avientek_eta.push(d.avientek_eta)
+			});
+			if(avientek_eta.length > 0){
+				frm.add_custom_button(__('Set SO ETA'),
+					function() {
+						frm.doc["items"].forEach(d => {
+							if(d.avientek_eta){
+								var sales_order = String(d.sales_order)+ " | " + (String(d.sales_order_item))
+								set_so_eta(frm, sales_order, d);
+							}
+						});
+					}).addClass("btn-default");
+			}
+			else{
+				frm.remove_custom_button('Set SO ETA')
+			}
+		}
+
 	},
 	avientek_eta: function(frm) {
 		if (frm.doc.avientek_eta) {
@@ -47,12 +68,17 @@ frappe.ui.form.on('Purchase Order',{
 	avientek_exchange_rate: function(frm) {
 		set_display_currency(frm)
 	},
-	custom_set_so_eta:function(frm) {
-		frm.doc["items"].forEach(d => {
-			var sales_order = String(d.sales_order)+ " | " + (String(d.sales_order_item))
-			set_so_eta(frm, sales_order, d);
-		});
-	}
+	// custom_set_so_eta:function(frm) {
+	// 	let avientek_eta = frm.doc.items.map(({ avientek_eta }) => avientek_eta);
+	// 	if(avientek_eta){
+	// 		frm.doc["items"].forEach(d => {
+	// 			if(d.avientek_eta){
+	// 				var sales_order = String(d.sales_order)+ " | " + (String(d.sales_order_item))
+	// 				set_so_eta(frm, sales_order, d);
+	// 			}
+	// 		});
+	// 	}
+	// }
 })
 
 frappe.ui.form.on("Purchase Order Item", {
