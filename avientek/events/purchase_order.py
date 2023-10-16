@@ -6,6 +6,17 @@ from frappe.utils import flt, getdate, nowdate, cint, cstr
 from erpnext.controllers.buying_controller import BuyingController
 from erpnext.buying.doctype.purchase_order.purchase_order import PurchaseOrder
 from erpnext.buying.utils import validate_for_items
+from frappe.utils import get_fullname, parse_addr
+from frappe.desk.doctype.notification_log.notification_log import (
+	enqueue_create_notification,
+	get_title,
+	get_title_html,
+)
+from frappe.desk.doctype.notification_settings.notification_settings import (
+	get_subscribed_documents,
+)
+from frappe.core.doctype.communication.email import make
+
 
 class CustomPurchaseOrder(BuyingController):
 
@@ -205,6 +216,7 @@ def get_sales_orders(item, qty, sales_order):
 				"label": str(so.get('so'))+" - "+str(so.get('customer'))+" - "+str(so.get('qty')),
 				"value": str(so.get('so'))+" | "+str(so.get('child'))
 			})
+
 	return so_option
 
 
@@ -230,6 +242,65 @@ def set_sales_order(sales_order, item_name, eta):
 			"eta_history_text": eta_history_text,
 			"eta_history" : eta_history
 			})
+
+		try:
+			po_doc = frappe.db.get_value("Purchase Order Item",item_name,"parent")
+			
+			# po_fullname = get_fullname(po.owner)
+			# so_fullname = get_fullname(so.owner)
+			create_notification("Purchase Order",po_doc)
+			create_notification("Sales Order",sales_order_name)
+
+		except Exception as e:
+			frappe.log_error(frappe.get_traceback(), str(e))
+
+def create_notification(ref_doctype,ref_name):
+	doc = frappe.get_doc(ref_doctype,ref_name)
+	title = get_title(ref_doctype, ref_name)
+	filters = {
+		"status": "Open",
+		"reference_name": ref_name,
+		"reference_type": ref_doctype,
+	}
+
+	rows = frappe.get_all("ToDo", filters=filters or {}, fields=["allocated_to"])
+	rec =  [parse_addr(row.allocated_to)[1] for row in rows if row.allocated_to]
+	rec.append(doc.owner)
+	notification_message = _("""ETA got updated in {0} {1}""").format(frappe.bold(ref_name),get_title_html(title))
+
+	notification_doc = {
+		"type": "Alert",
+		"document_type": ref_doctype,
+		"document_name": ref_name,
+		"subject": notification_message,
+		"from_user": frappe.session.user,
+	}
+
+	enqueue_create_notification(rec, notification_doc)
+
+	# frappe.sendmail(
+	# 	recipients=rec,
+	# 	message=notification_message,
+	# 	subject=_("""ETA updated"""),
+	# 	reference_doctype=ref_doctype,
+	# 	reference_name=ref_name,
+	# )
+
+	outgoing_email_account = frappe.get_cached_value(
+			"Email Account", {"default_outgoing": 1, "enable_outgoing": 1}, "email_id"
+		)
+
+	for user in rec:
+		if user != "Administrator":
+			make(
+					content = notification_message,
+					subject = "ETA Updated",
+					sender = outgoing_email_account,
+					recipients = user,
+					communication_medium = "Email",
+					sent_or_received = "Sent",
+					send_email = 1
+				)
 
 # from erpnext.controllers.item_variant import create_variant
 
