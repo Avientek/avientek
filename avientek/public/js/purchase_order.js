@@ -29,7 +29,7 @@ frappe.ui.form.on('Purchase Order',{
 				frm.add_custom_button(__('Set SO ETA'),
 					function() {
 						frm.doc["items"].forEach(d => {
-							if(d.avientek_eta){
+							if(d.avientek_eta && d.sales_order){
 								var sales_order = String(d.sales_order)+ " | " + (String(d.sales_order_item))
 								set_so_eta(frm, sales_order, d);
 							}
