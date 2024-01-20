@@ -35,7 +35,12 @@ fixtures = [{'dt':'Custom Field',
 	        "filters": [
 	            [
 	                "name", "in", [
-	                	'Item-main-search_fields'
+                        'Item-main-search_fields',
+                        'Sales Order-delivery_date-no_copy',
+                        'Sales Order-transaction_date-no_copy',
+                        'Sales Order-other_charges_calculation-no_copy',
+                        'Sales Order-per_delivered-no_copy',
+                        'Sales Order-per_billed-no_copy'
 	                	]
 	            ]
 	        ]
@@ -64,6 +69,7 @@ doctype_js = {
 	"Quotation" : "public/js/quotation.js",
 	"Purchase Order" : "public/js/purchase_order.js",
 	"Sales Order" : "public/js/sales_order.js",
+
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}

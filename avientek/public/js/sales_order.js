@@ -1,4 +1,15 @@
 frappe.ui.form.on('Sales Order',{
+	refresh:function(frm){
+		if (frm.doc.docstatus===1){
+			frm.add_custom_button(__('Proforma Invoice'),() => {
+			frappe.model.open_mapped_doc({
+				method: "avientek.events.sales_order.create_proforma_invoice",
+				frm: frm
+			})
+        },__('Create'));
+		}
+	},
+
 	// onload: function(frm) {
 	// 	frappe.db.get_value('Customer', frm.doc.customer, 'avientek_display_currency')
 	// 	.then(r => {
