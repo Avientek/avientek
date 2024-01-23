@@ -266,6 +266,12 @@ def create_notification(ref_doctype,ref_name):
 	rows = frappe.get_all("ToDo", filters=filters or {}, fields=["allocated_to"])
 	rec =  [parse_addr(row.allocated_to)[1] for row in rows if row.allocated_to]
 	rec.append(doc.owner)
+
+	if ref_doctype == "Sales Order":
+		if doc.po_no:
+			cust_po = frappe.get_doc("Purchase Order",doc.po_no)
+			rec.append(cust_po.owner)
+
 	notification_message = _("""ETA got updated in {0} {1}""").format(frappe.bold(ref_name),get_title_html(title))
 
 	notification_doc = {
