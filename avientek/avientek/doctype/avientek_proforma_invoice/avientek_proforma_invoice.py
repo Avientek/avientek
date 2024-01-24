@@ -5,4 +5,6 @@
 from frappe.model.document import Document
 
 class AvientekProformaInvoice(Document):
-	pass
+	def validate(self):
+		if self.items:
+			self.total = sum(float(i.amount) for i in self.items)
