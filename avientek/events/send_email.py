@@ -33,7 +33,7 @@ def get_sales_orders(company_name):
 @frappe.whitelist()
 def send_email_to_customer(customer_email, sales_orders):
     sales_orders = frappe.parse_json(sales_orders)
-    subject = 'Sales Order Details'
+    subject = 'Latest ETA on open orders'
     message = '<b>PFB the latest ETA for your open orders :</b><br><br>'
 
     if not isinstance(sales_orders, list):
