@@ -14,7 +14,7 @@ fixtures = [{'dt':'Custom Field',
 				'filters': [
 					['name', 'in', (
 						'Purchase Order Item-avientek_eta', 'Sales Order Item-avientek_eta',
-						'Sales Order Item-eta_history', 'Sales Order-avientek_display_currency',
+						'Sales Order Item-eta_history','Sales Order Item-eta', 'Sales Order-avientek_display_currency',
 						'Sales Order-avientek_exchange_rate', 'Sales Order-avientek_total',
 						'Sales Order-avientek_grand_total', 'Sales Order-avientek_rounding_adjustment',
 						'Sales Order-avientek_rounded_total', 'Sales Order Item-avientek_rate',
@@ -69,6 +69,7 @@ doctype_js = {
 	"Quotation" : "public/js/quotation.js",
 	"Purchase Order" : "public/js/purchase_order.js",
 	"Sales Order" : "public/js/sales_order.js",
+	"Company" : "public/js/send_email.js",
 
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
@@ -151,7 +152,8 @@ doc_events = {
 	},
 	"Item": {
 		"validate": "avientek.events.item.validate_brand_pn"
-	}
+	},
+	
 }
 
 # Scheduled Tasks
