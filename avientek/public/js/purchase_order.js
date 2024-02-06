@@ -143,7 +143,7 @@ var set_so_eta = function(frm, sales_order,row) {
 		'args':{
 			'sales_order': sales_order,
 			'item_name': row.name,
-			'eta': row.avientek_eta
+			'eta': row.avientek_eta,
 		},
 		freeze: true,
 		callback: (r) => {

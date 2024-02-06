@@ -118,7 +118,6 @@ def make_purchase_order(source_name, target_doc=None):
 		target_doc,
 		set_missing_values,
 	)
-	print("..........................................\ndoclist",doclist)
 	doclist.set_onload("ignore_price_list", True)
 	
 	return doclist
