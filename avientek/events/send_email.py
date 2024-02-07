@@ -8,7 +8,7 @@ def get_sales_orders(company_name):
     query = f'''
         SELECT 
             c.name AS customer_name, c.email_id AS customer_mail, so.name AS sales_order_name, so.po_no, so.status,
-            soi.item_code, soi.part_number, soi.qty, soi.eta
+            soi.item_code, soi.part_number, (soi.qty - soi.delivered_qty) AS qty, soi.avientek_eta as eta
         FROM 
             `tabCustomer` c
         LEFT JOIN          
@@ -16,11 +16,10 @@ def get_sales_orders(company_name):
         LEFT JOIN
             `tabSales Order Item` soi ON so.name = soi.parent
         WHERE 
-            so.status = 'To Deliver' AND so.company = "{company_name}"
+            c.disabled = 0 AND so.docstatus = 1 AND so.per_delivered < 100 AND soi.delivered_qty<soi.qty AND so.company = "{company_name}"
     '''
 
     sql_data = frappe.db.sql(query, as_dict=True)
-
     grouped_data = {}
     for row in sql_data:
         customer_mail = row.customer_mail

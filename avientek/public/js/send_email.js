@@ -38,7 +38,6 @@ function sendEmailToCustomer(frm, customerEmail, salesOrders) {
             sales_orders: salesOrders
         },
         callback: function(response) {
-            console.log(response.message)
             if (response.message === 'success' && !successMessageDisplayed) {
                 frappe.msgprint(('Email sent successfully.'));
                 successMessageDisplayed = true;

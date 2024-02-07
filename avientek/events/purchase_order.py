@@ -242,70 +242,69 @@ def set_sales_order(sales_order, item_name, eta):
 			"eta_history" : eta_history
 			})
 
-		try:
-			po_doc = frappe.db.get_value("Purchase Order Item",item_name,"parent")
+		# try:
+		# 	po_doc = frappe.db.get_value("Purchase Order Item",item_name,"parent")
 			
-			# po_fullname = get_fullname(po.owner)
-			# so_fullname = get_fullname(so.owner)
-			create_notification("Purchase Order",po_doc)
-			create_notification("Sales Order",sales_order_name)
+		# 	# po_fullname = get_fullname(po.owner)
+		# 	# so_fullname = get_fullname(so.owner)
+		# 	create_notification("Purchase Order",po_doc)
+		# 	create_notification("Sales Order",sales_order_name)
 
-		except Exception as e:
-			frappe.log_error(frappe.get_traceback(), str(e))
+		# except Exception as e:
+		# 	frappe.log_error(frappe.get_traceback(), str(e))
 
-def create_notification(ref_doctype,ref_name):
-	doc = frappe.get_doc(ref_doctype,ref_name)
-	title = get_title(ref_doctype, ref_name)
-	filters = {
-		"status": "Open",
-		"reference_name": ref_name,
-		"reference_type": ref_doctype,
-	}
+@frappe.whitelist()
+def create_notification(ref_doctype,ref_name,item):
+	try:
+		doc = frappe.get_doc(ref_doctype,ref_name)
+		title = get_title(ref_doctype, ref_name)
+		filters = {
+			"status": "Open",
+			"reference_name": ref_name,
+			"reference_type": ref_doctype,
+		}
 
-	rows = frappe.get_all("ToDo", filters=filters or {}, fields=["allocated_to"])
-	rec =  [parse_addr(row.allocated_to)[1] for row in rows if row.allocated_to]
-	rec.append(doc.owner)
+		rows = frappe.get_all("ToDo", filters=filters or {}, fields=["allocated_to"])
+		rec =  [parse_addr(row.allocated_to)[1] for row in rows if row.allocated_to]
+		rec.append(doc.owner)
 
-	if ref_doctype == "Sales Order":
-		if doc.po_no:
-			cust_po = frappe.get_doc("Purchase Order",doc.po_no)
-			rec.append(cust_po.owner)
+		if ref_doctype == "Sales Order":
+			if doc.po_no:
+				if frappe.db.exists('Purchase Order',doc.po_no):
+					cust_po = frappe.get_doc("Purchase Order",doc.po_no)
+					rec.append(cust_po.owner)
 
-	notification_message = _("""ETA got updated in {0} {1}""").format(frappe.bold(ref_name),get_title_html(title))
+		if item == '0':
+			item = 'item(s)'
 
-	notification_doc = {
-		"type": "Alert",
-		"document_type": ref_doctype,
-		"document_name": ref_name,
-		"subject": notification_message,
-		"from_user": frappe.session.user,
-	}
+		notification_message = _("""ETA got updated for {0} in {1} {2}""").format(frappe.bold(item),frappe.bold(ref_name),get_title_html(title))
+		notification_doc = {
+			"type": "Alert",
+			"document_type": ref_doctype,
+			"document_name": ref_name,
+			"subject": notification_message,
+			"from_user": frappe.session.user,
+		}
 
-	enqueue_create_notification(rec, notification_doc)
+		enqueue_create_notification(rec, notification_doc)
 
-	# frappe.sendmail(
-	# 	recipients=rec,
-	# 	message=notification_message,
-	# 	subject=_("""ETA updated"""),
-	# 	reference_doctype=ref_doctype,
-	# 	reference_name=ref_name,
-	# )
+		outgoing_email_account = frappe.get_cached_value(
+				"Email Account", {"default_outgoing": 1, "enable_outgoing": 1}, "email_id"
+			)
 
-	outgoing_email_account = frappe.get_cached_value(
-			"Email Account", {"default_outgoing": 1, "enable_outgoing": 1}, "email_id"
-		)
-
-	for user in rec:
-		if user != "Administrator":
-			make(
-					content = notification_message,
-					subject = "ETA Updated",
-					sender = outgoing_email_account,
-					recipients = user,
-					communication_medium = "Email",
-					sent_or_received = "Sent",
-					send_email = 1
-				)
+		for user in rec:
+			if user != "Administrator":
+				make(
+						content = notification_message,
+						subject = "ETA Updated",
+						sender = outgoing_email_account,
+						recipients = user,
+						communication_medium = "Email",
+						sent_or_received = "Sent",
+						send_email = 1
+					)
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), str(e))
 
 # from erpnext.controllers.item_variant import create_variant
 

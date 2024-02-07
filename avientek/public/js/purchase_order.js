@@ -28,12 +28,19 @@ frappe.ui.form.on('Purchase Order',{
 			if(avientek_eta.length > 0){
 				frm.add_custom_button(__('Set SO ETA'),
 					function() {
+						let so = frm.doc.items.map(({ sales_order }) => sales_order);
+						var arrayso = Array.from(new Set(so))
+						var unique_so = arrayso.filter(e => {return e != '';});
+						console.log(unique_so)
 						frm.doc["items"].forEach(d => {
 							if(d.avientek_eta && d.sales_order){
 								var sales_order = String(d.sales_order)+ " | " + (String(d.sales_order_item))
 								set_so_eta(frm, sales_order, d);
 							}
 						});
+						unique_so.forEach(val=> {
+							console.log(val) 
+							send_notification(frm,'Sales Order',val,0)});
 					}).addClass("btn-default");
 			}
 			else{
@@ -89,6 +96,8 @@ frappe.ui.form.on("Purchase Order Item", {
 		var row = locals[cdt][cdn];
 		var sales_order = String(row.sales_order)+ " | " + (String(row.sales_order_item))
 		set_so_eta(frm, sales_order, row);
+		send_notification(frm,'Purchase Order',frm.doc.name,row.item_code)
+		send_notification(frm,'Sales Order',row.sales_order,row.item_code)
 	},
 	qty: function(frm, cdt, cdn) {
 		set_display_currency(frm)
@@ -151,6 +160,27 @@ var set_so_eta = function(frm, sales_order,row) {
 				frm.reload_doc();
 				frappe.show_alert({
 					message:__('Sales Order Updated'),
+					indicator:'green'
+				}, 5);
+			}
+		}
+	})
+}
+
+var send_notification = function(frm, ref_doctype,ref_name,item) {
+	console.log("senddddddddddd",ref_doctype,ref_name,item)
+	frappe.call({
+		'method': 'avientek.events.purchase_order.create_notification',
+		'args':{
+			'ref_doctype': ref_doctype,
+			'ref_name': ref_name,
+			'item': item
+		},
+		freeze: true,
+		callback: (r) => {
+			if(!r.exc) {
+				frappe.show_alert({
+					message:__('Notification Sent'),
 					indicator:'green'
 				}, 5);
 			}
