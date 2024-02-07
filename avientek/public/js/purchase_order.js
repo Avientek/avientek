@@ -30,7 +30,7 @@ frappe.ui.form.on('Purchase Order',{
 					function() {
 						let so = frm.doc.items.map(({ sales_order }) => sales_order);
 						var arrayso = Array.from(new Set(so))
-						var unique_so = arrayso.filter(e => {return e != '';});
+						var unique_so = arrayso.filter(e => {return !['',undefined].includes(e)});
 						console.log(unique_so)
 						frm.doc["items"].forEach(d => {
 							if(d.avientek_eta && d.sales_order){
