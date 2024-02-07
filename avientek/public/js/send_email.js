@@ -1,11 +1,18 @@
 frappe.ui.form.on('Company', {
     refresh: function(frm) {
         frm.add_custom_button(('Send ETA'), function() {
-
-            sendSalesOrderPrints(frm);
-        },__('Manage'));
+            frappe.confirm(
+                'Are you sure?',
+                function(){
+                    sendSalesOrderPrints(frm);
+                },
+                function(){
+                },
+            );
+        }, __('Manage'));
     }
 });
+
 
 function sendSalesOrderPrints(frm) {
     frappe.call({
@@ -44,7 +51,7 @@ function sendEmailToCustomer(frm, customerEmail, salesOrders) {
             } else if (response.message !== 'success') {
                 frappe.msgprint(('Failed to send email. Please check the server logs.'));
             }
-          
+
         }
     });
 }
