@@ -147,6 +147,8 @@ var add_so_dialog = function (frm, cdt, cdn) {
 }
 
 var set_so_eta = function(frm, sales_order,row) {
+	console.log("set eta",row.avientek_eta)
+	// frappe.model.set_value(row.doctype,row.name,'avientek_eta',row.avientek_eta)
 	frappe.call({
 		'method': 'avientek.events.purchase_order.set_sales_order',
 		'args':{
