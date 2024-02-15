@@ -226,11 +226,19 @@ def set_sales_order(sales_order, item_name, eta):
 		sales_order_item = sales_order.split("| ")[1]
 		frappe.db.set_value('Purchase Order Item', item_name, {
 			'sales_order': sales_order_name,
-			'sales_order_item':sales_order_item,
 			'avientek_eta':eta
 			}, update_modified=False)
-		so_child_eta_history = frappe.db.get_value("Sales Order Item", sales_order_item, ["eta_history"])
+
+		so_child_eta_history = ''
 		so_eta_history = eta_history_text = eta_history = []
+
+		if frappe.db.exists("Sales Order Item",{"name": sales_order_item}):
+			frappe.db.set_value('Purchase Order Item', item_name, {
+				'sales_order_item':sales_order_item
+				}, update_modified=False)
+			so_child_eta_history = frappe.db.get_value("Sales Order Item", sales_order_item, ["eta_history"])
+
+		
 		if so_child_eta_history:
 			so_eta_history = append_to_eta_list(eta, so_child_eta_history)
 		else:
@@ -242,17 +250,7 @@ def set_sales_order(sales_order, item_name, eta):
 			"eta_history_text": eta_history_text,
 			"eta_history" : eta_history
 			})
-
-		# try:
-		# 	po_doc = frappe.db.get_value("Purchase Order Item",item_name,"parent")
-			
-		# 	# po_fullname = get_fullname(po.owner)
-		# 	# so_fullname = get_fullname(so.owner)
-		# 	create_notification("Purchase Order",po_doc)
-		# 	create_notification("Sales Order",sales_order_name)
-
-		# except Exception as e:
-		# 	frappe.log_error(frappe.get_traceback(), str(e))
+		return True
 
 @frappe.whitelist()
 def create_notification(ref_doctype,ref_name,item):
