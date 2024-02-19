@@ -20,6 +20,9 @@ def create_proforma_invoice(source_name, target_doc=None, args=None):
 				# "postprocess":update_item,
 				# "condition": lambda doc: abs(doc.received_qty) <= abs(doc.qty),
 			},
+			"Sales Taxes and Charges":{
+				"doctype":"Sales Taxes and Charges",
+			}
 		},
 		target_doc,
 	)
