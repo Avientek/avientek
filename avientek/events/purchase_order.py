@@ -224,10 +224,11 @@ def set_sales_order(sales_order, item_name, eta):
 	if sales_order and sales_order.split("| ")[1]:
 		sales_order_name = sales_order.split("| ")[0].strip()
 		sales_order_item = sales_order.split("| ")[1]
-		frappe.db.set_value('Purchase Order Item', item_name, {
-			'sales_order': sales_order_name,
-			'avientek_eta':eta
-			}, update_modified=False)
+		if frappe.db.exists("Sales Order",{"name": sales_order_name}):
+			frappe.db.set_value('Purchase Order Item', item_name, {
+				'sales_order': sales_order_name,
+				'avientek_eta':eta
+				}, update_modified=False)
 
 		so_child_eta_history = ''
 		so_eta_history = eta_history_text = eta_history = []
