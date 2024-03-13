@@ -41,7 +41,7 @@ fixtures = [{'dt':'Custom Field',
                         'Sales Order-other_charges_calculation-no_copy',
                         'Sales Order-per_delivered-no_copy',
                         'Sales Order-per_billed-no_copy','Purchase Invoice-represents_company-ignore_user_permissions',
-                        'Purchase Order Item-sales_order-read_only'
+                        'Purchase Order Item-sales_order-read_only','Purchase Invoice-represents_company-ignore_user_permissions'
 	                	]
 	            ]
 	        ]
