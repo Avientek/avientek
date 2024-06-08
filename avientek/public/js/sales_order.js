@@ -11,22 +11,24 @@ frappe.ui.form.on('Sales Order',{
 		var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
 		const purchase_order = frm.doc.items[0].purchase_order;
 		
-		frappe.call({
-			method: "erpnext.setup.utils.get_exchange_rate",
-			args: {
-				from_currency:frm.doc.currency,
-				to_currency: company_currency
-			},
-			callback: function(r) {
-				frappe.db.get_value("Purchase Order",purchase_order,"company").then(res => {
-					var company_currency1 = frappe.get_doc(":Company", res.message.company).default_currency;
-					if (r.message && company_currency != company_currency1) {
-						frm.set_value("conversion_rate",r.message)
-					}
-				})
-				
-			}
-		});
+		if (frm.doc.docstatus == 0) {
+			frappe.call({
+				method: "erpnext.setup.utils.get_exchange_rate",
+				args: {
+					from_currency:frm.doc.currency,
+					to_currency: company_currency
+				},
+				callback: function(r) {
+					frappe.db.get_value("Purchase Order",purchase_order,"company").then(res => {
+						var company_currency1 = frappe.get_doc(":Company", res.message.company).default_currency;
+						if (r.message && company_currency != company_currency1) {
+							frm.set_value("conversion_rate",r.message)
+						}
+					})
+					
+				}
+			});
+		}
 	},
 	
 
