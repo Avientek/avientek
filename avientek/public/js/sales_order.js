@@ -11,6 +11,12 @@ frappe.ui.form.on('Sales Order',{
 		var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
 		const purchase_order = frm.doc.items[0].purchase_order;
 		
+		if (frm.doc.__islocal){
+			frm.doc.items.forEach(item =>{
+				frappe.model.set_value(item.doctype, item.name, 'margin_rate_or_amount',0)
+			})
+		}
+
 		if (frm.doc.docstatus == 0) {
 			frappe.call({
 				method: "erpnext.setup.utils.get_exchange_rate",
