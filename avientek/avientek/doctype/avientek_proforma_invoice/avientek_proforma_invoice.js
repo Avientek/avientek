@@ -15,6 +15,18 @@ frappe.ui.form.on('Proforma Invoice Item',{
     }
 })
 
+frappe.ui.form.on('Sales Taxes and Charges',{
+	rate:function(frm, cdt, cdn){
+        let row = locals[cdt][cdn]
+        if (frm.doc.total){
+            let tax_amount = (row.rate/100)*frm.doc.total
+            let total_amount = tax_amount + frm.doc.total
+            frappe.model.set_value(cdt,cdn,"tax_amount", tax_amount)
+            frappe.model.set_value(cdt,cdn,"total", total_amount)
+        }
+    }
+})
+
 var set_amount = function(frm, cdt, cdn){
     let child = locals[cdt][cdn]
     if (frm.doc.items){
