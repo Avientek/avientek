@@ -10,8 +10,7 @@ class AvientekProformaInvoice(Document):
 	def validate(self):
 		if self.items:
 			self.total = sum(float(i.amount) for i in self.items)
-		if self.total_taxes_and_charges or self.total or self.discount_amount:
-			self.grand_total = self.total + self.total_taxes_and_charges
+
 		if self.total and self.sales_texes_and_charges:
 			total_taxes_charges = 0
 			for i in self.sales_texes_and_charges:
@@ -21,7 +20,8 @@ class AvientekProformaInvoice(Document):
 				i.total = total_amount
 				total_taxes_charges = total_taxes_charges + i.tax_amount
 			self.total_taxes_and_charges = total_taxes_charges
-
+		if self.total_taxes_and_charges or self.total or self.discount_amount:
+			self.grand_total = self.total + self.total_taxes_and_charges
 		self.net_total = self.total - (self.discount_amount if self.discount_amount else 0)
 
 		amount_in_words = money_in_words(self.grand_total)
