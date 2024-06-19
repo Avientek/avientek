@@ -11,14 +11,19 @@ frappe.ui.form.on('Purchase Receipt', {
                             }).catch(err => {
                                 console.log("Error setting plc_conversion_rate:", err);
                             });
-                        }, 1000); // 2-second delay
+                        }, 500); // 2-second delay
                     }
                 }).catch(err => {
                     console.log("Error retrieving plc_conversion_rate:", err);
                 });
             }
         }
+        if (frm.doc.__islocal){
+            setTimeout(() => {
+                frm.doc.items.forEach(item =>{
+                frappe.model.set_value(item.doctype, item.name, 'margin_rate_or_amount',0)
+                })
+            },1000)
+		}
     }
 });
-
-
