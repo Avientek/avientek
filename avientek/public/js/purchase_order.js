@@ -72,6 +72,11 @@ frappe.ui.form.on('Purchase Order',{
 			frm.set_value("avientek_exchange_rate", 0)
 		}
 	},
+	conversion_rate:function(frm){
+		setTimeout(() => {
+			frm.set_value("plc_conversion_rate" ,frm.doc.conversion_rate)
+		}, 2000);
+	},
 	avientek_exchange_rate: function(frm) {
 		set_display_currency(frm)
 	},
