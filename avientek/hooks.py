@@ -71,7 +71,7 @@ doctype_js = {
 	"Purchase Order" : "public/js/purchase_order.js",
 	"Sales Order" : "public/js/sales_order.js",
 	"Company" : "public/js/send_email.js",
-    "Purchase Receipt" : "public/js/purchase_receipt.js",
+    # "Purchase Receipt" : "public/js/purchase_receipt.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -149,7 +149,8 @@ after_migrate = "avientek.migrate.after_migrate"
 
 doc_events = {
 	"Purchase Order": {
-		"before_update_after_submit": "avientek.events.purchase_order.po_validate"
+		"before_update_after_submit": "avientek.events.purchase_order.po_validate",
+		"validate": "avientek.events.purchase_order.check_exchange_rate"
 	},
 	"Item": {
 		"validate": "avientek.events.item.validate_brand_pn"

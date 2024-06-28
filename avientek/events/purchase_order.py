@@ -16,6 +16,7 @@ from frappe.desk.doctype.notification_settings.notification_settings import (
 	get_subscribed_documents,
 )
 from frappe.core.doctype.communication.email import make
+from erpnext.setup.utils import get_exchange_rate
 
 
 class CustomPurchaseOrder(BuyingController):
@@ -122,6 +123,16 @@ def make_purchase_order(source_name, target_doc=None):
 	
 	return doclist
 
+def check_exchange_rate(doc,method):
+	if doc.currency == doc.price_list_currency:
+		if doc.conversion_rate and doc.plc_conversion_rate:
+		    if doc.conversion_rate != doc.plc_conversion_rate:
+		        frappe.throw("Exchange rate and price list exchange rate should be the same!")
+		    else:
+		    	company_default_currency = frappe.get_cached_value("Company", doc.company, "default_currency")
+		    	exc_rate = get_exchange_rate(doc.currency, company_default_currency, doc.transaction_date)
+		    	if (exc_rate != doc.conversion_rate) or (exc_rate != doc.plc_conversion_rate):
+		    		frappe.throw("Exchange rate is wrong!")
 
 def po_validate(doc, method):
 	doc_before_save = doc.get_doc_before_save()
