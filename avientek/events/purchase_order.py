@@ -453,15 +453,15 @@ def make_inter_company_transaction(doctype, source_name, target_doc=None):
 			if currency:
 				target_doc.currency = currency
 
-			update_taxes(
-				target_doc,
-				party=target_doc.supplier,
-				party_type="Supplier",
-				company=target_doc.company,
-				doctype=target_doc.doctype,
-				party_address=target_doc.supplier_address,
-				company_address=target_doc.shipping_address,
-			)
+			# update_taxes(
+			# 	target_doc,
+			# 	party=target_doc.supplier,
+			# 	party_type="Supplier",
+			# 	company=target_doc.company,
+			# 	doctype=target_doc.doctype,
+			# 	party_address=target_doc.supplier_address,
+			# 	company_address=target_doc.shipping_address,
+			# )
 
 		else:
 			currency = frappe.db.get_value("Customer", details.get("party"), "default_currency")
@@ -480,16 +480,16 @@ def make_inter_company_transaction(doctype, source_name, target_doc=None):
 			if currency:
 				target_doc.currency = currency
 
-			update_taxes(
-				target_doc,
-				party=target_doc.customer,
-				party_type="Customer",
-				company=target_doc.company,
-				doctype=target_doc.doctype,
-				party_address=target_doc.customer_address,
-				company_address=target_doc.company_address,
-				shipping_address_name=target_doc.shipping_address_name,
-			)
+			# update_taxes(
+			# 	target_doc,
+			# 	party=target_doc.customer,
+			# 	party_type="Customer",
+			# 	company=target_doc.company,
+			# 	doctype=target_doc.doctype,
+			# 	party_address=target_doc.customer_address,
+			# 	company_address=target_doc.company_address,
+			# 	shipping_address_name=target_doc.shipping_address_name,
+			# )
 
 	def update_item(source, target, source_parent):
 		target.qty = flt(source.qty) - received_items.get(source.name, 0.0)
@@ -552,7 +552,7 @@ def make_inter_company_transaction(doctype, source_name, target_doc=None):
 			doctype + " Item": item_field_map,
 		},
 		target_doc,
-		set_missing_values,
+		# set_missing_values,
 	)
 
 	return doclist
