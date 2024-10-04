@@ -124,6 +124,7 @@ def make_purchase_order(source_name, target_doc=None):
 	return doclist
 
 def check_exchange_rate(doc,method):
+	po_validate(doc,method)
 	if doc.currency == doc.price_list_currency:
 		if doc.conversion_rate and doc.plc_conversion_rate:
 		    if doc.conversion_rate != doc.plc_conversion_rate:
@@ -134,7 +135,7 @@ def check_exchange_rate(doc,method):
 		    	if (exc_rate != doc.conversion_rate) or (exc_rate != doc.plc_conversion_rate):
 		    		frappe.throw("Exchange rate is wrong!")
 
-def po_validate(doc, method):
+# def po_validate(doc, method):
 	doc_before_save = doc.get_doc_before_save()
 	if doc.items:
 		for i, item in enumerate(doc.items):
@@ -175,6 +176,63 @@ def po_validate(doc, method):
 					po_eta_history = [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
 				item.eta_history = json.dumps(po_eta_history)
 				item.eta_history_text = set_history(po_eta_history)
+
+# item is purchase order item
+@frappe.whitelist()
+def line_update_eta(item):
+	item = json.loads(item)
+	item = frappe._dict(item)
+	if item:
+		update_eta(item)
+
+def update_eta(item):
+	eta = item.avientek_eta
+	# Proceed if Sales Order and Sales Order Item are present
+	if item.sales_order and item.sales_order_item:
+		so_child_doc = frappe.db.get_value(
+			"Sales Order Item", 
+			item.sales_order_item, 
+			["eta_history", "purchase_order_item"], 
+			as_dict=True
+		)
+
+		so_eta_history = append_to_eta_list(item.avientek_eta, so_child_doc.eta_history) if so_child_doc.eta_history else [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
+		so_eta_history_text = set_history(so_eta_history)
+
+		frappe.db.set_value("Sales Order Item", item.sales_order_item, {
+			"avientek_eta": item.avientek_eta,
+			"eta_history": json.dumps(so_eta_history),
+			"eta_history_text": so_eta_history_text
+		}, update_modified=False)
+
+		# Handle Purchase Order Item ETA history if linked to Sales Order
+		if so_child_doc.purchase_order_item:
+			# Fetch the Purchase Order Item's existing ETA history
+			first_po_eta_history = frappe.db.get_value("Purchase Order Item", so_child_doc.purchase_order_item, "eta_history")
+			po_eta_history = append_to_eta_list(item.avientek_eta, first_po_eta_history) if first_po_eta_history else [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
+			po_eta_history_text = set_history(po_eta_history)
+
+			frappe.db.set_value("Purchase Order Item", so_child_doc.purchase_order_item, {
+				"avientek_eta": item.avientek_eta,
+				"eta_history": json.dumps(po_eta_history),
+				"eta_history_text": po_eta_history_text
+			}, update_modified=False)
+
+	# Update ETA history in the current Purchase Order line item
+	po_eta_history = append_to_eta_list(item.avientek_eta, item.eta_history) if item.eta_history else [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
+	frappe.db.set_value("Purchase Order Item",item.name,"avientek_eta",eta)
+	frappe.db.set_value("Purchase Order Item",item.name,"eta_history",json.dumps(po_eta_history))
+	frappe.db.set_value("Purchase Order Item",item.name,"eta_history_text",set_history(po_eta_history))
+
+def po_validate(doc, method):
+	doc_before_save = doc.get_doc_before_save()
+
+	if not doc.items:
+		return  
+
+	for i, item in enumerate(doc.items):
+		if item.avientek_eta and doc_before_save.items[i] and item.avientek_eta != doc_before_save.items[i].avientek_eta and item.name == doc_before_save.items[i].name:
+			update_eta(item)
 
 
 def append_to_eta_list(avientek_eta, eta_history):
@@ -232,10 +290,14 @@ def get_sales_orders(item, qty, sales_order):
 
 @frappe.whitelist()
 def set_sales_order(sales_order, item_name, eta):
+	print("\n..........................")
+	print("\nsales order item eta",sales_order,item_name, eta)
 	if sales_order and sales_order.split("| ")[1]:
 		sales_order_name = sales_order.split("| ")[0].strip()
 		sales_order_item = sales_order.split("| ")[1]
+		print("\n...sales order",sales_order_name,sales_order_item)
 		if frappe.db.exists("Sales Order",{"name": sales_order_name}):
+			print("sales order exists... lets update the po eta",item_name)
 			frappe.db.set_value('Purchase Order Item', item_name, {
 				'sales_order': sales_order_name,
 				'avientek_eta':eta

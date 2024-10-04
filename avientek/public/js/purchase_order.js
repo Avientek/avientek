@@ -100,6 +100,7 @@ frappe.ui.form.on("Purchase Order Item", {
 	set_so_eta: function(frm, cdt, cdn) {
 		var row = locals[cdt][cdn];
 		var sales_order = String(row.sales_order)+ " | " + (String(row.sales_order_item))
+		console.log("sales_order",sales_order)
 		set_so_eta(frm, sales_order, row);
 		send_notification(frm,'Purchase Order',frm.doc.name,row.item_code)
 		send_notification(frm,'Sales Order',row.sales_order,row.item_code)
@@ -155,11 +156,9 @@ var set_so_eta = function(frm, sales_order,row) {
 	console.log("set eta",row.avientek_eta)
 	// frappe.model.set_value(row.doctype,row.name,'avientek_eta',row.avientek_eta)
 	frappe.call({
-		'method': 'avientek.events.purchase_order.set_sales_order',
+		'method': 'avientek.events.purchase_order.line_update_eta',
 		'args':{
-			'sales_order': sales_order,
-			'item_name': row.name,
-			'eta': row.avientek_eta,
+			'item': row,
 		},
 		freeze: true,
 		callback: (r) => {
