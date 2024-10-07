@@ -136,46 +136,46 @@ def check_exchange_rate(doc,method):
 		    		frappe.throw("Exchange rate is wrong!")
 
 # def po_validate(doc, method):
-	doc_before_save = doc.get_doc_before_save()
-	if doc.items:
-		for i, item in enumerate(doc.items):
-			if item.avientek_eta and doc_before_save.items[i] \
-				and item.avientek_eta != doc_before_save.items[i].avientek_eta and item.name == doc_before_save.items[i].name:
-				if item.sales_order and item.sales_order_item:
-					so_eta_history = []
-					so_child_doc = frappe.db.get_value("Sales Order Item", item.sales_order_item, ["eta_history", "purchase_order_item"], as_dict=1)
-					if so_child_doc.eta_history:
-						so_eta_history = append_to_eta_list(item.avientek_eta, so_child_doc.eta_history)
-					else:
-						so_eta_history = [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
-					so_eta_history_text = set_history(so_eta_history)
-					frappe.db.set_value("Sales Order Item", item.sales_order_item, {
-						"avientek_eta": item.avientek_eta,
-						"eta_history": json.dumps(so_eta_history),
-						"eta_history_text": so_eta_history_text
-						}, update_modified = False)
-					if so_child_doc.purchase_order_item:
-						first_po_eta_history = frappe.db.get_value("Purchase Order Item", so_child_doc.purchase_order_item, ["eta_history"])
-						f_po_eta_history = []
-						if first_po_eta_history:
-							f_so_eta_history = append_to_eta_list(item.avientek_eta, first_po_eta_history)
-						else:
-							f_so_eta_history = [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
-						f_po_eta_history = f_so_eta_history
-						po_eta_history_text = set_history(f_so_eta_history)
-						frappe.db.set_value("Purchase Order Item", so_child_doc.purchase_order_item, {
-							"avientek_eta": item.avientek_eta,
-							"eta_history": json.dumps(f_po_eta_history),
-							"eta_history_text": po_eta_history_text
-							}, update_modified = False)
-				# set in same doc
-				po_eta_history = []
-				if item.eta_history:
-					po_eta_history = append_to_eta_list(item.avientek_eta, item.eta_history)
-				else:
-					po_eta_history = [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
-				item.eta_history = json.dumps(po_eta_history)
-				item.eta_history_text = set_history(po_eta_history)
+	# doc_before_save = doc.get_doc_before_save()
+	# if doc.items:
+	# 	for i, item in enumerate(doc.items):
+	# 		if item.avientek_eta and doc_before_save.items[i] \
+	# 			and item.avientek_eta != doc_before_save.items[i].avientek_eta and item.name == doc_before_save.items[i].name:
+	# 			if item.sales_order and item.sales_order_item:
+	# 				so_eta_history = []
+	# 				so_child_doc = frappe.db.get_value("Sales Order Item", item.sales_order_item, ["eta_history", "purchase_order_item"], as_dict=1)
+	# 				if so_child_doc.eta_history:
+	# 					so_eta_history = append_to_eta_list(item.avientek_eta, so_child_doc.eta_history)
+	# 				else:
+	# 					so_eta_history = [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
+	# 				so_eta_history_text = set_history(so_eta_history)
+	# 				frappe.db.set_value("Sales Order Item", item.sales_order_item, {
+	# 					"avientek_eta": item.avientek_eta,
+	# 					"eta_history": json.dumps(so_eta_history),
+	# 					"eta_history_text": so_eta_history_text
+	# 					}, update_modified = False)
+	# 				if so_child_doc.purchase_order_item:
+	# 					first_po_eta_history = frappe.db.get_value("Purchase Order Item", so_child_doc.purchase_order_item, ["eta_history"])
+	# 					f_po_eta_history = []
+	# 					if first_po_eta_history:
+	# 						f_so_eta_history = append_to_eta_list(item.avientek_eta, first_po_eta_history)
+	# 					else:
+	# 						f_so_eta_history = [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
+	# 					f_po_eta_history = f_so_eta_history
+	# 					po_eta_history_text = set_history(f_so_eta_history)
+	# 					frappe.db.set_value("Purchase Order Item", so_child_doc.purchase_order_item, {
+	# 						"avientek_eta": item.avientek_eta,
+	# 						"eta_history": json.dumps(f_po_eta_history),
+	# 						"eta_history_text": po_eta_history_text
+	# 						}, update_modified = False)
+	# 			# set in same doc
+	# 			po_eta_history = []
+	# 			if item.eta_history:
+	# 				po_eta_history = append_to_eta_list(item.avientek_eta, item.eta_history)
+	# 			else:
+	# 				po_eta_history = [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
+	# 			item.eta_history = json.dumps(po_eta_history)
+	# 			item.eta_history_text = set_history(po_eta_history)
 
 # item is purchase order item
 @frappe.whitelist()
