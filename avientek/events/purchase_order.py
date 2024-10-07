@@ -225,8 +225,9 @@ def update_eta(item):
 	frappe.db.set_value("Purchase Order Item",item.name,"eta_history_text",set_history(po_eta_history))
 
 def po_validate(doc, method):
-	if frappe.db.exists("Purchase Order",doc.name):
-		doc_before_save = doc.get_doc_before_save()
+	doc_before_save = doc.get_doc_before_save()
+
+	if frappe.db.exists("Purchase Order",doc_before_save.name):
 
 		if not doc.items:
 			return  
