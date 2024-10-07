@@ -227,7 +227,7 @@ def update_eta(item):
 def po_validate(doc, method):
 	doc_before_save = doc.get_doc_before_save()
 
-	if frappe.db.exists("Purchase Order",doc_before_save.name):
+	if doc_before_save:
 
 		if not doc.items:
 			return  
