@@ -225,14 +225,15 @@ def update_eta(item):
 	frappe.db.set_value("Purchase Order Item",item.name,"eta_history_text",set_history(po_eta_history))
 
 def po_validate(doc, method):
-	doc_before_save = doc.get_doc_before_save()
+	if frappe.db.exists("Purchase Order",doc.name):
+		doc_before_save = doc.get_doc_before_save()
 
-	if not doc.items:
-		return  
+		if not doc.items:
+			return  
 
-	for i, item in enumerate(doc.items):
-		if item.avientek_eta and doc_before_save.items[i] and item.avientek_eta != doc_before_save.items[i].avientek_eta and item.name == doc_before_save.items[i].name:
-			update_eta(item)
+		for i, item in enumerate(doc.items):
+			if item.avientek_eta and doc_before_save.items[i] and item.avientek_eta != doc_before_save.items[i].avientek_eta and item.name == doc_before_save.items[i].name:
+				update_eta(item)
 
 
 def append_to_eta_list(avientek_eta, eta_history):
