@@ -69,7 +69,7 @@ fixtures = [{'dt':'Custom Field',
 doctype_js = {
 	"Quotation" : "public/js/quotation.js",
 	"Purchase Order" : "public/js/purchase_order.js",
-	"Sales Order" : "public/js/sales_order.js",
+	#"Sales Order" : "public/js/sales_order.js",
 	"Company" : "public/js/send_email.js",
     # "Purchase Receipt" : "public/js/purchase_receipt.js",
 }
