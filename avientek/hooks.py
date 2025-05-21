@@ -155,6 +155,9 @@ doc_events = {
 	"Item": {
 		"validate": "avientek.events.item.validate_brand_pn"
 	},
+	"Sales Order" : {
+		"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"
+	}
 	
 }
 
