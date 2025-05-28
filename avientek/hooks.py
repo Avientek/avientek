@@ -27,7 +27,21 @@ fixtures = [{'dt':'Custom Field',
 						'Purchase Order-avientek_rounding_adjustment', 'Purchase Order-avientek_rounded_total',
 						'Purchase Order Item-avientek_rate', 'Purchase Order Item-avientek_amount',
 						'Purchase Order-avientek_exchange_rate', 'Purchase Order Item-avientek_exchange_rate',
-						'Supplier-avientek_display_currency', 'Customer-avientek_display_currency')]
+						'Supplier-avientek_display_currency', 'Customer-avientek_display_currency',
+						'Quotation Item-custom_finance_', 'Quotation Item-custom_transport_',
+						'Quotation Item-custom_incentive_', 'Quotation Item-custom_customs_',
+						'Quotation Item-custom_markup_', 'Quotation Item-custom_finance_value',
+						'Quotation Item-custom_incentive_value', 'Quotation Item-custom_customs_value',
+						'Quotation Item-custom_markup_value', 'Quotation Item-custom_transport_value',
+                        'Quotation Item-custom_total_', 'Quotation Item-custom_cogs',
+                        'Quotation Item-custom_selling_price', 'Brand-custom_finance_',
+                        'Brand-custom_transport', 'Quotation-custom_section_break_tiek0',
+                        'Quotation-custom_brand_summary', 'Quotation Item-custom_section_break_dkbzh',
+                        'Quotation Item-custom_standard_price_', 'Quotation Item-custom_special_price',
+                        'Quotation Item-custom_margin_', 'Quotation Item-custom_margin_value',
+                        'Quotation-probability', 'Quotation-custom_company_currency',
+                        'Quotation Item-custom_special_rate','Quotation Item-custom_final_valuation_rate'
+            )]
                 ]
 			},
 			{
@@ -157,6 +171,9 @@ doc_events = {
 	},
 	"Sales Order" : {
 		"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"
+	},
+	"Quotation" : {
+		"before_submit": "avientek.events.quotation.validate_margin_before_submit"
 	}
 	
 }
