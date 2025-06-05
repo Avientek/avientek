@@ -136,7 +136,7 @@ fixtures = [
 doctype_js = {
 	"Quotation": "public/js/quotation.js",
 	"Purchase Order": "public/js/purchase_order.js",
-	# "Sales Order" : "public/js/sales_order.js",
+	"Sales Order" : "public/js/sales_order.js",
 	"Company": "public/js/send_email.js",
 	# "Purchase Receipt" : "public/js/purchase_receipt.js",
 }
@@ -237,14 +237,19 @@ after_migrate = "avientek.migrate.after_migrate"
 # Hook on document methods and events
 
 doc_events = {
-	"Purchase Order": {
-		"before_update_after_submit": "avientek.events.purchase_order.po_validate",
-		"validate": "avientek.events.purchase_order.check_exchange_rate",
-	},
-	"Item": {"validate": "avientek.events.item.validate_brand_pn"},
-	"Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
-	"Quotation": {"before_submit": "avientek.events.quotation.validate_margin_before_submit"},
+    "Purchase Order": {
+        "before_update_after_submit": "avientek.events.purchase_order.po_validate",
+        "validate": "avientek.events.purchase_order.check_exchange_rate",
+    },
+    "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
+    "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
+    # "Quotation": {
+    #     # "validate":      "avientek.events.quotation.validate",                   # server maths
+    #     "before_submit": "avientek.events.quotation.validate_margin_before_submit",
+    # },
+    # "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
 }
+
 
 # Scheduled Tasks
 # ---------------
