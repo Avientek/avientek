@@ -1,7 +1,7 @@
 frappe.ui.form.on('Quotation', {
     validate: function(frm) {
         console.log("hii")
-        calculate_brand_summary(frm);
+        // calculate_brand_summary(frm);
     }
 });
 
@@ -411,27 +411,27 @@ price_list_rate_copy:function(frm,cdt,cdn){
 },
 custom_special_price:function(frm,cdt,cdn){
     calculate_all(frm, cdt, cdn);
-    calculate_custom_rate(frm, cdt, cdn);
+    // calculate_custom_rate(frm, cdt, cdn);
 },
 custom_incentive_(frm, cdt, cdn) {
     calculate_all(frm, cdt, cdn);
-    calculate_custom_rate(frm, cdt, cdn);
+    // calculate_custom_rate(frm, cdt, cdn);
 },
 custom_markup_(frm,cdt,cdn){
     // console.log("Markup : ",markup )
     calculate_all(frm, cdt, cdn);
-    calculate_custom_rate(frm, cdt, cdn);
+    // calculate_custom_rate(frm, cdt, cdn);
 },
 custom_customs_(frm,cdt,cdn){
     calculate_all(frm, cdt, cdn);
-    calculate_custom_rate(frm, cdt, cdn);
-    var row = locals[cdt][cdn]
-    if (row.custom_customs_) {
-        let final_rate = (row.custom_customs_ / 100) * row.valuation_rate;
-        frappe.model.set_value(cdt, cdn, 'custom_final_valuation_rate', final_rate);
-    } else {
-        frappe.model.set_value(cdt, cdn, 'custom_final_valuation_rate', 0);
-    }
+    // calculate_custom_rate(frm, cdt, cdn);
+    // var row = locals[cdt][cdn]
+    // if (row.custom_customs_) {
+    //     let final_rate = (row.custom_customs_ / 100) * row.valuation_rate;
+    //     frappe.model.set_value(cdt, cdn, 'custom_final_valuation_rate', final_rate);
+    // } else {
+    //     frappe.model.set_value(cdt, cdn, 'custom_final_valuation_rate', 0);
+    // }
     
 },
 custom_finance_(frm,cdt,cdn){
@@ -473,7 +473,7 @@ shipping_per:function(frm, cdt,cdn){
         // }
         // update_rates(frm,cdt,cdn)
         calculate_all(frm, cdt, cdn);
-        calculate_custom_rate(frm, cdt, cdn);
+        // calculate_custom_rate(frm, cdt, cdn);
     // }
 
 },
@@ -572,7 +572,7 @@ s
 
 qty:function(frm, cdt,cdn){
     calculate_all(frm, cdt, cdn);
-    calculate_custom_rate(frm, cdt, cdn);
+    // calculate_custom_rate(frm, cdt, cdn);
     // var row = locals[cdt][cdn]
     // if(row.brand && row.price_list_rate_copy){
     //     update_rates(frm,cdt,cdn)
