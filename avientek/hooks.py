@@ -77,7 +77,7 @@ fixtures = [
 					"Quotation Item-custom_selling_price",
 					"Brand-custom_finance_",
 					"Brand-custom_transport",
-					"Quotation-custom_section_break_tiek0",
+					"Quotation-custom_section_break_pdpgu",
 					"Quotation-custom_brand_summary",
 					"Quotation Item-custom_section_break_dkbzh",
 					"Quotation Item-custom_standard_price_",
