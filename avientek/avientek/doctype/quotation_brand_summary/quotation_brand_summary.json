@@ -35,7 +35,8 @@
   {
    "fieldname": "shipping",
    "fieldtype": "Currency",
-   "label": "Shipping"
+   "label": "Shipping",
+   "options": "currency"
   },
   {
    "fieldname": "shipping_percent",
@@ -45,7 +46,8 @@
   {
    "fieldname": "finance",
    "fieldtype": "Currency",
-   "label": "Finance"
+   "label": "Finance",
+   "options": "currency"
   },
   {
    "fieldname": "finance_percent",
@@ -55,7 +57,8 @@
   {
    "fieldname": "transport",
    "fieldtype": "Currency",
-   "label": "Transport"
+   "label": "Transport",
+   "options": "currency"
   },
   {
    "fieldname": "transport_percent",
@@ -65,7 +68,8 @@
   {
    "fieldname": "reward",
    "fieldtype": "Currency",
-   "label": "Reward"
+   "label": "Reward",
+   "options": "currency"
   },
   {
    "fieldname": "reward_percent",
@@ -79,7 +83,8 @@
   {
    "fieldname": "incentive",
    "fieldtype": "Currency",
-   "label": "Incentive"
+   "label": "Incentive",
+   "options": "currency"
   },
   {
    "fieldname": "incentive_percent",
@@ -89,7 +94,8 @@
   {
    "fieldname": "customs",
    "fieldtype": "Currency",
-   "label": "Customs"
+   "label": "Customs",
+   "options": "currency"
   },
   {
    "fieldname": "customs_",
@@ -99,17 +105,20 @@
   {
    "fieldname": "total_cost",
    "fieldtype": "Currency",
-   "label": "Total Cost"
+   "label": "Total Cost",
+   "options": "currency"
   },
   {
    "fieldname": "total_selling",
    "fieldtype": "Currency",
-   "label": "Total Selling"
+   "label": "Total Selling",
+   "options": "currency"
   },
   {
    "fieldname": "margin",
    "fieldtype": "Currency",
-   "label": "Margin"
+   "label": "Margin",
+   "options": "currency"
   },
   {
    "fieldname": "margin_percent",
@@ -120,7 +129,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-06-11 09:54:54.599591",
+ "modified": "2025-06-11 14:33:37.834841",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Quotation Brand Summary",

@@ -2,7 +2,9 @@ frappe.ui.form.on('Quotation', {
     validate: function(frm) {
         console.log("hii")
         calculate_brand_summary(frm);
-    }
+        // frm.fields_dict.custom_brand_summary.grid.add_totals_row = true;
+    },
+    
 });
 
 
@@ -113,13 +115,27 @@ frappe.db.get_value('Brand',{'brand':row.brand},['shipping','processing_charges'
     // var levee = (row.price_list_rate_copy*b.levee) /100
     // var std_margin = (row.price_list_rate_copy*b.std_margin) /100
 
-    frappe.model.set_value(row.doctype,row.name,'shipping_per',(b.shipping))
-    frappe.model.set_value(row.doctype,row.name,'processing_charges_per',(b.processing_charges))
-    frappe.model.set_value(row.doctype,row.name,'reward_per',(b.reward))
-    frappe.model.set_value(row.doctype,row.name,'levee_per',(b.levee))
-    frappe.model.set_value(row.doctype,row.name,'std_margin_per',(b.std_margin))
-    frappe.model.set_value(row.doctype,row.name,'custom_finance_',(b.custom_finance_))
-    frappe.model.set_value(row.doctype,row.name,'custom_transport_',(b.custom_transport))
+    if (!row.shipping_per || row.shipping_per == b.shipping) {
+            frappe.model.set_value(row.doctype, row.name, 'shipping_per', b.shipping);
+    }
+    if (!row.processing_charges_per || row.processing_charges_per == b.processing_charges) {
+        frappe.model.set_value(row.doctype, row.name, 'processing_charges_per', b.processing_charges);
+    }
+    if (!row.reward_per || row.reward_per == b.reward) {
+        frappe.model.set_value(row.doctype, row.name, 'reward_per', b.reward);
+    }
+    if (!row.levee_per || row.levee_per == b.levee) {
+        frappe.model.set_value(row.doctype, row.name, 'levee_per', b.levee);
+    }
+    if (!row.std_margin_per || row.std_margin_per == b.std_margin) {
+        frappe.model.set_value(row.doctype, row.name, 'std_margin_per', b.std_margin);
+    }
+    if (!row.custom_finance_ || row.custom_finance_ == b.custom_finance_) {
+        frappe.model.set_value(row.doctype, row.name, 'custom_finance_', b.custom_finance_);
+    }
+    if (!row.custom_transport_ || row.custom_transport_ == b.custom_transport) {
+        frappe.model.set_value(row.doctype, row.name, 'custom_transport_', b.custom_transport);
+    }
     frappe.call({
         'method': 'avientek.events.item.get_custom_duty',
         'args':{
@@ -128,9 +144,9 @@ frappe.db.get_value('Brand',{'brand':row.brand},['shipping','processing_charges'
         },
         callback: (r) => {
             if(!r.exc) {
-                console.log("Custom duty result", r.message);
-                // console.log("r.messageeeeeee dty",r.message)
-                frappe.model.set_value(row.doctype,row.name,'custom_customs_',r.message)
+                if (!row.custom_customs_ || row.custom_customs_ == r.message) {
+                        frappe.model.set_value(row.doctype, row.name, 'custom_customs_', r.message);
+                }
             }
         }
     })
@@ -187,16 +203,16 @@ function calculate_all(frm, cdt, cdn) {
 
     let base_amount = (sp * qty) + shipping + finance + transport + reward;
     let incentive = incentive_per * base_amount / 100;
-    let cogs = base_amount + incentive;
-
-    let markup = markup_per * cogs / 100;
-    let total = cogs + markup;
+    let markup_base = base_amount + incentive;
+    let markup = markup_per * markup_base / 100;
+    let total = markup_base + markup;
 
     let customs = customs_per * total / 100;
+    let cogs = base_amount + incentive + customs;
     let selling_price = total + customs;
 
-    let margin_percent = total !== 0 ? (markup / total) * 100 : 0;
-    let margin_value = (margin_percent / 100) * total;
+    let margin_percent = total !== 0 ? (markup / selling_price) * 100 : 0;
+    let margin_value = (margin_percent / 100) * selling_price;
 
     // Set values
     frappe.model.set_value(cdt, cdn, 'shipping', shipping);
@@ -263,20 +279,21 @@ function calculate_brand_summary(frm) {
         let incentive_percent = flt(row.custom_incentive_);
         let incentive = (base_amount * incentive_percent / 100);
 
-        let cogs = base_amount + incentive;
+        let markup_base = base_amount + incentive;
+        let markup = (flt(row.custom_markup_) * markup_base / 100);
 
-        let markup = (flt(row.custom_markup_) * cogs / 100);
-        let total = cogs + markup;
+        let total = markup_base + markup;
 
         let customs_percent = flt(row.custom_customs_);
         let customs = (customs_percent * total / 100);
 
+        let cogs = base_amount + incentive + customs;
+
         let selling_price = total + customs;
 
         let margin = markup;
-        let margin_percent = (markup / (total || 1)) * 100;
+        let margin_percent = (markup / (selling_price || 1)) * 100;
 
-        // Sum up amounts
         brand_data[brand].shipping += shipping;
         brand_data[brand].shipping_percent += flt(row.shipping_per);
         brand_data[brand].finance += finance;
@@ -298,6 +315,14 @@ function calculate_brand_summary(frm) {
 
     frm.clear_table('custom_brand_summary');
 
+    let total_summary = {
+        total_cost: 0,
+        total_selling: 0,
+        // margin: 0,
+        // margin_percent: 0,
+        count: 0
+    };
+
     Object.keys(brand_data).forEach(brand => {
         let data = brand_data[brand];
         let count = data.item_count;
@@ -314,18 +339,30 @@ function calculate_brand_summary(frm) {
             reward_percent: data.reward_percent / count,
             incentive: data.incentive,
             incentive_percent: data.incentive_percent / count,
-            customs: data.customs,
-            customs_: data.customs_percent / count,
+            customs_: data.customs,
             total_cost: data.total_cost,
             total_selling: data.total_selling,
             margin: data.margin,
             margin_percent: data.margin_percent / count
         });
+
+        total_summary.total_cost += data.total_cost;
+        total_summary.total_selling += data.total_selling;
+        // total_summary.margin += data.margin;
+        // total_summary.margin_percent += data.margin_percent;
+        total_summary.count += count;
     });
 
     frm.refresh_field('custom_brand_summary');
-    console.log("✅ Brand summary updated with qty considered.");
+
+    // Set total fields on form
+    frm.set_value('custom_total_cost', total_summary.total_cost);
+    frm.set_value('custom_total_selling', total_summary.total_selling);
+    // frm.set_value('custom_total_margin_percent', total_summary.margin_percent / (total_summary.count || 1));
+
+    console.log("✅ Brand summary and totals updated.");
 }
+
 function calculate_custom_rate(frm, cdt, cdn) {
     let row = locals[cdt][cdn];
     if (row.qty > 0) {
@@ -334,6 +371,47 @@ function calculate_custom_rate(frm, cdt, cdn) {
         frappe.model.set_value(cdt, cdn, 'rate', special_rate);
     }
 }
+
+function handle_qty_or_rate_change(frm, cdt, cdn) {
+    let row = locals[cdt][cdn];
+
+    // Check if the row belongs to your second table (not main 'items')
+    if (row.parentfield === 'custom_service_items') {
+        calculate_custom_amount(frm, row);
+        frm.refresh_field('custom_service_items');
+    }
+}
+
+function calculate_custom_amount(frm, row) {
+    const qty = flt(row.qty);
+    const rate = flt(row.rate);
+
+    row.amount = qty * rate;
+    // frm.refresh_field("custom_service_items");
+    // row.base_rate = rate;
+    // row.base_amount = row.amount;
+    // row.net_amount = row.amount;
+
+    // If needed, calculate other fields like discounts here
+}
+
+function update_custom_service_totals(frm) {
+    let total_qty = 0;
+    let total_amount = 0;
+
+    (frm.doc.custom_service_items || []).forEach(row => {
+        total_qty += flt(row.qty);
+        total_amount += flt(row.amount);
+    });
+
+    frm.set_value('custom_total_qty', total_qty);
+    frm.set_value('custom_total', total_amount);
+
+    // If conversion_rate exists (e.g. from quotation), use it
+    let conversion_rate = flt(frm.doc.conversion_rate || 1);
+    frm.set_value('custom_total_company_currency', total_amount * conversion_rate);
+}
+
 
 // frappe.ui.form.on('Quotation', {
 //     refresh(frm) {
@@ -350,7 +428,49 @@ function calculate_custom_rate(frm, cdt, cdn) {
 
 frappe.ui.form.on('Quotation Item',{
 item_code:function(frm, cdt,cdn){
-    var row = locals[cdt][cdn]
+        var row = locals[cdt][cdn]
+        if (!frm.doc.party_name) {
+            frappe.msgprint(__('Customer must be selected before choosing an item.'));
+            return;
+        }
+        frappe.call({
+            method: "avientek.events.quotation.get_last_transactions",
+            args: {
+                customer: frm.doc.party_name,
+                item_code: row.item_code
+            },
+            callback: function (r) {
+            if (r.message && r.message.length > 0) {
+                const data = r.message;
+                console.log("data",data)
+                const dialog = new frappe.ui.Dialog({
+                    title: 'Recent Transactions for ' + row.item_code,
+                    fields: [
+                        {
+                        label: 'Table',
+                        fieldname: 'table',
+                        fieldtype: 'Table',
+                        cannot_add_rows: true,
+                        in_place_edit: false,
+                        data: data,
+                        fields: [
+                            { fieldname: 'doctype', fieldtype: 'Data', in_list_view: 1, label: 'Doctype' },
+                            { fieldname: 'name', fieldtype: 'Data', in_list_view: 1, label: 'Doc ID' },
+                            { fieldname: 'rate', fieldtype: 'Data', in_list_view: 1, label: 'Rate' },
+
+                        ]
+                        }
+                    ],
+
+                    size: 'large'
+                });
+
+                dialog.show();
+            } else {
+                frappe.msgprint("No previous transactions found for this item.");
+            }
+        },
+        })
     setTimeout(() => {
         var row = locals[cdt][cdn]
         frappe.db.get_value("Item Price", {"item_code": row.item_code,"price_list":frm.doc.selling_price_list}, "price_list_rate", (d) => {
@@ -367,8 +487,57 @@ item_code:function(frm, cdt,cdn){
         //     frappe.model.set_value(row.doctype,row.name,'price_list_rate_copy',row.base_price_list_rate)
         // }
         rate_calculation(frm,cdt,cdn)
+        if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+        }
+        // handle_qty_or_rate_change(frm, cdt, cdn);
        
     },1000)
+},
+custom_view_price_history: function(frm, cdt, cdn) {
+    var row = locals[cdt][cdn];
+    if (!row.item_code) {
+        frappe.msgprint(__('Please select an item first.'));
+        return;
+    }
+    frappe.call({
+        method: "avientek.events.quotation.get_last_transactions",
+        args: {
+            customer: frm.doc.party_name,
+            item_code: row.item_code
+        },
+        callback: function (r) {
+        if (r.message && r.message.length > 0) {
+            const data = r.message;
+            console.log("data",data)
+            const dialog = new frappe.ui.Dialog({
+                title: 'Recent Transactions for ' + row.item_code,
+                fields: [
+                    {
+                    label: 'Table',
+                    fieldname: 'table',
+                    fieldtype: 'Table',
+                    cannot_add_rows: true,
+                    in_place_edit: false,
+                    data: data,
+                    fields: [
+                        { fieldname: 'doctype', fieldtype: 'Data', in_list_view: 1, label: 'Doctype' },
+                        { fieldname: 'name', fieldtype: 'Data', in_list_view: 1, label: 'Doc ID' },
+                        { fieldname: 'rate', fieldtype: 'Data', in_list_view: 1, label: 'Rate' },
+
+                    ]
+                    }
+                ],
+
+                size: 'large'
+            });
+
+            dialog.show();
+        } else {
+            frappe.msgprint("No previous transactions found for this item.");
+        }
+    },
+    })
 },
 usd_price_list_rate_with_margin:function(frm,cdt,cdn) {
     var row = locals[cdt][cdn]
@@ -412,20 +581,40 @@ price_list_rate_copy:function(frm,cdt,cdn){
 custom_special_price:function(frm,cdt,cdn){
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
+    var row = locals[cdt][cdn]
+    if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+    }
 },
 custom_incentive_(frm, cdt, cdn) {
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
+    var row = locals[cdt][cdn]
+    if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+    }
 },
 custom_markup_(frm,cdt,cdn){
     // console.log("Markup : ",markup )
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
+    var row = locals[cdt][cdn]
+    if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+    }
 },
 custom_customs_(frm,cdt,cdn){
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
     var row = locals[cdt][cdn]
+    if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+    }
+    // var row = locals[cdt][cdn]
     if (row.custom_customs_) {
         let final_rate = (row.custom_customs_ / 100) * row.valuation_rate;
         frappe.model.set_value(cdt, cdn, 'custom_final_valuation_rate', final_rate);
@@ -443,7 +632,12 @@ custom_transport_(frm,cdt,cdn){
 // custom_selling_price(frm, cdt, cdn) {
 //         calculate_custom_rate(frm, cdt, cdn);
 // },
-
+amount(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (row.parentfield === 'custom_service_items') {
+            update_custom_service_totals(frm);
+        }
+    },
 
 shipping:function(frm, cdt,cdn){
     var row = locals[cdt][cdn]
@@ -474,6 +668,11 @@ shipping_per:function(frm, cdt,cdn){
         // update_rates(frm,cdt,cdn)
         calculate_all(frm, cdt, cdn);
         calculate_custom_rate(frm, cdt, cdn);
+        if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+        }
+
     // }
 
 },
@@ -573,6 +772,11 @@ s
 qty:function(frm, cdt,cdn){
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
+    var row = locals[cdt][cdn]
+    if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+    }
     // var row = locals[cdt][cdn]
     // if(row.brand && row.price_list_rate_copy){
     //     update_rates(frm,cdt,cdn)

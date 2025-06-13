@@ -88,6 +88,17 @@ fixtures = [
 					"Quotation-custom_company_currency",
 					"Quotation Item-custom_special_rate",
 					"Quotation Item-custom_final_valuation_rate",
+					"Quotation Item-custom_view_price_history",
+					"Quotation-custom_section_break_m2mfs",
+					"Quotation-custom_service_items",
+     				"Quotation-custom_section_break_iz6bt",
+					"Quotation-custom_total_qty","Quotation-custom_column_break_fkkaf",
+					"Quotation-custom_total_company_currency","Quotation-custom_column_break_d6xvc",
+					"Quotation-custom_total","Journal Entry-custom_sales_invoice",
+					"Sales Order Item-custom_incentive_value","Sales Invoice Item-custom_incentive_value",
+					"Quotation-custom_section_break_d9xy0","Quotation-custom_total_cost",
+					"Quotation-custom_column_break_tjozq","Quotation-custom_total_selling",
+					"Quotation-custom_next_state"
 				),
 			]
 		],
@@ -243,11 +254,10 @@ doc_events = {
     },
     "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
     "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
-    # "Quotation": {
-    #     # "validate":      "avientek.events.quotation.validate",                   # server maths
-    #     "before_submit": "avientek.events.quotation.validate_margin_before_submit",
-    # },
-    # "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
+    "Quotation": {
+        "before_submit":      "avientek.events.quotation.validate_margin_for_workflow",                   # server maths
+    },
+    "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
 }
 
 
