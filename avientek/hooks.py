@@ -98,7 +98,9 @@ fixtures = [
 					"Sales Order Item-custom_incentive_value","Sales Invoice Item-custom_incentive_value",
 					"Quotation-custom_section_break_d9xy0","Quotation-custom_total_cost",
 					"Quotation-custom_column_break_tjozq","Quotation-custom_total_selling",
-					"Quotation-custom_next_state"
+					"Quotation-custom_next_state","Quotation-custom_quote_type",
+					"Sales Order-custom_quote_type","Sales Invoice-custom_quote_type",
+					"Delivery Note-custom_customers_purchase_order"
 				),
 			]
 		],
