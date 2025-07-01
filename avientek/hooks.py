@@ -100,7 +100,8 @@ fixtures = [
 					"Quotation-custom_column_break_tjozq","Quotation-custom_total_selling",
 					"Quotation-custom_next_state","Quotation-custom_quote_type",
 					"Sales Order-custom_quote_type","Sales Invoice-custom_quote_type",
-					"Delivery Note-custom_customers_purchase_order"
+					"Delivery Note-custom_customers_purchase_order","Quotation-custom_applicable_date",
+					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company"
 				),
 			]
 		],
@@ -151,6 +152,8 @@ doctype_js = {
 	"Purchase Order": "public/js/purchase_order.js",
 	"Sales Order" : "public/js/sales_order.js",
 	"Company": "public/js/send_email.js",
+	# "Journal Entry": "public/js/journal_entry.js",
+	# "Purchase Invoice": "public/js/purchase_invoice.js"
 	# "Purchase Receipt" : "public/js/purchase_receipt.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
