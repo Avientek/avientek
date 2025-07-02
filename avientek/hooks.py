@@ -100,8 +100,9 @@ fixtures = [
 					"Quotation-custom_column_break_tjozq","Quotation-custom_total_selling",
 					"Quotation-custom_next_state","Quotation-custom_quote_type",
 					"Sales Order-custom_quote_type","Sales Invoice-custom_quote_type",
-					"Delivery Note-custom_customers_purchase_order","Quotation-custom_applicable_date",
-					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company"
+					"Delivery Note-custom_customers_purchase_order",
+					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company",
+					"Selling Settings-custom_applicable_date"
 				),
 			]
 		],
@@ -233,6 +234,12 @@ doctype_js = {
 # permission_query_conditions = {
 # "Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
 # }
+# hooks.py
+
+# permission_query_conditions = {
+#     "Payment Request Form": "avientek.avientek.doctype.payment_request_form.payment_request_form.get_permission_query_conditions"
+# }
+
 #
 # has_permission = {
 # "Event": "frappe.desk.doctype.event.event.has_permission",
