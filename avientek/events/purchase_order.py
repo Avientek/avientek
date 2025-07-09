@@ -2,6 +2,8 @@ import frappe
 from frappe import _
 import json
 from frappe.model.mapper import get_mapped_doc
+from frappe.utils.pdf import get_pdf
+from frappe.utils.file_manager import save_file
 from frappe.utils import flt, getdate, nowdate, cint, cstr
 from erpnext.controllers.buying_controller import BuyingController
 from erpnext.buying.doctype.purchase_order.purchase_order import PurchaseOrder
@@ -81,7 +83,6 @@ class CustomPurchaseOrder(BuyingController):
 					d.discount_percentage = 0.0
 					d.discount_amount = 0.0
 					d.margin_rate_or_amount = 0.0
-
 
 
 @frappe.whitelist()
@@ -380,6 +381,64 @@ def create_notification(ref_doctype,ref_name,item):
 					)
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), str(e))
+
+@frappe.whitelist()
+def create_payment_request(source_name, target_doc=None, args=None):
+    def set_single_reference(source, target):
+        attachment_html = ""
+
+        # 1. Generate and attach Purchase Order PDF
+        try:
+            po_pdf_data = get_pdf(frappe.get_print("Purchase Order", source.name, "Standard"))
+            po_file = save_file(
+                fname=f"{source.name}-Print.pdf",
+                content=po_pdf_data,
+                dt=target.doctype,
+                dn=target.name,
+                is_private=1
+            )
+            attachment_html += f'<a href="{po_file.file_url}" target="_blank">Purchase Order PDF</a><br>'
+        except Exception as e:
+            frappe.log_error(frappe.get_traceback(), "Failed to generate PO PDF")
+
+        # 2. Get related Sales Order from first item
+        sales_order = source.items[0].sales_order if source.items else ""
+
+        # 3. Append to payment references
+        target.append("payment_references", {
+            "reference_doctype": "Purchase Order",
+            "reference_name": source.name,
+            "total_amount": source.total,
+            "payment_amount": source.total,
+            "outstanding_amount": source.base_total,
+            "invoice_date": source.transaction_date,
+            "due_date": source.schedule_date,
+            "exchange_rate": source.conversion_rate,
+            "document_reference": sales_order,
+            "currency": source.currency,
+            "reference_attachment": attachment_html
+        })
+
+        # 4. Calculate totals
+        target.total_outstanding_amount = sum((row.outstanding_amount or 0) for row in target.payment_references)
+        target.total_payment_amount = sum((row.payment_amount or 0) for row in target.payment_references)
+        target.total_amount = sum((row.total_amount or 0) for row in target.payment_references)
+
+    # Create mapped Payment Request Form
+    target_doc = get_mapped_doc(
+        "Purchase Order",
+        source_name,
+        {
+            "Purchase Order": {
+                "doctype": "Payment Request Form",
+            },
+        },
+        target_doc,
+        postprocess=set_single_reference
+    )
+
+    return target_doc
+
 
 # from erpnext.controllers.item_variant import create_variant
 

@@ -8,25 +8,69 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "workflow_state",
   "type_of_payment_section",
   "naming_series",
   "payment_type",
+  "company",
   "column_break_4",
   "posting_date",
-  "company",
+  "voucher_date",
+  "cost_center",
+  "department",
   "payment_to_section",
+  "party_type",
+  "party",
+  "party_name",
   "supplier",
   "supplier_name",
   "column_break_10",
   "supplier_balance",
   "get_outstanding_invoice",
+  "payment_details_section",
+  "issued_bank",
+  "account",
+  "account_no",
+  "issued_currency",
+  "column_break_dike",
+  "payment_mode",
+  "cheque_date",
+  "cheque_no",
+  "receiving_bank",
+  "receiving_account",
+  "receving_account_no",
+  "receiving_currency",
+  "currency_section",
+  "currency",
+  "column_break_wnxv",
+  "conversion_rate",
   "reference_section",
   "payment_references",
+  "section_break_mnon",
+  "total_amount",
+  "column_break_mlnn",
+  "total_payment_amount",
+  "total_received_amount",
+  "column_break_sajy",
   "total_outstanding_amount",
+  "total_received",
+  "column_break_voiu",
   "approved_amount",
   "more_information_section",
   "remarks",
-  "amended_from"
+  "amended_from",
+  "address_and_contact_tab",
+  "supplier_address",
+  "address_display",
+  "column_break_ljgn",
+  "telephone",
+  "email",
+  "supplier_bank_details_tab",
+  "supplier_bank_account",
+  "account_number",
+  "bank",
+  "swift_code",
+  "connections_tab"
  ],
  "fields": [
   {
@@ -38,14 +82,15 @@
    "fieldname": "naming_series",
    "fieldtype": "Select",
    "label": "Series",
-   "options": "REQ-.YYYY.-"
+   "options": "AVFZC-.###\nAVETLL-.###\nAVTLL-.###\nAVTWL-.###\nAVETPL-.###\nAVETL-.###\nEAWFCIT-.###\nAVG-.###"
   },
   {
-   "default": "Pay",
    "fieldname": "payment_type",
-   "fieldtype": "Data",
+   "fieldtype": "Select",
+   "in_list_view": 1,
    "label": "Payment Type",
-   "read_only": 1
+   "options": "Pay\nInternal Transfer\nAdvance Pay",
+   "reqd": 1
   },
   {
    "fieldname": "column_break_4",
@@ -60,10 +105,13 @@
   {
    "fieldname": "company",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Company",
-   "options": "Company"
+   "options": "Company",
+   "reqd": 1
   },
   {
+   "depends_on": "eval:doc.payment_type==\"Pay\" || doc.payment_type==\"Advance Pay\"\r\n",
    "fieldname": "payment_to_section",
    "fieldtype": "Section Break",
    "label": "Payment To"
@@ -71,6 +119,7 @@
   {
    "fieldname": "supplier",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Supplier",
    "options": "Supplier"
   },
@@ -79,6 +128,7 @@
    "fetch_from": "supplier.supplier_name",
    "fieldname": "supplier_name",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "Supplier Name",
    "read_only": 1
   },
@@ -96,19 +146,20 @@
    "fieldtype": "Column Break"
   },
   {
-   "depends_on": "supplier",
+   "depends_on": "party",
    "fieldname": "supplier_balance",
    "fieldtype": "Currency",
    "label": "Supplier Balance",
    "read_only": 1
   },
   {
-   "depends_on": "eval:doc.docstatus==0 && doc.supplier",
+   "depends_on": "eval:doc.docstatus==0 && doc.party",
    "fieldname": "get_outstanding_invoice",
    "fieldtype": "Button",
    "label": "Get Outstanding Invoice"
   },
   {
+   "depends_on": "eval:doc.payment_type==\"Pay\"\r\n",
    "fieldname": "reference_section",
    "fieldtype": "Section Break",
    "label": "Reference"
@@ -133,18 +184,283 @@
   {
    "fieldname": "total_outstanding_amount",
    "fieldtype": "Currency",
-   "label": "Total Outstanding amount"
+   "label": "Total Payment (Company Currency)",
+   "options": "Company:company:default_currency"
   },
   {
    "fieldname": "approved_amount",
    "fieldtype": "Currency",
    "label": "Approved Amount"
+  },
+  {
+   "fieldname": "voucher_date",
+   "fieldtype": "Date",
+   "label": "Voucher Date"
+  },
+  {
+   "fetch_from": "company.cost_center",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "payment_details_section",
+   "fieldtype": "Section Break",
+   "label": "Payment Details"
+  },
+  {
+   "fieldname": "issued_bank",
+   "fieldtype": "Link",
+   "label": "Issued Bank",
+   "options": "Bank Account"
+  },
+  {
+   "fetch_from": "issued_bank.bank_account_no",
+   "fieldname": "account_no",
+   "fieldtype": "Data",
+   "label": "Account No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_dike",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Pay\"\r\n",
+   "fieldname": "payment_mode",
+   "fieldtype": "Link",
+   "label": "Payment Mode",
+   "options": "Mode of Payment"
+  },
+  {
+   "depends_on": "eval:doc.payment_mode==\"Cheque\"\r\n",
+   "fieldname": "cheque_date",
+   "fieldtype": "Date",
+   "label": "Cheque Date"
+  },
+  {
+   "depends_on": "eval:doc.payment_mode==\"Cheque\"\r\n",
+   "fieldname": "cheque_no",
+   "fieldtype": "Data",
+   "label": "Cheque No"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.payment_type==\"Pay\"\r\n",
+   "fieldname": "currency_section",
+   "fieldtype": "Section Break",
+   "label": "Currency"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "column_break_wnxv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "conversion_rate",
+   "fieldtype": "Float",
+   "label": "Exchange Rate\t"
+  },
+  {
+   "fieldname": "section_break_mnon",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_voiu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "address_and_contact_tab",
+   "fieldtype": "Tab Break",
+   "label": "Address & Contact"
+  },
+  {
+   "fieldname": "supplier_address",
+   "fieldtype": "Link",
+   "label": "Party Address",
+   "options": "Address"
+  },
+  {
+   "fieldname": "address_display",
+   "fieldtype": "Small Text",
+   "label": "Address"
+  },
+  {
+   "fieldname": "column_break_ljgn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "supplier_address.phone",
+   "fieldname": "telephone",
+   "fieldtype": "Data",
+   "label": "Telephone"
+  },
+  {
+   "fetch_from": "supplier_address.email_id",
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email"
+  },
+  {
+   "fieldname": "supplier_bank_details_tab",
+   "fieldtype": "Tab Break",
+   "label": "Party Bank Details"
+  },
+  {
+   "fieldname": "account_number",
+   "fieldtype": "Data",
+   "label": "Account No"
+  },
+  {
+   "fieldname": "bank",
+   "fieldtype": "Link",
+   "label": "Bank",
+   "options": "Bank"
+  },
+  {
+   "fieldname": "swift_code",
+   "fieldtype": "Data",
+   "label": "SWIFT Code"
+  },
+  {
+   "fieldname": "total_payment_amount",
+   "fieldtype": "Currency",
+   "label": "Total Payment Amount"
+  },
+  {
+   "fieldname": "column_break_sajy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "party_type",
+   "fieldtype": "Link",
+   "label": "Party Type",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "party",
+   "fieldtype": "Dynamic Link",
+   "label": "Party",
+   "options": "party_type"
+  },
+  {
+   "fieldname": "party_name",
+   "fieldtype": "Data",
+   "label": "Party Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Department",
+   "options": "Department",
+   "reqd": 1
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Total Amount"
+  },
+  {
+   "fieldname": "column_break_mlnn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "workflow_state",
+   "fieldtype": "Link",
+   "label": "Workflow State",
+   "options": "Workflow State"
+  },
+  {
+   "fetch_from": "issued_bank.account",
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "label": "Account",
+   "options": "Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplier_bank_account",
+   "fieldtype": "Link",
+   "label": "Bank Account",
+   "options": "Bank Account"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\"\r\n",
+   "fieldname": "receiving_bank",
+   "fieldtype": "Link",
+   "label": "Receiving Bank",
+   "options": "Bank Account"
+  },
+  {
+   "fetch_from": "receiving_bank.account",
+   "fieldname": "receiving_account",
+   "fieldtype": "Link",
+   "label": "Account",
+   "options": "Account",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "receiving_bank.bank_account_no",
+   "fieldname": "receving_account_no",
+   "fieldtype": "Data",
+   "label": "Account No",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:(doc.payment_type==\"Internal Transfer\" || doc.payment_type==\"Advance Pay\") && doc.account\r\n",
+   "fieldname": "issued_currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\"&& doc.receiving_account\r\n",
+   "fieldname": "receiving_currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\"\r\n",
+   "fieldname": "total_received_amount",
+   "fieldtype": "Currency",
+   "label": "Total Received Amount",
+   "options": "currency"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\"\r\n",
+   "fieldname": "total_received",
+   "fieldtype": "Currency",
+   "label": "Total Received (Company Currency)",
+   "options": "Company:company:default_currency"
+  },
+  {
+   "fieldname": "connections_tab",
+   "fieldtype": "Tab Break",
+   "label": "Connections"
   }
  ],
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
- "links": [],
- "modified": "2023-02-04 09:59:11.402392",
+ "links": [
+  {
+   "link_doctype": "Payment Entry",
+   "link_fieldname": "payment_request_form"
+  },
+  {
+   "link_doctype": "Journal Entry",
+   "link_fieldname": "custom_payment_request_form"
+  }
+ ],
+ "modified": "2025-07-09 21:58:56.350480",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Form",
@@ -160,6 +476,16 @@
    "read": 1,
    "report": 1,
    "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
    "share": 1,
    "write": 1
   }

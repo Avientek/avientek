@@ -102,7 +102,8 @@ fixtures = [
 					"Sales Order-custom_quote_type","Sales Invoice-custom_quote_type",
 					"Delivery Note-custom_customers_purchase_order",
 					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company",
-					"Selling Settings-custom_applicable_date"
+					"Selling Settings-custom_applicable_date","Department-custom_payment_approver",
+					"Journal Entry-custom_payment_request_form"
 				),
 			]
 		],
