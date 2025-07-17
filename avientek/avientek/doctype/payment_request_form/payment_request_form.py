@@ -2,6 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
+import io
+import requests
+from pypdf import PdfMerger
+from bs4 import BeautifulSoup
 from frappe.utils.pdf import get_pdf
 from frappe.utils.file_manager import save_file
 import json
@@ -409,3 +413,71 @@ def create_journal_entry(source_name, target_doc=None, args=None):
 
     return target_doc
 
+@frappe.whitelist()
+def generate_payment_pdf_file(docname):
+    if not frappe.has_permission("Payment Request Form", "read", doc=docname):
+        frappe.throw("Not permitted")
+
+    doc = frappe.get_doc("Payment Request Form", docname)
+    base_url = frappe.utils.get_url()
+    session_cookie = frappe.local.request.cookies.get("sid")
+    headers = {"Cookie": f"sid={session_cookie}"}
+
+    merger = PdfMerger()
+
+    # 1️⃣ Merge the print format PDF first
+    try:
+        print_format_pdf = frappe.get_print(
+            "Payment Request Form",
+            docname,
+            print_format="PAYMENT VOUCHER",
+            as_pdf=True
+        )
+        merger.append(io.BytesIO(print_format_pdf))
+    except Exception as e:
+        frappe.log_error(f"Error merging print format PDF: {e}")
+
+    # 2️⃣ Loop through each child row
+    for row in doc.payment_references:
+        # ✅ First: Merge PDFs from reference_attachment (HTML with <a href>)
+        html = row.reference_attachment
+        if html:
+            try:
+                soup = BeautifulSoup(html, "html.parser")
+                links = [a['href'] for a in soup.find_all('a', href=True)]
+                for href in links:
+                    file_url = href if href.startswith("http") else base_url + href
+                    try:
+                        res = requests.get(file_url, headers=headers, verify=False)
+                        if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
+                            merger.append(io.BytesIO(res.content))
+                    except Exception as e:
+                        frappe.log_error(f"Error fetching reference_attachment PDF from {file_url}: {e}")
+            except Exception as e:
+                frappe.log_error(f"Error parsing reference_attachment HTML: {e}")
+
+        # ✅ Second: Merge `row.attachment` if it exists and is a PDF
+        if row.attachment:
+            try:
+                file_url = row.attachment if row.attachment.startswith("http") else base_url + row.attachment
+                res = requests.get(file_url, headers=headers, verify=False)
+                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
+                    merger.append(io.BytesIO(res.content))
+            except Exception as e:
+                frappe.log_error(f"Error fetching attachment PDF from {file_url}: {e}")
+
+    # 3️⃣ Save the merged PDF
+    output = io.BytesIO()
+    merger.write(output)
+    merger.close()
+    output.seek(0)
+
+    file_doc = save_file(
+        fname=f"{docname}_combined.pdf",
+        content=output.read(),
+        dt="Payment Request Form",
+        dn=docname,
+        is_private=0
+    )
+
+    return file_doc.file_url

@@ -55,6 +55,24 @@ frappe.ui.form.on('Payment Request Form', {
     },
     
     refresh: function(frm) {
+        if (frm.doc.payment_type == "Pay" && !frm.doc.__islocal) {
+            frm.add_custom_button(__('Download Combined PDF'), function () {
+            frappe.call({
+                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.generate_payment_pdf_file",
+                args: {
+                    docname: frm.doc.name
+                },
+                callback: function(r) {
+                    if (r.message) {
+                        window.open(r.message);
+                    } else {
+                        frappe.msgprint("Failed to generate PDF.");
+                    }
+                }
+            });
+        });
+        }
+        
         if (frm.doc.docstatus === 0 ) {
             frm.add_custom_button(
                 __("Purchase Order"),
