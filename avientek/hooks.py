@@ -88,7 +88,8 @@ fixtures = [
 					"Quotation-custom_company_currency",
 					"Quotation Item-custom_special_rate",
 					"Quotation Item-custom_final_valuation_rate",
-					"Delivery Note-custom_customers_purchase_order"
+					"Delivery Note-custom_customers_purchase_order",
+					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company"
 				),
 			]
 		],
