@@ -103,8 +103,12 @@ fixtures = [
 					"Delivery Note-custom_customers_purchase_order",
 					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company",
 					"Selling Settings-custom_applicable_date","Department-custom_payment_approver",
-					"Journal Entry-custom_payment_request_form"
-				),
+					"Journal Entry-custom_payment_request_form",
+					"Quotation-custom_column_break_gasyq","Quotation-custom_total_shipping_value",
+					"Quotation-custom_column_break_r7uqo","Quotation-custom_total_finance_value",
+					"Quoation-custom_total_transport_value","Quoation-custom_total_reward_value",
+					"Quotation-custom_total_incentive_value","Quotation-custom_total_margin_value"
+     ),
 			]
 		],
 	},
