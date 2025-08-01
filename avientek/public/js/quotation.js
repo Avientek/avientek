@@ -50,8 +50,23 @@ function update_rates(frm,cdt,cdn){
         // if (!frm.doc.amended_from){
         frappe.model.set_value(row.doctype,row.name, 'base_price_list_rate',row.usd_price_list_rate_with_margin*plc*conv)
         frappe.model.set_value(row.doctype,row.name, 'custom_duty_charges',duty)
-        frappe.model.set_value(row.doctype,row.name,'custom_standard_price_',row.price_list_rate)
-        frappe.model.set_value(row.doctype,row.name,'custom_special_price',row.price_list_rate)
+        let price_list_currency = cur_frm.doc.price_list_currency;
+        let customer_currency = cur_frm.doc.currency;
+        let price_list_exchange_rate = cur_frm.doc.plc_conversion_rate || 1; // Price List Exchange Rate
+
+        if (customer_currency === price_list_currency) {
+            // No conversion needed
+            frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', row.price_list_rate);
+            frappe.model.set_value(row.doctype, row.name, 'custom_special_price', row.price_list_rate);
+        } else {
+            // Convert using Price List Exchange Rate
+            let converted_price = row.price_list_rate * price_list_exchange_rate;
+            frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', converted_price);
+            frappe.model.set_value(row.doctype, row.name, 'custom_special_price', converted_price);
+        }
+
+        // frappe.model.set_value(row.doctype,row.name,'custom_standard_price_',row.price_list_rate)
+        // frappe.model.set_value(row.doctype,row.name,'custom_special_price',row.price_list_rate)
         
     },100)
 
@@ -316,10 +331,15 @@ function calculate_brand_summary(frm) {
     frm.clear_table('custom_brand_summary');
 
     let total_summary = {
+        shipping: 0,
+        finance: 0,
+        transport: 0,
+        reward: 0,
+        incentive: 0,
+        margin: 0,
+        customs: 0,
         total_cost: 0,
         total_selling: 0,
-        // margin: 0,
-        // margin_percent: 0,
         count: 0
     };
 
@@ -339,23 +359,35 @@ function calculate_brand_summary(frm) {
             reward_percent: data.reward_percent / count,
             incentive: data.incentive,
             incentive_percent: data.incentive_percent / count,
-            customs_: data.customs,
+            customs: data.customs,
+            customs_: data.customs_percent / count,
             total_cost: data.total_cost,
             total_selling: data.total_selling,
             margin: data.margin,
             margin_percent: data.margin_percent / count
         });
-
+        total_summary.shipping += data.shipping;
+        total_summary.finance += data.finance;
+        total_summary.transport += data.transport;
+        total_summary.reward += data.reward;
+        total_summary.incentive += data.incentive;
+        total_summary.margin += data.margin;
         total_summary.total_cost += data.total_cost;
         total_summary.total_selling += data.total_selling;
-        // total_summary.margin += data.margin;
-        // total_summary.margin_percent += data.margin_percent;
         total_summary.count += count;
+        console.log(data.shipping)
+        console.log("shipping",total_summary.shipping);
     });
 
     frm.refresh_field('custom_brand_summary');
 
     // Set total fields on form
+    frm.set_value('custom_total_shipping_value', total_summary.shipping);
+    frm.set_value('custom_total_finance_value', total_summary.finance);
+    frm.set_value('custom_total_transport_value', total_summary.transport);
+    frm.set_value('custom_total_reward_value', total_summary.reward);
+    frm.set_value('custom_total_incentive_value', total_summary.incentive);
+    frm.set_value('custom_total_margin_value', total_summary.margin);
     frm.set_value('custom_total_cost', total_summary.total_cost);
     frm.set_value('custom_total_selling', total_summary.total_selling);
     // frm.set_value('custom_total_margin_percent', total_summary.margin_percent / (total_summary.count || 1));
