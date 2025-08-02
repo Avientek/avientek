@@ -96,18 +96,19 @@ fixtures = [
 					"Quotation-custom_total_company_currency","Quotation-custom_column_break_d6xvc",
 					"Quotation-custom_total","Journal Entry-custom_sales_invoice",
 					"Sales Order Item-custom_incentive_value","Sales Invoice Item-custom_incentive_value",
-					"Quotation-custom_section_break_d9xy0","Quotation-custom_total_cost",
-					"Quotation-custom_column_break_tjozq","Quotation-custom_total_selling",
 					"Quotation-custom_next_state","Quotation-custom_quote_type",
 					"Sales Order-custom_quote_type","Sales Invoice-custom_quote_type",
 					"Delivery Note-custom_customers_purchase_order",
 					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company",
 					"Selling Settings-custom_applicable_date","Department-custom_payment_approver",
 					"Journal Entry-custom_payment_request_form",
-					"Quotation-custom_column_break_gasyq","Quotation-custom_total_shipping_value",
-					"Quotation-custom_column_break_r7uqo","Quotation-custom_total_finance_value",
-					"Quoation-custom_total_transport_value","Quoation-custom_total_reward_value",
-					"Quotation-custom_total_incentive_value","Quotation-custom_total_margin_value"
+     				"Quotation-custom_section_break_d9xy0","Quotation-custom_total_shipping_value",
+					"Quotation-custom_total_finance_value","Quoation-custom_total_transport_value",
+					"Quotation-custom_column_break_tjozq","Quoation-custom_total_reward_value",
+     				"Quotation-custom_total_incentive_value","Quotation-custom_total_margin_value",
+					"Quotation-custom_column_break_gasyq","Quotation-custom_total_customs_value",
+         			"Quotation-custom_total_cost","Quotation-custom_total_selling",
+					"Quotation-custom_auto_approve_ok","Quotation-custom_gm_approve_ok"
      ),
 			]
 		],
@@ -272,7 +273,7 @@ doc_events = {
     "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
     "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
     "Quotation": {
-        "before_submit":      "avientek.events.quotation.validate_margin_for_workflow",                   # server maths
+        "validate": "avientek.events.quotation.set_margin_flags"
     },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
 }

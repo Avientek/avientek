@@ -57,12 +57,18 @@ function update_rates(frm,cdt,cdn){
         if (customer_currency === price_list_currency) {
             // No conversion needed
             frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', row.price_list_rate);
-            frappe.model.set_value(row.doctype, row.name, 'custom_special_price', row.price_list_rate);
+            if (!row.custom_special_price || row.custom_special_price == row.price_list_rate) {
+                frappe.model.set_value(row.doctype, row.name, 'custom_special_price', row.price_list_rate);
+            }
+            // frappe.model.set_value(row.doctype, row.name, 'custom_special_price', row.price_list_rate);
         } else {
             // Convert using Price List Exchange Rate
             let converted_price = row.price_list_rate * price_list_exchange_rate;
             frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', converted_price);
-            frappe.model.set_value(row.doctype, row.name, 'custom_special_price', converted_price);
+            if (!row.custom_special_price || row.custom_special_price == converted_price) {
+                frappe.model.set_value(row.doctype, row.name, 'custom_special_price', converted_price);
+            }
+            // frappe.model.set_value(row.doctype, row.name, 'custom_special_price', converted_price);
         }
 
         // frappe.model.set_value(row.doctype,row.name,'custom_standard_price_',row.price_list_rate)
@@ -151,6 +157,7 @@ frappe.db.get_value('Brand',{'brand':row.brand},['shipping','processing_charges'
     if (!row.custom_transport_ || row.custom_transport_ == b.custom_transport) {
         frappe.model.set_value(row.doctype, row.name, 'custom_transport_', b.custom_transport);
     }
+    
     frappe.call({
         'method': 'avientek.events.item.get_custom_duty',
         'args':{
@@ -372,6 +379,7 @@ function calculate_brand_summary(frm) {
         total_summary.reward += data.reward;
         total_summary.incentive += data.incentive;
         total_summary.margin += data.margin;
+        total_summary.customs += data.customs;
         total_summary.total_cost += data.total_cost;
         total_summary.total_selling += data.total_selling;
         total_summary.count += count;
@@ -388,6 +396,7 @@ function calculate_brand_summary(frm) {
     frm.set_value('custom_total_reward_value', total_summary.reward);
     frm.set_value('custom_total_incentive_value', total_summary.incentive);
     frm.set_value('custom_total_margin_value', total_summary.margin);
+    frm.set_value('custom_total_customs_value', total_summary.customs);
     frm.set_value('custom_total_cost', total_summary.total_cost);
     frm.set_value('custom_total_selling', total_summary.total_selling);
     // frm.set_value('custom_total_margin_percent', total_summary.margin_percent / (total_summary.count || 1));

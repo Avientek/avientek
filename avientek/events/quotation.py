@@ -1,6 +1,8 @@
 import frappe
 from frappe.utils import flt
 from frappe.utils import flt, cint
+from frappe.model.workflow import apply_workflow
+
 
 @frappe.whitelist()
 def get_last_transactions(customer, item_code):
@@ -169,111 +171,90 @@ def recalc_totals(doc):
     doc.total_std_margin= sum(it.total_std_margin or 0 for it in doc.items)
 
 
-def get_avg_margin_percent_from_sales_orders(brand, salesperson):
-    if not (brand and salesperson):
-        return 0.0
 
-    # Fetch applicable date from Selling Settings
-    applicable_date = frappe.db.get_single_value("Selling Settings", "custom_applicable_date")
-
-    conditions = """
-        so.docstatus = 1
-        AND st.sales_person = %(salesperson)s
-        AND soi.brand = %(brand)s
-        AND qi.brand = %(brand)s
-        AND qi.rate > 0
-    """
-    if applicable_date:
-        conditions += " AND so.transaction_date >= %(applicable_date)s"
-
-    quotation_items = frappe.db.sql(f"""
-        SELECT
-            so.name AS sales_order,
-            qi.parent AS quotation,
-            st.sales_person,
-            soi.brand,
-            qi.rate,
-            qi.custom_cogs,
-            qi.qty
-        FROM `tabSales Order` so
-        JOIN `tabSales Team` st ON st.parent = so.name
-        JOIN `tabSales Order Item` soi ON soi.parent = so.name
-        JOIN `tabQuotation Item` qi 
-            ON qi.parent = soi.prevdoc_docname 
-            AND qi.item_code = soi.item_code
-        WHERE {conditions}
-    """, {
-        "brand": brand,
-        "salesperson": salesperson,
-        "applicable_date": applicable_date
-    }, as_dict=True)
-
-    if not quotation_items:
-        return 0.0
-
-    margins = []
-    for row in quotation_items:
-        rate = flt(row.rate)
-        qty = flt(row.qty)
-        total_cogs = flt(row.custom_cogs)
-        cogs_per_unit = total_cogs / qty if qty else 0
-        margin_percent = (rate - cogs_per_unit) / rate * 100
-
-        frappe.errprint(f"[HISTORICAL MARGIN] SO: {row.sales_order}, Quotation: {row.quotation}, "
-                        f"Salesperson: {row.sales_person}, Brand: {row.brand}, "
-                        f"Rate: {rate}, Qty: {qty}, COGS: {total_cogs}, Margin: {margin_percent:.2f}%")
-        margins.append(margin_percent)
-
-    return sum(margins) / len(margins) if margins else 0.0
+# -*- coding: utf-8 -*-
+"""
+Compute two Boolean flags on Quotation so that Workflow conditions
+need only read doc.auto_approve_ok / doc.gm_approve_ok.
+"""
 
 
-def validate_margin_for_workflow(doc, method):
-    salesperson = None
-    if getattr(doc, "sales_team", None):
-        salesperson = doc.sales_team[0].sales_person
-    elif hasattr(doc, "sales_person"):
-        salesperson = doc.sales_person
+# ------------------------------------------------------------------ #
+#  Helper functions — you already wrote these
+# ------------------------------------------------------------------ #
+def rule_1_or_2_pass(doc):
+    """Return True when either margin Rule 1 or Rule 2 passes."""
+    salesperson = (
+        doc.sales_team[0].sales_person
+        if doc.get("sales_team")
+        else doc.get("sales_person")
+    )
 
-    requires_director_approval = False
-    condition_3_passed = False
+    # --------------- helper for Rule 2 ------------------
+    def avg_margin(brand):
+        if not (brand and salesperson):
+            return 0
+        date_cut = frappe.db.get_single_value(
+            "Selling Settings", "custom_applicable_date"
+        )
+        cond = """
+            so.docstatus = 1
+            AND st.sales_person = %(sp)s
+            AND soi.brand = %(br)s
+            AND qi.rate > 0
+        """
+        if date_cut:
+            cond += " AND so.transaction_date >= %(dc)s"
 
+        rows = frappe.db.sql(
+            f"""
+            SELECT qi.rate, qi.custom_cogs, qi.qty
+              FROM `tabSales Order` so
+              JOIN `tabSales Team` st  ON st.parent = so.name
+              JOIN `tabSales Order Item` soi ON soi.parent = so.name
+              JOIN `tabQuotation Item`  qi
+                    ON qi.parent      = soi.prevdoc_docname
+                   AND qi.item_code   = soi.item_code
+             WHERE {cond}
+            """,
+            {"sp": salesperson, "br": brand, "dc": date_cut},
+            as_dict=True,
+        )
+        if not rows:
+            return 0
+        margins = [
+            (flt(r.rate) - flt(r.custom_cogs) / flt(r.qty or 1)) / flt(r.rate) * 100
+            for r in rows
+        ]
+        return sum(margins) / len(margins)
+
+    # --------------- apply rules over all items ----------
     for row in doc.items:
-        std_margin = flt(row.std_margin_per)
-        margin_value = flt(row.custom_margin_)
-        custom_margin = flt(row.custom_margin_value or 0)
-        selling_price = flt(row.custom_selling_price)
+        std = flt(row.std_margin_per)
+        if flt(row.custom_margin_) >= std:           # Rule 1
+            return True
+        if avg_margin(row.brand) >= std:             # Rule 2
+            return True
+    return False
 
-        # Condition 1
-        if margin_value >= std_margin:
-            frappe.errprint(f"[✔] Condition 1 passed for {row.item_code}")
-            continue
 
-        # Condition 2
-        avg_margin = get_avg_margin_percent_from_sales_orders(row.brand, salesperson)
-        frappe.errprint(f"[INFO] Avg margin for {row.brand}: {avg_margin:.2f}%")
-        if avg_margin >= std_margin:
-            frappe.errprint(f"[✔] Condition 2 passed for {row.item_code}")
-            continue
+def rule_3_pass(doc):
+    """Return True if GM is allowed to approve the quotation."""
+    for row in doc.items:
+        target = 0.20 * flt(row.custom_selling_price)
+        diff   = target - flt(row.custom_margin_value or 0)
+        if target and (diff / target) * 100 > 20:
+            return False          # >20 % below target → needs Director
+    return True
 
-        # Condition 3
-        margin_target = 0.2 * selling_price
-        margin_diff = margin_target - custom_margin
-        margin_percent_off = (margin_diff / margin_target) * 100 if margin_target else 0
 
-        frappe.errprint(f"[⚠] Condition 3 check → Target: {margin_target}, Actual: {custom_margin}, Off By: {margin_percent_off:.2f}%")
-
-        if margin_percent_off <= 20:
-            frappe.errprint(f"[⚠] Condition 3 passed → GM can approve directly")
-            condition_3_passed = True
-        else:
-            frappe.errprint("[⛔] Condition 3 failed → Director approval required")
-            requires_director_approval = True
-
-    # Workflow Enforcement
-    if doc.workflow_state == "Pending GM Approval":
-        if requires_director_approval:
-            doc.workflow_state = "Pending Director Approval"  # Force change
-            frappe.msgprint("Margin too low → Sent to Director Approval.")
-        else:
-            doc.workflow_state = "Approved"  # Directly approved
-            frappe.msgprint("GM approval successful → Quotation Approved.")
+# ------------------------------------------------------------------ #
+#                Doc-event hook – called on validate
+# ------------------------------------------------------------------ #
+def set_margin_flags(doc, method=None):
+    """
+    Compute & store the two Booleans so Workflow can read them
+    without evaluating Python in the Condition column.
+    """
+    doc.custom_auto_approve_ok = 1 if rule_1_or_2_pass(doc) else 0
+    doc.custom_gm_approve_ok   = 1 if rule_3_pass(doc)      else 0
