@@ -53,7 +53,7 @@ function update_rates(frm,cdt,cdn){
         let price_list_currency = cur_frm.doc.price_list_currency;
         let customer_currency = cur_frm.doc.currency;
         let price_list_exchange_rate = cur_frm.doc.plc_conversion_rate || 1; // Price List Exchange Rate
-
+        console.log("Price List rate copy: ",row.price_list_rate_copy)
         if (customer_currency === price_list_currency) {
             // No conversion needed
             frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', row.price_list_rate);
@@ -63,10 +63,11 @@ function update_rates(frm,cdt,cdn){
             // frappe.model.set_value(row.doctype, row.name, 'custom_special_price', row.price_list_rate);
         } else {
             // Convert using Price List Exchange Rate
-            let converted_price = row.price_list_rate * price_list_exchange_rate;
-            frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', converted_price);
-            if (!row.custom_special_price || row.custom_special_price == converted_price) {
-                frappe.model.set_value(row.doctype, row.name, 'custom_special_price', converted_price);
+            // let converted_price = row.price_list_rate * price_list_exchange_rate;
+            console.log(row.price_list_rate_copy)
+            frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', row.price_list_rate_copy);
+            if (!row.custom_special_price || row.custom_special_price == price_list_rate_copy) {
+                frappe.model.set_value(row.doctype, row.name, 'custom_special_price', row.price_list_rate_copy);
             }
             // frappe.model.set_value(row.doctype, row.name, 'custom_special_price', converted_price);
         }
