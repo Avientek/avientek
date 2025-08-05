@@ -193,10 +193,12 @@ def rule_1_or_2_pass(doc):
     # --------------- helper for Rule 2 ------------------
     def avg_margin(brand):
         if not (brand and salesperson):
+            frappe.errprint(f"Brand {brand} or salesperson missing → avg_margin = 0")
             return 0
         date_cut = frappe.db.get_single_value(
             "Selling Settings", "custom_applicable_date"
         )
+        frappe.errprint(f"Brand {brand} salesperson {salesperson} date_cut {date_cut}")
         cond = """
             so.docstatus = 1
             AND st.sales_person = %(sp)s
@@ -220,21 +222,33 @@ def rule_1_or_2_pass(doc):
             {"sp": salesperson, "br": brand, "dc": date_cut},
             as_dict=True,
         )
+        frappe.errprint(f"Brand {brand} salesperson {salesperson} rows: {rows}")
         if not rows:
+            frappe.errprint(f"No previous sales orders found for Brand: {brand}")
             return 0
         margins = [
-            (flt(r.rate) - flt(r.custom_cogs) / flt(r.qty or 1)) / flt(r.rate) * 100
+            # (flt(r.rate) - flt(r.custom_cogs) / flt(r.qty or 1)) / flt(r.rate) * 100
+            ((flt(r.rate) - (flt(r.custom_cogs) / flt(r.qty or 1))) / flt(r.rate)) * 100
+
             for r in rows
         ]
+        frappe.errprint(f"Brand {brand} margins: {margins}")
+        frappe.errprint(f"Brand {brand} margins: {sum(margins) / len(margins)}")
         return sum(margins) / len(margins)
 
     # --------------- apply rules over all items ----------
     for row in doc.items:
         std = flt(row.std_margin_per)
-        if flt(row.custom_margin_) >= std:           # Rule 1
+        frappe.errprint(f"Checking item {row.item_code} (Brand: {row.brand}) → Std Margin: {std}, Item Margin: {row.custom_margin_}")
+
+        if flt(row.custom_margin_) >= std:
+            frappe.errprint(f"Rule 1 passed for item {row.item_code} → Item Margin: {row.custom_margin_} >= Std Margin: {std}")# Rule 1
             return True
-        if avg_margin(row.brand) >= std:             # Rule 2
+        brand_avg_margin = avg_margin(row.brand)
+        if brand_avg_margin >= std:
+            frappe.errprint(f"Rule 2 passed for item {row.item_code} → Avg Margin: {brand_avg_margin} >= Std Margin: {std}")
             return True
+        frappe.errprint(f"No rule passed for item {row.item_code}")
     return False
 
 
@@ -244,7 +258,10 @@ def rule_3_pass(doc):
         target = 0.20 * flt(row.custom_selling_price)
         diff   = target - flt(row.custom_margin_value or 0)
         if target and (diff / target) * 100 > 20:
-            return False          # >20 % below target → needs Director
+            frappe.errprint(f"Rule 3 failed for item {row.item_code} → {diff / target * 100}% below target margin")
+            return False
+    frappe.errprint("Rule 3 passed for all items")
+
     return True
 
 
