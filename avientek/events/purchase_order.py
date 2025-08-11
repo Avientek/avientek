@@ -416,7 +416,7 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "exchange_rate": source.conversion_rate,
             "document_reference": sales_order,
             "currency": source.currency,
-            "reference_attachment": attachment_html
+            # "reference_attachment": attachment_html
         })
 
         # 4. Calculate totals

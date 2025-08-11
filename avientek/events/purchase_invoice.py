@@ -63,7 +63,7 @@ def create_payment_request(source_name, target_doc=None, args=None):
         # Add row to Payment References
         target.append("payment_references", {
             "reference_doctype": "Purchase Invoice",
-            "reference_name": source.bill_no,
+            "reference_name": source.name,
             "total_amount": source.total,
             "payment_amount": source.total,
             "outstanding_amount": source.base_total,
@@ -72,7 +72,7 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "currency": source.currency,
             "due_date": source.due_date,
             "exchange_rate": source.conversion_rate,
-            "reference_attachment": attachment_html
+            # "reference_attachment": attachment_html
         })
 
         # Set totals

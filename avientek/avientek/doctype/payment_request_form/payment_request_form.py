@@ -94,21 +94,25 @@ def get_outstanding_reference_documents(args):
     if isinstance(args, str):
         args = json.loads(args)
 
-    supplier_status = get_supplier_block_status(args["party"])
-    if supplier_status["on_hold"]:
-        if supplier_status["hold_type"] == "All":
-            return []
-        elif supplier_status["hold_type"] == "Payments":
-            if not supplier_status["release_date"] or getdate(nowdate()) <= supplier_status["release_date"]:
+    if args.get("party_type") == "Supplier":
+        supplier_status = get_supplier_block_status(args["party"])
+        if supplier_status["on_hold"]:
+            if supplier_status["hold_type"] == "All":
                 return []
+            elif supplier_status["hold_type"] == "Payments":
+                if not supplier_status["release_date"] or getdate(nowdate()) <= supplier_status["release_date"]:
+                    return []
+
 
     ple = DocType("Payment Ledger Entry")
     company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
 
     common_filter = [
-        ple.party_type == "Supplier",
-        ple.party == args.get("party")
+        ple.party_type == args.get("party_type"),
+        ple.party == args.get("party"),
+        ple.company == args.get("company")  # ✅ Add this line
     ]
+
 
     query_voucher_amount = (
         frappe.qb.from_(ple)
@@ -188,106 +192,33 @@ def get_outstanding_reference_documents(args):
 
     # ▶ Enhance data with Purchase Invoice details if applicable
     for row in voucher_outstandings:
-        if row.get("voucher_type") == "Purchase Invoice":
-            invoice = frappe.get_value(
-                "Purchase Invoice",
-                row.get("voucher_no"),
-                ["bill_no", "bill_date", "total", "base_total","currency"],
-                as_dict=True
-            )
-            attachment = frappe.get_all(
-                "File",
-                filters={
-                    "attached_to_doctype": "Purchase Invoice",
-                    "attached_to_name": row.get("voucher_no")
-                },
-                fields=["file_url"],
-                order_by="creation asc",
-                limit=1
-            )
-            frappe.errprint(f"Invoice details : {invoice}")
-            purchase_order = frappe.get_value(
-                "Purchase Invoice Item",
-                {
-                    "parent": row.get("voucher_no")
-                },
-                fieldname="purchase_order",
-                order_by="idx asc",                    # first item in the table
-            )
-            frappe.errprint(f"Linked PO       : {purchase_order}")
-            links = []
-            if attachment:
-                links.append(
-                    f'<a href="{attachment[0]["file_url"]}" target="_blank">Invoice Attachment</a>'
+        voucher_type = row.get("voucher_type")
+        voucher_no = row.get("voucher_no")
+
+        try:
+            invoice = frappe.get_doc(voucher_type, voucher_no)
+            meta = frappe.get_meta(voucher_type)
+
+            # Fallbacks for all voucher types
+            row["bill_no"] = invoice.get("bill_no") or invoice.name
+            row["posting_date"] = invoice.get("posting_date")
+            row["invoice_amount"] = invoice.get("total") or invoice.get("grand_total")
+            row["outstanding"] = invoice.get("base_total") or row.get("outstanding")
+            row["total_amount"] = row["invoice_amount"]
+            row["currency"] = invoice.get("currency")
+            row["exchange_rate"] = invoice.get("conversion_rate")
+            if voucher_type == "Purchase Invoice":
+                purchase_order = frappe.get_value(
+                    "Purchase Invoice Item",
+                    {"parent": voucher_no},
+                    "purchase_order",
+                    order_by="idx asc"
                 )
-            if purchase_order:
-                try:
-                    po_pdf = get_pdf(
-                        frappe.get_print(
-                            "Purchase Order",
-                            purchase_order,
-                            print_format="Avientek PO",
-                        )
-                    )
-                    po_file = save_file(
-                        fname=f"{purchase_order}-Print.pdf",
-                        content=po_pdf,
-                        dt="Purchase Invoice",
-                        dn=row.get("voucher_no"),
-                        is_private=1,
-                    )
-                    links.append(
-                        f'<a href="{po_file.file_url}" target="_blank">Purchase Order</a>'
-                    )
-                except Exception:
-                    frappe.log_error(
-                        frappe.get_traceback(), "Failed to generate/attach PO PDF"
-                    )
-            quotation = None
-            quotation_pdf_url = None
-            if purchase_order:
-                sales_order = frappe.db.get_value(
-                    "Purchase Order Item", {"parent": purchase_order}, "sales_order"
-                )
-                quotation = frappe.db.get_value(
-                    "Sales Order Item", {"parent": sales_order}, "prevdoc_docname"
-                ) if sales_order else None
+                row["document_reference"] = purchase_order
 
-            if quotation:
-                try:
-                    quotation_pdf = get_pdf(
-                        frappe.get_print(
-                            "Quotation", quotation, print_format="Quotation New"
-                        )
-                    )
-                    quotation_file = save_file(
-                        fname=f"{quotation}-Print.pdf",
-                        content=quotation_pdf,
-                        dt="Purchase Invoice",
-                        dn=row.get("voucher_no"),
-                        is_private=1,
-                    )
-                    links.append(
-                        f'<a href="{quotation_file.file_url}" target="_blank">Quotation</a>'
-                    )
-                except Exception:
-                    frappe.log_error(
-                        frappe.get_traceback(), "Failed to generate/attach Quotation PDF"
-                    )
-            if invoice:
-                row["bill_no"] = invoice.bill_no
-                row["posting_date"] = invoice.bill_date
-                row["invoice_amount"] = invoice.total
-                row["outstanding"] = invoice.base_total
-                row["total_amount"] = invoice.total
-                row["currency"] = invoice.currency
-                row["exchange_rate"] = frappe.get_value("Purchase Invoice", row.get("voucher_no"), "conversion_rate")
 
-            if purchase_order:
-                row["document_reference"]  = purchase_order
-            if links:
-                row["reference_attachment"] = "<br>".join(links)
-
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), f"Error processing voucher {voucher_type} {voucher_no}")
     return voucher_outstandings
 
 def get_formatted_supplier_address(address_name):
@@ -425,7 +356,7 @@ def generate_payment_pdf_file(docname):
 
     merger = PdfMerger()
 
-    # 1️⃣ Merge the print format PDF first
+    # 1️⃣ Merge the Payment Request Form print format first
     try:
         print_format_pdf = frappe.get_print(
             "Payment Request Form",
@@ -437,34 +368,59 @@ def generate_payment_pdf_file(docname):
     except Exception as e:
         frappe.log_error(f"Error merging print format PDF: {e}")
 
-    # 2️⃣ Loop through each child row
+    # 2️⃣ Loop through each payment reference row
     for row in doc.payment_references:
-        # ✅ First: Merge PDFs from reference_attachment (HTML with <a href>)
-        html = row.reference_attachment
-        if html:
-            try:
-                soup = BeautifulSoup(html, "html.parser")
-                links = [a['href'] for a in soup.find_all('a', href=True)]
-                for href in links:
-                    file_url = href if href.startswith("http") else base_url + href
-                    try:
-                        res = requests.get(file_url, headers=headers, verify=False)
-                        if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
-                            merger.append(io.BytesIO(res.content))
-                    except Exception as e:
-                        frappe.log_error(f"Error fetching reference_attachment PDF from {file_url}: {e}")
-            except Exception as e:
-                frappe.log_error(f"Error parsing reference_attachment HTML: {e}")
+        voucher_no = row.reference_name
 
-        # ✅ Second: Merge `row.attachment` if it exists and is a PDF
-        if row.attachment:
-            try:
-                file_url = row.attachment if row.attachment.startswith("http") else base_url + row.attachment
-                res = requests.get(file_url, headers=headers, verify=False)
+        # ✅ Get Purchase Invoice Attachment
+        try:
+            attachment = frappe.get_all(
+                "File",
+                filters={
+                    "attached_to_doctype": "Purchase Invoice",
+                    "attached_to_name": voucher_no
+                },
+                fields=["file_url"],
+                order_by="creation asc",
+                limit=1
+            )
+            if attachment:
+                file_url = attachment[0]["file_url"]
+                res = requests.get(file_url if file_url.startswith("http") else base_url + file_url, headers=headers, verify=False)
                 if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
                     merger.append(io.BytesIO(res.content))
-            except Exception as e:
-                frappe.log_error(f"Error fetching attachment PDF from {file_url}: {e}")
+        except Exception as e:
+            frappe.log_error(f"Error fetching Purchase Invoice attachment for {voucher_no}: {e}")
+
+        # ✅ Purchase Order PDF
+        try:
+            purchase_order = frappe.get_value(
+                "Purchase Invoice Item",
+                {"parent": voucher_no},
+                fieldname="purchase_order",
+                order_by="idx asc",
+            )
+            if purchase_order:
+                po_pdf = get_pdf(
+                    frappe.get_print("Purchase Order", purchase_order, print_format="Avientek PO")
+                )
+                merger.append(io.BytesIO(po_pdf))
+
+                # ✅ Quotation PDF (via Sales Order)
+                sales_order = frappe.db.get_value(
+                    "Purchase Order Item", {"parent": purchase_order}, "sales_order"
+                )
+                quotation = frappe.db.get_value(
+                    "Sales Order Item", {"parent": sales_order}, "prevdoc_docname"
+                ) if sales_order else None
+
+                if quotation:
+                    quotation_pdf = get_pdf(
+                        frappe.get_print("Quotation", quotation, print_format="Quotation New")
+                    )
+                    merger.append(io.BytesIO(quotation_pdf))
+        except Exception as e:
+            frappe.log_error(f"Error fetching PO/Quotation PDFs for {voucher_no}: {e}")
 
     # 3️⃣ Save the merged PDF
     output = io.BytesIO()

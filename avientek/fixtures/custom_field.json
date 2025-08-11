@@ -2024,7 +2024,7 @@
   "insert_after": "custom_standard_price_",
   "is_system_generated": 0,
   "is_virtual": 0,
-  "label": "Special Price",
+  "label": "Special Price(Billing Currency)",
   "length": 0,
   "link_filters": null,
   "mandatory_depends_on": null,
