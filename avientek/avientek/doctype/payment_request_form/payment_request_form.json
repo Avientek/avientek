@@ -55,6 +55,7 @@
   "total_outstanding_amount",
   "total_received",
   "column_break_voiu",
+  "deduction",
   "approved_amount",
   "more_information_section",
   "remarks",
@@ -190,6 +191,7 @@
   {
    "fieldname": "approved_amount",
    "fieldtype": "Currency",
+   "hidden": 1,
    "label": "Approved Amount"
   },
   {
@@ -253,6 +255,7 @@
    "label": "Currency"
   },
   {
+   "fetch_from": "company.default_currency",
    "fieldname": "currency",
    "fieldtype": "Link",
    "label": "Currency",
@@ -446,6 +449,12 @@
    "fieldname": "connections_tab",
    "fieldtype": "Tab Break",
    "label": "Connections"
+  },
+  {
+   "fieldname": "deduction",
+   "fieldtype": "Currency",
+   "label": "Deduction",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -460,7 +469,7 @@
    "link_fieldname": "custom_payment_request_form"
   }
  ],
- "modified": "2025-07-09 21:58:56.350480",
+ "modified": "2025-08-13 14:03:32.195300",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Form",
@@ -490,6 +499,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

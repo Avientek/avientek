@@ -18,6 +18,7 @@
   "column_break_4",
   "total_amount",
   "payment_amount",
+  "deduction",
   "payment_percentage",
   "outstanding_amount",
   "currency",
@@ -143,12 +144,18 @@
    "fieldname": "attachment",
    "fieldtype": "Attach",
    "label": "Attachment"
+  },
+  {
+   "fieldname": "deduction",
+   "fieldtype": "Currency",
+   "label": "Deduction",
+   "options": "currency"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-08-11 14:45:39.933605",
+ "modified": "2025-08-13 11:40:58.826183",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Reference",

@@ -108,7 +108,8 @@ fixtures = [
      				"Quotation-custom_total_incentive_value","Quotation-custom_total_margin_value",
 					"Quotation-custom_column_break_gasyq","Quotation-custom_total_customs_value",
          			"Quotation-custom_total_cost","Quotation-custom_total_selling",
-					"Quotation-custom_auto_approve_ok","Quotation-custom_gm_approve_ok"
+					"Quotation-custom_auto_approve_ok","Quotation-custom_gm_approve_ok",
+					"Quotation-custom_quote_project"
      ),
 			]
 		],
@@ -163,7 +164,9 @@ doctype_js = {
 	# "Purchase Invoice": "public/js/purchase_invoice.js"
 	# "Purchase Receipt" : "public/js/purchase_receipt.js",
 }
-doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js"}
+doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
+	"Quotation": "public/js/quotation_list.js"
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
