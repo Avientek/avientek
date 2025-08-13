@@ -73,21 +73,13 @@ frappe.ui.form.on('Payment Request Form', {
     refresh: function(frm) {
         if (frm.doc.payment_type == "Pay" && !frm.doc.__islocal) {
             frm.add_custom_button(__('Download Combined PDF'), function () {
-            frappe.call({
-                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.generate_payment_pdf_file",
-                args: {
-                    docname: frm.doc.name
-                },
-                callback: function(r) {
-                    if (r.message) {
-                        window.open(r.message);
-                    } else {
-                        frappe.msgprint("Failed to generate PDF.");
-                    }
-                }
+                window.open(
+                    `/api/method/avientek.avientek.doctype.payment_request_form.payment_request_form.download_payment_pdf?docname=${encodeURIComponent(frm.doc.name)}`,
+                    '_blank'
+                );
             });
-        });
         }
+
         
         if (frm.doc.docstatus === 0 ) {
             frm.add_custom_button(
@@ -415,6 +407,71 @@ frappe.ui.form.on('Payment Request Form', {
             is_updating_fields = false;
         });
     },
+    total_payment_amount: function(frm) {
+        if (is_updating_fields) return;
+        is_updating_fields = true;
+
+        // frm.set_value("total_payment_amount", frm.doc.total_amount);
+
+        // Step 1: Get company currency
+        frappe.db.get_value('Company', frm.doc.company, 'default_currency')
+        .then(({ message }) => {
+            const company_currency = message.default_currency;
+            const issue_currency = frm.doc.issued_currency;
+            const receive_currency = frm.doc.receiving_currency;
+            let deduction = flt(frm.doc.total_amount) - flt(frm.doc.total_payment_amount);
+            frm.set_value("deduction", deduction);
+            // Step 2: Convert total_payment_amount to company currency
+            return frappe.call({
+                method: 'erpnext.setup.utils.get_exchange_rate',
+                args: {
+                    from_currency: issue_currency,
+                    to_currency: company_currency,
+                    posting_date: frappe.datetime.now_date(),
+                    company: frm.doc.company
+                }
+            }).then(outstanding_rate_response => {
+                const outstanding_rate = outstanding_rate_response.message || 1;
+                const total_outstanding = frm.doc.total_payment_amount * outstanding_rate;
+                frm.set_value("total_outstanding_amount", total_outstanding);
+
+                // Step 3: Convert to receiving currency
+                return frappe.call({
+                    method: 'erpnext.setup.utils.get_exchange_rate',
+                    args: {
+                        from_currency: issue_currency,
+                        to_currency: receive_currency,
+                        posting_date: frappe.datetime.now_date(),
+                        company: frm.doc.company
+                    }
+                }).then(received_rate_response => {
+                    const received_rate = received_rate_response.message || 1;
+                    const total_received = frm.doc.total_payment_amount * received_rate;
+                    frm.set_value("total_received_amount", total_received);
+
+                    // Step 4: Convert to company currency again
+                    return frappe.call({
+                        method: 'erpnext.setup.utils.get_exchange_rate',
+                        args: {
+                            from_currency: receive_currency,
+                            to_currency: company_currency,
+                            posting_date: frappe.datetime.now_date(),
+                            company: frm.doc.company
+                        }
+                    }).then(received_company_rate_response => {
+                        const received_company_rate = received_company_rate_response.message || 1;
+                        const total_received_company = total_received * received_company_rate;
+                        frm.set_value("total_received", total_received_company);
+
+                        is_updating_fields = false;
+                    });
+                });
+            });
+        }).catch(() => {
+            is_updating_fields = false;
+        });
+
+    },                 
 
     total_received_amount: function(frm) {
         if (is_updating_fields) return;
@@ -604,7 +661,9 @@ frappe.ui.form.on('Payment Request Reference', {
     if (perc > 0 && row.total_amount) {
         row.payment_amount = flt(row.total_amount) * perc;
         row.outstanding_amount = row.payment_amount * flt(row.exchange_rate || 1);
+        row.deduction = flt(row.total_amount) - flt(row.payment_amount);
         console.log("Outstanding Amount", row.outstanding_amount)
+        console.log("Deduction", row.deduction);
         frm.refresh_field("payment_references");
 
         let total_payment = 0;

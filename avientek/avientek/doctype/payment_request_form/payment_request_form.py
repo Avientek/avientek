@@ -344,8 +344,12 @@ def create_journal_entry(source_name, target_doc=None, args=None):
 
     return target_doc
 
+
+
 @frappe.whitelist()
-def generate_payment_pdf_file(docname):
+def download_payment_pdf(docname):
+    """Streams the combined PDF directly to the browser."""
+
     if not frappe.has_permission("Payment Request Form", "read", doc=docname):
         frappe.throw("Not permitted")
 
@@ -356,7 +360,7 @@ def generate_payment_pdf_file(docname):
 
     merger = PdfMerger()
 
-    # 1️⃣ Merge the Payment Request Form print format first
+    # Merge Payment Request Form
     try:
         print_format_pdf = frappe.get_print(
             "Payment Request Form",
@@ -368,11 +372,11 @@ def generate_payment_pdf_file(docname):
     except Exception as e:
         frappe.log_error(f"Error merging print format PDF: {e}")
 
-    # 2️⃣ Loop through each payment reference row
+    # Loop through references
     for row in doc.payment_references:
         voucher_no = row.reference_name
 
-        # ✅ Get Purchase Invoice Attachment
+        # Purchase Invoice Attachment
         try:
             attachment = frappe.get_all(
                 "File",
@@ -386,13 +390,16 @@ def generate_payment_pdf_file(docname):
             )
             if attachment:
                 file_url = attachment[0]["file_url"]
-                res = requests.get(file_url if file_url.startswith("http") else base_url + file_url, headers=headers, verify=False)
+                res = requests.get(
+                    file_url if file_url.startswith("http") else base_url + file_url,
+                    headers=headers, verify=False
+                )
                 if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
                     merger.append(io.BytesIO(res.content))
         except Exception as e:
             frappe.log_error(f"Error fetching Purchase Invoice attachment for {voucher_no}: {e}")
 
-        # ✅ Purchase Order PDF
+        # Purchase Order & Quotation PDFs
         try:
             purchase_order = frappe.get_value(
                 "Purchase Invoice Item",
@@ -406,7 +413,6 @@ def generate_payment_pdf_file(docname):
                 )
                 merger.append(io.BytesIO(po_pdf))
 
-                # ✅ Quotation PDF (via Sales Order)
                 sales_order = frappe.db.get_value(
                     "Purchase Order Item", {"parent": purchase_order}, "sales_order"
                 )
@@ -422,18 +428,12 @@ def generate_payment_pdf_file(docname):
         except Exception as e:
             frappe.log_error(f"Error fetching PO/Quotation PDFs for {voucher_no}: {e}")
 
-    # 3️⃣ Save the merged PDF
+    # Output merged PDF
     output = io.BytesIO()
     merger.write(output)
     merger.close()
     output.seek(0)
 
-    file_doc = save_file(
-        fname=f"{docname}_combined.pdf",
-        content=output.read(),
-        dt="Payment Request Form",
-        dn=docname,
-        is_private=0
-    )
-
-    return file_doc.file_url
+    frappe.local.response.filename = f"{docname}_combined.pdf"
+    frappe.local.response.filecontent = output.read()
+    frappe.local.response.type = "download"
