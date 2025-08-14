@@ -191,6 +191,8 @@ def get_outstanding_reference_documents(args):
     voucher_outstandings = cte_query.run(as_dict=True)
 
     # ▶ Enhance data with Purchase Invoice details if applicable
+    filtered_rows = []
+
     for row in voucher_outstandings:
         voucher_type = row.get("voucher_type")
         voucher_no = row.get("voucher_no")
@@ -199,14 +201,22 @@ def get_outstanding_reference_documents(args):
             invoice = frappe.get_doc(voucher_type, voucher_no)
             meta = frappe.get_meta(voucher_type)
 
-            # Fallbacks for all voucher types
-            row["bill_no"] = invoice.get("bill_no") or invoice.name
+            if voucher_type == "Purchase Invoice":
+                # Skip if no bill number
+                if not invoice.get("bill_no"):
+                    continue
+                row["bill_no"] = invoice.get("bill_no")
+            else:
+                # For other voucher types, use voucher number as bill number
+                row["bill_no"] = voucher_no
+
             row["posting_date"] = invoice.get("posting_date")
             row["invoice_amount"] = invoice.get("total") or invoice.get("grand_total")
             row["outstanding"] = invoice.get("base_total") or row.get("outstanding")
             row["total_amount"] = row["invoice_amount"]
             row["currency"] = invoice.get("currency")
             row["exchange_rate"] = invoice.get("conversion_rate")
+
             if voucher_type == "Purchase Invoice":
                 purchase_order = frappe.get_value(
                     "Purchase Invoice Item",
@@ -216,10 +226,13 @@ def get_outstanding_reference_documents(args):
                 )
                 row["document_reference"] = purchase_order
 
+            filtered_rows.append(row)
 
         except Exception:
             frappe.log_error(frappe.get_traceback(), f"Error processing voucher {voucher_type} {voucher_no}")
-    return voucher_outstandings
+
+    return filtered_rows
+
 
 def get_formatted_supplier_address(address_name):
     """
@@ -344,8 +357,6 @@ def create_journal_entry(source_name, target_doc=None, args=None):
 
     return target_doc
 
-
-
 @frappe.whitelist()
 def download_payment_pdf(docname):
     """Streams the combined PDF directly to the browser."""
@@ -426,7 +437,7 @@ def download_payment_pdf(docname):
                     )
                     merger.append(io.BytesIO(quotation_pdf))
         except Exception as e:
-            frappe.log_error(f"Error fetching PO/Quotation PDFs for {voucher_no}: {e}")
+            frappe.log_error(f"Error fetching Quotation PDFs for {voucher_no}: {e}")
 
     # Output merged PDF
     output = io.BytesIO()

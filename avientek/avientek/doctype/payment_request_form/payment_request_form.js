@@ -256,8 +256,8 @@ frappe.ui.form.on('Payment Request Form', {
 					$.each(r.message, function(i, d) {
                         let c = frm.add_child("payment_references");
                         c.reference_doctype = d.voucher_type;
-                        c.reference_name = d.voucher_no;  // Always use voucher_no for reference_name
-                        c.bill_no = d.bill_no;            // Display bill_no if available
+                        // c.reference_name = d.voucher_no;  // Always use voucher_no for reference_name
+                        c.reference_name = d.bill_no;            // Display bill_no if available
                         c.due_date = d.due_date;
                         c.invoice_date = d.posting_date;
                         c.total_amount = d.invoice_amount;
@@ -267,33 +267,19 @@ frappe.ui.form.on('Payment Request Form', {
                         c.currency = d.currency;
                         c.document_reference = d.document_reference
 ;
-                        // Optionally: c.reference_attachment = d.reference_attachment;
                     });
 					frm.refresh_fields();
-					frm.events.set_total_outstanding_amount(frm);
 					frm.events.set_total_payment_amount(frm);
 					frm.events.set_total_amount(frm);
                     frm.events.recalculate_totals(frm);
+                    frm.events.set_total_outstanding_amount(frm);
 
 				}
 			}
 		});
 	},
 
-	set_total_outstanding_amount: function(frm) {
-		console.log("outstanding_amount")
-		var total_outstanding_amount = 0.0;
-		var base_total_allocated_amount = 0.0;
-		$.each(frm.doc.payment_references || [], function(i, row) {
-			if (row.outstanding_amount) {
-				total_outstanding_amount += flt(row.outstanding_amount);
-			}
-		});
-		console.log("outstanding_amount",total_outstanding_amount)
-		frm.set_value("total_outstanding_amount", Math.abs(total_outstanding_amount));
-        frm.refresh_field("total_outstanding_amount");
-		// frm.set_value("base_total_allocated_amount", Math.abs(base_total_allocated_amount));
-	},
+	
 	set_total_payment_amount: function(frm) {
 		console.log("payment_amount")
 		var total_payment_amount = 0.0;
@@ -334,6 +320,18 @@ frappe.ui.form.on('Payment Request Form', {
         frm.set_value("total_outstanding_amount", total_outstanding);
         frm.set_value("total_amount", total_amount);
     },
+    set_total_outstanding_amount: function(frm) {
+		console.log("outstanding_amount")
+		var total_outstanding_amount = 0.0;
+		$.each(frm.doc.payment_references || [], function(i, row) {
+			if (row.outstanding_amount) {
+				total_outstanding_amount += flt(row.outstanding_amount);
+			}
+		});
+		console.log("outstanding_amount",total_outstanding_amount)
+		frm.set_value("total_outstanding_amount", Math.abs(total_outstanding_amount));
+        frm.refresh_field("total_outstanding_amount");
+	},
 
 	check_mandatory_to_fetch: function(frm) {
 		$.each(["Company", "Supplier"], function(i, field) {
@@ -682,6 +680,15 @@ frappe.ui.form.on('Payment Request Reference', {
 		frm.set_value("total_amount", total_amount);
 
     }
+    },
+    deduction: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        let total = flt(row.total_amount);
+        let deduction = flt(row.deduction);
+        row.payment_amount = total - deduction;
+        row.outstanding_amount = row.payment_amount * flt(row.exchange_rate || 1);
+        console.log("Payment Amount", row.payment_amount);
+        frm.refresh_field("payment_references"); // replace with your child table fieldname
     },
     payment_amount: function(frm, cdt, cdn) {
         frm.events.recalculate_totals(frm);

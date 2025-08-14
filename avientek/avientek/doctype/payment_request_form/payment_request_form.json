@@ -55,8 +55,8 @@
   "total_outstanding_amount",
   "total_received",
   "column_break_voiu",
-  "deduction",
   "approved_amount",
+  "deduction",
   "more_information_section",
   "remarks",
   "amended_from",
@@ -469,7 +469,7 @@
    "link_fieldname": "custom_payment_request_form"
   }
  ],
- "modified": "2025-08-13 14:03:32.195300",
+ "modified": "2025-08-14 10:03:55.142681",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Form",

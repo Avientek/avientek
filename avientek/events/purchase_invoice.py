@@ -15,7 +15,7 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "File",
             filters={
                 "attached_to_doctype": source.doctype,
-                "attached_to_name": source.name
+                "attached_to_name": source.bill_no
             },
             fields=["file_url"],
             order_by="creation asc",

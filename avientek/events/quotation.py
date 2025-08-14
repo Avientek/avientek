@@ -6,9 +6,10 @@ from frappe.model.workflow import apply_workflow
 
 @frappe.whitelist()
 def get_last_transactions(customer, item_code):
-    # Step 1: Get up to 5 Sales Invoices
+    # Step 1: Get up to 5 submitted Sales Invoices
     invoice_data = frappe.db.sql("""
-        SELECT 'Sales Invoice' as doctype, si.name as name, sii.rate, si.posting_date as date
+        SELECT 'Sales Invoice' AS doctype, si.name AS name, sii.rate, si.posting_date AS date,
+               sii.sales_order
         FROM `tabSales Invoice Item` sii
         JOIN `tabSales Invoice` si ON sii.parent = si.name
         WHERE si.customer = %s AND sii.item_code = %s AND si.docstatus = 1
@@ -16,23 +17,58 @@ def get_last_transactions(customer, item_code):
         LIMIT 5
     """, (customer, item_code), as_dict=True)
 
-    invoice_count = len(invoice_data)
-    remaining_count = 5 - invoice_count
+    # Step 2: Get Sales Orders that have never been invoiced (draft or submitted)
+    # Find all orders already linked to invoices
+    invoiced_orders = frappe.db.sql("""
+        SELECT DISTINCT sii.sales_order
+        FROM `tabSales Invoice Item` sii
+        JOIN `tabSales Invoice` si ON sii.parent = si.name
+        WHERE si.customer = %s AND sii.item_code = %s
+          AND sii.sales_order IS NOT NULL
+    """, (customer, item_code))
+    invoiced_orders = {row[0] for row in invoiced_orders if row[0]}
 
-    # Step 2: Get remaining Sales Orders if needed
+    remaining_count = 5 - len(invoice_data)
     order_data = []
+
     if remaining_count > 0:
         order_data = frappe.db.sql("""
-            SELECT 'Sales Order' as doctype, so.name as name, soi.rate, so.transaction_date as date
+            SELECT 'Sales Order' AS doctype, so.name AS name, soi.rate, so.transaction_date AS date
             FROM `tabSales Order Item` soi
             JOIN `tabSales Order` so ON soi.parent = so.name
-            WHERE so.customer = %s AND soi.item_code = %s AND so.docstatus = 1
+            WHERE so.customer = %(customer)s
+              AND soi.item_code = %(item_code)s
+              AND so.docstatus = 1
+              AND so.name NOT IN %(exclude_orders)s
             ORDER BY so.transaction_date DESC
-            LIMIT %s
-        """, (customer, item_code, remaining_count), as_dict=True)
+            LIMIT %(limit)s
+        """, {
+            "customer": customer,
+            "item_code": item_code,
+            "exclude_orders": tuple(invoiced_orders) if invoiced_orders else ("",),
+            "limit": remaining_count
+        }, as_dict=True)
 
-    # Step 3: Combine both
+    # Step 3: Combine
     combined_data = invoice_data + order_data
+
+    # Step 4: If no invoices at all, just show orders without invoices
+    if not invoice_data:
+        combined_data = frappe.db.sql("""
+            SELECT 'Sales Order' AS doctype, so.name AS name, soi.rate, so.transaction_date AS date
+            FROM `tabSales Order Item` soi
+            JOIN `tabSales Order` so ON soi.parent = so.name
+            WHERE so.customer = %(customer)s
+              AND soi.item_code = %(item_code)s
+              AND so.docstatus = 1
+              AND so.name NOT IN %(exclude_orders)s
+            ORDER BY so.transaction_date DESC
+            LIMIT 5
+        """, {
+            "customer": customer,
+            "item_code": item_code,
+            "exclude_orders": tuple(invoiced_orders) if invoiced_orders else ("",)
+        }, as_dict=True)
 
     return combined_data
 

@@ -6,7 +6,7 @@ frappe.listview_settings["Quotation"] = {
 			listview.page.fields_dict.quotation_to.get_query = function () {
 				return {
 					filters: {
-						name: ["in", ["Customer", "Lead", "Prospect"]],
+						name: ["in", ["Customer", "Prospect", "Lead"]],
 					},
 				};
 			};

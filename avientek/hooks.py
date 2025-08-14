@@ -104,9 +104,8 @@ fixtures = [
 					"Journal Entry-custom_payment_request_form",
      				"Quotation-custom_section_break_d9xy0","Quotation-custom_total_shipping_value",
 					"Quotation-custom_total_finance_value","Quotation-custom_total_transport_value",
-					"Quotation-custom_column_break_tjozq","Quotation-custom_total_reward_value",
-     				"Quotation-custom_total_incentive_value","Quotation-custom_total_margin_value",
-					"Quotation-custom_column_break_gasyq","Quotation-custom_total_customs_value",
+					"Quotation-custom_total_reward_value","Quotation-custom_total_incentive_value",
+					"Quotation-custom_column_break_tjozq","Quotation-custom_total_margin_value","Quotation-custom_total_customs_value",
          			"Quotation-custom_total_cost","Quotation-custom_total_selling",
 					"Quotation-custom_auto_approve_ok","Quotation-custom_gm_approve_ok",
 					"Quotation-custom_quote_project"
