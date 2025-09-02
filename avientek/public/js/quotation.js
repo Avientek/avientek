@@ -84,17 +84,17 @@ function update_rates(frm,cdt,cdn){
         },100)
         
 
-    frappe.model.set_value(row.doctype,row.name,'base_total_shipping',(row.base_shipping*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_processing_charges',(row.base_processing_charges*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_reward',(row.base_reward*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_levee',(row.base_levee*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'base_total_std_margin',(row.base_std_margin*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'base_total_shipping',(row.base_shipping*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'base_total_processing_charges',(row.base_processing_charges*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'base_total_reward',(row.base_reward*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'base_total_levee',(row.base_levee*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'base_total_std_margin',(row.base_std_margin*row.qty))
 
-    frappe.model.set_value(row.doctype,row.name,'total_shipping',(row.shipping*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_processing_charges',(row.processing_charges*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_reward',(row.reward*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_levee',(row.levee*row.qty))
-    frappe.model.set_value(row.doctype,row.name,'total_std_margin',(row.std_margin*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'total_shipping',(row.shipping*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'total_processing_charges',(row.processing_charges*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'total_reward',(row.reward*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'total_levee',(row.levee*row.qty))
+    // frappe.model.set_value(row.doctype,row.name,'total_std_margin',(row.std_margin*row.qty))
 
     frm.trigger('calculate_total')
 
@@ -396,6 +396,7 @@ function calculate_brand_summary(frm) {
     frm.set_value('custom_total_transport_value', total_summary.transport);
     frm.set_value('custom_total_reward_value', total_summary.reward);
     frm.set_value('custom_total_incentive_value', total_summary.incentive);
+    frm.set_value('custom_margin_total', total_summary.margin);
     frm.set_value('custom_total_margin_value', total_summary.margin);
     frm.set_value('custom_total_customs_value', total_summary.customs);
     frm.set_value('custom_total_cost', total_summary.total_cost);
@@ -608,15 +609,15 @@ price_list_rate_copy:function(frm,cdt,cdn){
     var row = locals[cdt][cdn]
     if(row.brand && row.price_list_rate_copy){
         // row.shipping = (flt(row.price_list_rate_copy) * flt(row.shipping_per) / 100) / frm.doc.conversion_rate;
-        row.base_shipping = row.shipping*frm.doc.conversion_rate;
-        row.processing_charges = (flt(row.price_list_rate_copy) * flt(row.processing_charges_per) / 100)/ frm.doc.conversion_rate;
-        row.base_processing_charges = row.processing_charges*frm.doc.conversion_rate;
+        // row.base_shipping = row.shipping*frm.doc.conversion_rate;
+        // row.processing_charges = (flt(row.price_list_rate_copy) * flt(row.processing_charges_per) / 100)/ frm.doc.conversion_rate;
+        // row.base_processing_charges = row.processing_charges*frm.doc.conversion_rate;
         // row.reward = (flt(row.price_list_rate_copy) * flt(row.reward_per) / 100)/ frm.doc.conversion_rate;
-        row.base_reward = row.reward*frm.doc.conversion_rate;
-        row.levee = (flt(row.price_list_rate_copy) * flt(row.levee_per) / 100)/ frm.doc.conversion_rate;
-        row.base_levee = row.levee*frm.doc.conversion_rate;
+        // row.base_reward = row.reward*frm.doc.conversion_rate;
+        // row.levee = (flt(row.price_list_rate_copy) * flt(row.levee_per) / 100)/ frm.doc.conversion_rate;
+        // row.base_levee = row.levee*frm.doc.conversion_rate;
         row.std_margin = (flt(row.price_list_rate_copy) * flt(row.std_margin_per) / 100)/ frm.doc.conversion_rate;
-        row.base_std_margin = row.std_margin*frm.doc.conversion_rate;
+        // row.base_std_margin = row.std_margin*frm.doc.conversion_rate;
     }
     update_rates(frm,cdt,cdn)
 },
@@ -718,27 +719,27 @@ shipping_per:function(frm, cdt,cdn){
     // }
 
 },
-processing_charges:function(frm, cdt,cdn){
-    var row = locals[cdt][cdn]
-    if(row.brand && row.price_list_rate_copy){
-        // if (row.processing_charges) {
-            row.processing_charges_per = 100 * flt(row.processing_charges) / flt(row.price_list_rate_copy);
-        // }
-        update_rates(frm,cdt,cdn)
-    }
+// processing_charges:function(frm, cdt,cdn){
+//     var row = locals[cdt][cdn]
+//     if(row.brand && row.price_list_rate_copy){
+//         // if (row.processing_charges) {
+//             row.processing_charges_per = 100 * flt(row.processing_charges) / flt(row.price_list_rate_copy);
+//         // }
+//         update_rates(frm,cdt,cdn)
+//     }
 
-},
-processing_charges_per:function(frm, cdt,cdn){
-    var row = locals[cdt][cdn]
-    if(row.brand && row.price_list_rate_copy){
-        // if (row.processing_charges_per) {
-            row.processing_charges = (flt(row.price_list_rate_copy) * flt(row.processing_charges_per) / 100) / frm.doc.conversion_rate;
-            row.base_processing_charges = row.processing_charges*frm.doc.conversion_rate;
-        // }
-        update_rates(frm,cdt,cdn)
-    }
+// },
+// processing_charges_per:function(frm, cdt,cdn){
+//     var row = locals[cdt][cdn]
+//     if(row.brand && row.price_list_rate_copy){
+//         // if (row.processing_charges_per) {
+//             row.processing_charges = (flt(row.price_list_rate_copy) * flt(row.processing_charges_per) / 100) / frm.doc.conversion_rate;
+//             row.base_processing_charges = row.processing_charges*frm.doc.conversion_rate;
+//         // }
+//         update_rates(frm,cdt,cdn)
+//     }
 
-},
+// },
 reward:function(frm, cdt,cdn){
     var row = locals[cdt][cdn]
     // if(row.brand && row.price_list_rate_copy){
@@ -768,27 +769,27 @@ reward_per:function(frm, cdt,cdn){
     }
 
 },
-levee:function(frm, cdt,cdn){
-    var row = locals[cdt][cdn]
-    if(row.brand && row.price_list_rate_copy){
-        // if (row.levee) {
-            row.levee_per = 100 * flt(row.levee) / flt(row.price_list_rate_copy);
-        // }
-        update_rates(frm,cdt,cdn)
-    }
+// levee:function(frm, cdt,cdn){
+//     var row = locals[cdt][cdn]
+//     if(row.brand && row.price_list_rate_copy){
+//         // if (row.levee) {
+//             row.levee_per = 100 * flt(row.levee) / flt(row.price_list_rate_copy);
+//         // }
+//         update_rates(frm,cdt,cdn)
+//     }
 
-},
-levee_per:function(frm, cdt,cdn){
-    var row = locals[cdt][cdn]
-    if(row.brand && row.price_list_rate_copy){
-        // if (row.levee_per) {
-            row.levee = (flt(row.price_list_rate_copy) * flt(row.levee_per) / 100)/ frm.doc.conversion_rate;
-            row.base_levee = row.levee*frm.doc.conversion_rate;
-        // }
-        update_rates(frm,cdt,cdn)
-    }
+// },
+// levee_per:function(frm, cdt,cdn){
+//     var row = locals[cdt][cdn]
+//     if(row.brand && row.price_list_rate_copy){
+//         // if (row.levee_per) {
+//             row.levee = (flt(row.price_list_rate_copy) * flt(row.levee_per) / 100)/ frm.doc.conversion_rate;
+//             row.base_levee = row.levee*frm.doc.conversion_rate;
+//         // }
+//         update_rates(frm,cdt,cdn)
+//     }
 
-},
+// },
 std_margin:function(frm, cdt,cdn){
     var row = locals[cdt][cdn]
     if(row.brand && row.price_list_rate_copy){
@@ -824,6 +825,9 @@ qty:function(frm, cdt,cdn){
     //     update_rates(frm,cdt,cdn)
     // }
 },
+custom_service_items_remove: function(frm, cdt, cdn) {
+    update_custom_service_totals(frm);
+},
 before_save:function(frm,cdt,cdn){
     frm.trigger('calculate_total')
 },
@@ -833,45 +837,46 @@ items_remove:function(frm){
 
 })
 
-function toggle_item_grid_columns(frm){
-var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
-var item_grid = frm.fields_dict["items"].grid;
-$.each(["base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges",
-    "base_total_reward","base_total_levee","base_total_std_margin",
-    "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"], function(i, fname) {
-    if(frappe.meta.get_docfield(item_grid.doctype, fname))
-        item_grid.toggle_display(fname, frm.doc.currency != company_currency);
-    if(frappe.meta.get_docfield("Quotation", fname))
-        frm.toggle_display(fname, frm.doc.currency != company_currency);
-});
-}
+// function toggle_item_grid_columns(frm){
+// var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
+// var item_grid = frm.fields_dict["items"].grid;
+// $.each(["base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges",
+//     "base_total_reward","base_total_levee","base_total_std_margin",
+//     "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"], function(i, fname) {
+//     if(frappe.meta.get_docfield(item_grid.doctype, fname))
+//         item_grid.toggle_display(fname, frm.doc.currency != company_currency);
+//     if(frappe.meta.get_docfield("Quotation", fname))
+//         frm.toggle_display(fname, frm.doc.currency != company_currency);
+// });
+// }
 
 frappe.ui.form.on('Quotation',{
 before_save:function(frm){
     frm.trigger('calculate_total')
 },
-items_on_form_rendered:function(frm){
-    var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
-    frm.set_currency_labels([
-        "base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
-    ], company_currency, "items");
+// items_on_form_rendered:function(frm){
+//     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
+//     frm.set_currency_labels([
+//         "base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
+//     ], company_currency, "items");
 
-    frm.set_currency_labels([
-        "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
-    ], company_currency);
+//     frm.set_currency_labels([
+//         "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
+//     ], company_currency);
 
-    var trans_currency = frm.doc.currency
-    frm.set_currency_labels([
-        "shipping","processing_charges","reward","levee","std_margin","total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
-    ], trans_currency, "items");
+//     var trans_currency = frm.doc.currency
+//     frm.set_currency_labels([
+//         "shipping","processing_charges","reward","levee","std_margin","total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
+//     ], trans_currency, "items");
 
-    frm.set_currency_labels([
-        "total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
-    ], trans_currency);
+//     frm.set_currency_labels([
+//         "total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
+//     ], trans_currency);
 
-    toggle_item_grid_columns(frm);
-},
+//     toggle_item_grid_columns(frm);
+// },
 refresh:function(frm){ 
+    update_custom_service_totals(frm);
     // console.log("Workingggg",frm.doc.__islocal,frm.doc.selling_price_list)  
 
     if(frm.doc.__islocal === 1){
@@ -896,51 +901,67 @@ refresh:function(frm){
         }
     });
     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
-    frm.set_currency_labels([
-        "base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
-    ], company_currency, "items");
+    // frm.set_currency_labels([
+    //     "base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
+    // ], company_currency, "items");
 
-    frm.set_currency_labels([
-        "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
-    ], company_currency);
+    // frm.set_currency_labels([
+    //     "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
+    // ], company_currency);
 
-    var trans_currency = frm.doc.currency
-    frm.set_currency_labels([
-        "shipping","processing_charges","reward","levee","std_margin","total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
-    ], trans_currency, "items");
+    // var trans_currency = frm.doc.currency
+    // frm.set_currency_labels([
+    //     "shipping","processing_charges","reward","levee","std_margin","total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
+    // ], trans_currency, "items");
 
-    frm.set_currency_labels([
-        "total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
-    ], trans_currency);
+    // frm.set_currency_labels([
+    //     "total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
+    // ], trans_currency);
 
-    toggle_item_grid_columns(frm);
+    // toggle_item_grid_columns(frm);
+},
+custom_quote_project: function(frm) {
+    console.log("Custom Query Triggered");
+    frm.set_query("custom_quote_project", function() {
+        return {
+            query: "avientek.avientek.doctype.project_quotation.project_quotation.get_allowed_projects",
+            filters: {
+                    sales_person: frm.doc.sales_person
+            }
+        };
+    });
 },
 onload:function(frm){
+    // frm.set_query("custom_quote_project", function() {
+    //     return {
+    //         query: "avientek.avientek.doctype.project_quotation.project_quotation.get_allowed_projects"
+    //     };
+    // });
     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
-    frm.set_currency_labels([
-        "base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
-    ], company_currency, "items");
-    frm.set_currency_labels([
-        "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
-    ], company_currency);
+    // frm.set_currency_labels([
+    //     "base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
+    // ], company_currency, "items");
+    // frm.set_currency_labels([
+    //     "base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"
+    // ], company_currency);
 
-    var trans_currency = frm.doc.currency
-    frm.set_currency_labels([
-        "shipping","processing_charges","reward","levee","std_margin","total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
-    ], trans_currency, "items");
-    frm.set_currency_labels([
-        "total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
-    ], trans_currency);
+    // var trans_currency = frm.doc.currency
+    // frm.set_currency_labels([
+    //     "shipping","processing_charges","reward","levee","std_margin","total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
+    // ], trans_currency, "items");
+    // frm.set_currency_labels([
+    //     "total_shipping","total_processing_charges","total_reward","total_levee","total_std_margin"
+    // ], trans_currency);
 },
-currency:function(frm){
-    toggle_item_grid_columns(frm);
-},
-customer:function(frm){
-    toggle_item_grid_columns(frm);
-},
-conversion_rate:function(frm){
-    toggle_item_grid_columns(frm);
-},
+// currency:function(frm){
+//     toggle_item_grid_columns(frm);
+// },
+// customer:function(frm){
+//     toggle_item_grid_columns(frm);
+// },
+// conversion_rate:function(frm){
+//     toggle_item_grid_columns(frm);
+// },
 selling_price_list:function(frm){
     if(frm.doc.selling_price_list){
         setTimeout(() => {
@@ -1012,21 +1033,21 @@ calculate_total: function (frm){
         //     per_std_total += doc.items[i].std_margin_per;
         // } 
 
-        if (doc.items[i].base_total_shipping){
-            base_shipping_total += doc.items[i].base_total_shipping;
-        }       
-        if (doc.items[i].base_processing_charges){
-            base_pc_total += doc.items[i].base_processing_charges;
-        }       
-        if (doc.items[i].base_reward){
-            base_reward_total += doc.items[i].base_reward;
-        }       
-        if (doc.items[i].base_levee){
-            base_levee_total += doc.items[i].base_levee;
-        }       
-        if (doc.items[i].base_std_margin){
-            base_std_total += doc.items[i].base_std_margin;
-        }       
+        // if (doc.items[i].base_total_shipping){
+        //     base_shipping_total += doc.items[i].base_total_shipping;
+        // }       
+        // if (doc.items[i].base_processing_charges){
+        //     base_pc_total += doc.items[i].base_processing_charges;
+        // }       
+        // if (doc.items[i].base_reward){
+        //     base_reward_total += doc.items[i].base_reward;
+        // }       
+        // if (doc.items[i].base_levee){
+        //     base_levee_total += doc.items[i].base_levee;
+        // }       
+        // if (doc.items[i].base_std_margin){
+        //     base_std_total += doc.items[i].base_std_margin;
+        // }       
     }
 
     frm.refresh_field('items');

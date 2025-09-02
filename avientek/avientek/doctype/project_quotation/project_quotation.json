@@ -9,10 +9,26 @@
   "naming_series",
   "project_name",
   "project_owner",
+  "country",
+  "state",
+  "end_user_name",
   "column_break_rruy",
   "project_value",
   "start_date",
-  "end_date"
+  "end_date",
+  "sales_person",
+  "contact_section",
+  "contact_name",
+  "designation",
+  "mobile",
+  "column_break_pqhs",
+  "email",
+  "address",
+  "section_break_avtx",
+  "project_details",
+  "compitition_name",
+  "column_break_xyux",
+  "additional_note"
  ],
  "fields": [
   {
@@ -54,15 +70,98 @@
    "fieldname": "end_date",
    "fieldtype": "Date",
    "label": "End Date"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "state",
+   "fieldtype": "Data",
+   "label": "State"
+  },
+  {
+   "fieldname": "end_user_name",
+   "fieldtype": "Data",
+   "label": "End User Name"
+  },
+  {
+   "fieldname": "contact_section",
+   "fieldtype": "Section Break",
+   "label": "Contact"
+  },
+  {
+   "fieldname": "contact_name",
+   "fieldtype": "Link",
+   "label": "Contact Name",
+   "options": "Contact"
+  },
+  {
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "label": "Designation",
+   "options": "Designation"
+  },
+  {
+   "fieldname": "mobile",
+   "fieldtype": "Data",
+   "label": "Mobile"
+  },
+  {
+   "fieldname": "column_break_pqhs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Link",
+   "label": "Address",
+   "options": "Address"
+  },
+  {
+   "fieldname": "section_break_avtx",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "project_details",
+   "fieldtype": "Text",
+   "label": "Project Details"
+  },
+  {
+   "fieldname": "compitition_name",
+   "fieldtype": "Text",
+   "label": "Compitition Name"
+  },
+  {
+   "fieldname": "column_break_xyux",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "additional_note",
+   "fieldtype": "Text",
+   "label": "Additional Note"
+  },
+  {
+   "fieldname": "sales_person",
+   "fieldtype": "Table MultiSelect",
+   "label": "Sales Person",
+   "options": "Sales Person Project"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-08-14 10:11:57.536545",
+ "modified": "2025-09-02 14:43:13.758377",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Project Quotation",
+ "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
   {
