@@ -304,7 +304,7 @@ function calculate_brand_summary(frm) {
 
         let markup_base = base_amount + incentive;
         let markup = (flt(row.custom_markup_) * markup_base / 100);
-
+        console.log("Markup : ",markup )
         let total = markup_base + markup;
 
         let customs_percent = flt(row.custom_customs_);
@@ -315,7 +315,10 @@ function calculate_brand_summary(frm) {
         let selling_price = total + customs;
 
         let margin = markup;
-        let margin_percent = (markup / (selling_price || 1)) * 100;
+        let margin_percent_value = selling_price - cogs;
+        console.log("margin percent value",margin_percent_value)
+        let margin_percent = (margin_percent_value / selling_price) * 100;
+        console.log("margin percent",margin_percent)
 
         brand_data[brand].shipping += shipping;
         brand_data[brand].shipping_percent += flt(row.shipping_per);
@@ -353,6 +356,11 @@ function calculate_brand_summary(frm) {
 
     Object.keys(brand_data).forEach(brand => {
         let data = brand_data[brand];
+        console.log(data.margin_percent)
+        console.log(data.item_count)
+        console.log(data.margin_percent / data.item_count)
+        let marg = data.total_selling - data.total_cost
+        let marg_value = marg / data.total_selling * 100
         let count = data.item_count;
 
         frm.add_child('custom_brand_summary', {
@@ -372,7 +380,7 @@ function calculate_brand_summary(frm) {
             total_cost: data.total_cost,
             total_selling: data.total_selling,
             margin: data.margin,
-            margin_percent: data.margin_percent / count
+            margin_percent: marg_value
         });
         total_summary.shipping += data.shipping;
         total_summary.finance += data.finance;
@@ -384,8 +392,7 @@ function calculate_brand_summary(frm) {
         total_summary.total_cost += data.total_cost;
         total_summary.total_selling += data.total_selling;
         total_summary.count += count;
-        console.log(data.shipping)
-        console.log("shipping",total_summary.shipping);
+        
     });
 
     frm.refresh_field('custom_brand_summary');
@@ -454,7 +461,32 @@ function update_custom_service_totals(frm) {
     let conversion_rate = flt(frm.doc.conversion_rate || 1);
     frm.set_value('custom_total_company_currency', total_amount * conversion_rate);
 }
+function calculate_discount_and_margin(frm, cdt, cdn) {
+    let row = locals[cdt][cdn];
 
+    let selling_price = flt(row.custom_special_rate);
+    let discount_percentage = flt(row.custom_discount_);
+    let cogs = flt(row.custom_cogs);
+
+    // Calculate discount
+    let discount_amount = (selling_price * discount_percentage) / 100;
+    frappe.model.set_value(cdt, cdn, "custom_discount_amount_value", discount_amount);
+
+    // Net Selling Price
+    let net_selling_price = selling_price - discount_amount;
+
+    // Margin
+    let margin = net_selling_price - cogs;
+    frappe.model.set_value(cdt, cdn, "custom_margin_value", margin);
+
+    // Optional: Margin %
+    let margin_percentage = net_selling_price ? (margin / net_selling_price) * 100 : 0;
+    console.log("Net selling price: ",net_selling_price)
+    frappe.model.set_value(cdt, cdn, "custom_margin_", margin_percentage);
+    // frappe.model.set_value(cdt, cdn, "custom_special_rate", net_selling_price);
+
+    frm.refresh_field("items");
+}
 
 // frappe.ui.form.on('Quotation', {
 //     refresh(frm) {
@@ -825,6 +857,13 @@ qty:function(frm, cdt,cdn){
     //     update_rates(frm,cdt,cdn)
     // }
 },
+custom_discount_: function(frm, cdt, cdn) {
+        calculate_discount_and_margin(frm, cdt, cdn);
+        calculate_custom_rate(frm, cdt, cdn);
+},
+// custom_special_rate: function(frm, cdt, cdn) {
+//     calculate_discount_and_margin(frm, cdt, cdn);
+// },
 custom_service_items_remove: function(frm, cdt, cdn) {
     update_custom_service_totals(frm);
 },
@@ -920,23 +959,12 @@ refresh:function(frm){
 
     // toggle_item_grid_columns(frm);
 },
-custom_quote_project: function(frm) {
-    console.log("Custom Query Triggered");
-    frm.set_query("custom_quote_project", function() {
-        return {
-            query: "avientek.avientek.doctype.project_quotation.project_quotation.get_allowed_projects",
-            filters: {
-                    sales_person: frm.doc.sales_person
-            }
-        };
-    });
-},
 onload:function(frm){
-    // frm.set_query("custom_quote_project", function() {
-    //     return {
-    //         query: "avientek.avientek.doctype.project_quotation.project_quotation.get_allowed_projects"
-    //     };
-    // });
+    frm.set_query('custom_quote_project', function() {
+            return {
+                query: 'avientek.events.sales_person_permission.get_project_quotation_for_user'
+            };
+        });
     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
     // frm.set_currency_labels([
     //     "base_shipping","base_processing_charges","base_reward","base_levee","base_std_margin","base_total_shipping","base_total_processing_charges","base_total_reward","base_total_levee","base_total_std_margin"

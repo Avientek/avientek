@@ -252,7 +252,15 @@ doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
 # has_permission = {
 # "Event": "frappe.desk.doctype.event.event.has_permission",
 # }
+permission_query_conditions = {
+    "Project Quotation": "avientek.events.sales_person_permission.project_quotation_pqc",
+    "Quotation": "avientek.events.sales_person_permission.quotation_pqc",
+}
 
+has_permission = {
+    "Project Quotation": "avientek.events.sales_person_permission.project_quotation_has_perm",
+    "Quotation": "avientek.events.sales_person_permission.quotation_has_perm",
+}
 # DocType Class
 # ---------------
 # Override standard doctype classes
