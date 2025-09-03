@@ -16,6 +16,7 @@ from frappe import ValidationError, _, qb, scrub, throw
 from frappe.query_builder.functions import Sum
 from frappe.query_builder.utils import DocType
 from pypika import Order
+from frappe.utils import getdate, nowdate
 from frappe.contacts.doctype.address.address import get_address_display
 from pypika.terms import ExistsCriterion
 from frappe.query_builder import AliasedQuery, Criterion, Table
@@ -357,6 +358,7 @@ def create_journal_entry(source_name, target_doc=None, args=None):
 
     return target_doc
 
+
 @frappe.whitelist()
 def download_payment_pdf(docname):
     """Streams the combined PDF directly to the browser."""
@@ -385,7 +387,18 @@ def download_payment_pdf(docname):
 
     # Loop through references
     for row in doc.payment_references:
-        voucher_no = row.reference_name
+        supplier_bill_no = row.reference_name
+
+        # Get Purchase Invoice name from Supplier Bill No
+        purchase_invoice_name = frappe.db.get_value(
+            "Purchase Invoice",
+            {"bill_no": supplier_bill_no},
+            "name"
+        )
+
+        if not purchase_invoice_name:
+            frappe.log_error(f"No Purchase Invoice found for Bill No: {supplier_bill_no}")
+            continue
 
         # Purchase Invoice Attachment
         try:
@@ -393,7 +406,7 @@ def download_payment_pdf(docname):
                 "File",
                 filters={
                     "attached_to_doctype": "Purchase Invoice",
-                    "attached_to_name": voucher_no
+                    "attached_to_name": purchase_invoice_name
                 },
                 fields=["file_url"],
                 order_by="creation asc",
@@ -408,13 +421,13 @@ def download_payment_pdf(docname):
                 if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
                     merger.append(io.BytesIO(res.content))
         except Exception as e:
-            frappe.log_error(f"Error fetching Purchase Invoice attachment for {voucher_no}: {e}")
+            frappe.log_error(f"Error fetching Purchase Invoice attachment for {purchase_invoice_name}: {e}")
 
         # Purchase Order & Quotation PDFs
         try:
             purchase_order = frappe.get_value(
                 "Purchase Invoice Item",
-                {"parent": voucher_no},
+                {"parent": purchase_invoice_name},
                 fieldname="purchase_order",
                 order_by="idx asc",
             )
@@ -437,7 +450,7 @@ def download_payment_pdf(docname):
                     )
                     merger.append(io.BytesIO(quotation_pdf))
         except Exception as e:
-            frappe.log_error(f"Error fetching Quotation PDFs for {voucher_no}: {e}")
+            frappe.log_error(f"Error fetching Quotation PDFs for {purchase_invoice_name}: {e}")
 
     # Output merged PDF
     output = io.BytesIO()
