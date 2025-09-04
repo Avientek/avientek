@@ -2,7 +2,71 @@ import frappe
 from frappe.utils import flt
 from frappe.utils import flt, cint
 from frappe.model.workflow import apply_workflow
+import json
+from decimal import Decimal, ROUND_HALF_UP
 
+@frappe.whitelist()
+def apply_discount(doc, discount_amount):
+    quotation = frappe.parse_json(doc)
+    discount = Decimal(str(discount_amount or 0))
+    if discount <= 0:
+        frappe.throw("Please enter a valid discount amount")
+
+    items = quotation.get("items", []) or []
+    total_qty = sum(Decimal(str(i.get("qty") or 0)) for i in items)
+    if total_qty <= 0:
+        frappe.throw("Total quantity is zero, cannot apply discount")
+
+    per_unit = discount / total_qty
+    updated_items = []
+    total_new_selling = Decimal('0.0')
+
+    # rounder for 4 decimals
+    q = lambda x: float(x.quantize(Decimal('1.0000'), rounding=ROUND_HALF_UP))
+
+    for i in items:
+        name = i.get("name")
+        qty = Decimal(str(i.get("qty") or 0))
+        unit_price = Decimal(str(i.get("custom_special_rate") if i.get("custom_special_rate") is not None else i.get("rate") or 0))
+        item_discount = (per_unit * qty)
+
+        new_unit_price = unit_price - per_unit
+        if new_unit_price < 0:
+            new_unit_price = Decimal('0.0')
+
+        new_selling_amount = (new_unit_price * qty)
+
+        old_margin_val = Decimal(str(i.get("custom_margin_value") or 0))
+        new_margin_val = old_margin_val - item_discount
+        if new_margin_val < 0:
+            new_margin_val = Decimal('0.0')
+
+        new_margin_pct = (new_margin_val / new_selling_amount * 100) if new_selling_amount != 0 else Decimal('0.0')
+
+        updated_items.append({
+            "name": name,
+            "allocated_discount": q(item_discount),
+            "custom_special_rate": q(new_unit_price),
+            "custom_selling_price": q(new_selling_amount),
+            "custom_margin_value": q(new_margin_val),
+            "custom_margin_": q(new_margin_pct)
+        })
+
+        total_new_selling += new_selling_amount
+
+    parent_discount_pct = q(discount / total_new_selling * 100) if total_new_selling != 0 else 0.0
+
+    exchange_rate = Decimal(str(quotation.get("conversion_rate") or 1))
+    grand_total_usd = q(total_new_selling)
+    grand_total_aed = q(total_new_selling * exchange_rate)
+
+    return {
+        "custom_discount_amount_value": q(discount),
+        "custom_discount_": parent_discount_pct,
+        "items": updated_items,
+        "total": grand_total_usd,
+        "base_total": grand_total_aed
+    }
 
 @frappe.whitelist()
 def get_last_transactions(customer, item_code):

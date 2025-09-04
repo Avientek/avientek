@@ -108,7 +108,9 @@ fixtures = [
 					"Quotation-custom_column_break_tjozq","Quotation-custom_total_margin_value","Quotation-custom_total_customs_value",
          			"Quotation-custom_total_cost","Quotation-custom_total_selling",
 					"Quotation-custom_auto_approve_ok","Quotation-custom_gm_approve_ok",
-					"Quotation-custom_quote_project","Quotation Item-custom_discount_","Quotation Item-custom_discount_amount_value"
+					"Quotation-custom_quote_project","Quotation-custom_discount",
+					"Quotation-custom_discount_amount_value","Quotation-custom_discount_",
+     				"Quotation-custom_column_break_lqu6l","Quotation-custom_apply_discount"
      ),
 			]
 		],

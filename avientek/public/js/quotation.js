@@ -4,6 +4,48 @@ frappe.ui.form.on('Quotation', {
         calculate_brand_summary(frm);
         // frm.fields_dict.custom_brand_summary.grid.add_totals_row = true;
     },
+    custom_apply_discount: function(frm) {
+        if (!frm.doc.custom_discount_amount_value) {
+            frappe.msgprint("Please enter discount amount");
+            return;
+        }
+
+        frappe.call({
+            method: "avientek.events.quotation.apply_discount",
+            args: {
+                doc: frm.doc,
+                discount_amount: frm.doc.custom_discount_amount_value
+            },
+            callback: function(r) {
+                if (r.message) {
+                    frm.set_value("custom_discount_amount_value", r.message.custom_discount_amount_value);
+                    frm.set_value("custom_discount_", r.message.custom_discount_);
+                    frm.set_value("total", r.message.total);
+                    frm.set_value("base_total", r.message.base_total);
+                    frm.set_value("grand_total",r.message.total)
+                    frm.set_value("base_grand_total",r.message.base_total)
+                    frm.set_value("rounded_total",r.message.total)
+                    frm.set_value("base_rounded_total",r.message.base_total)
+                    (r.message.items || []).forEach(it => {
+                        const row = frm.doc.items.find(r => r.name === it.name);
+                        if (row) {
+                            row.custom_special_rate = it.custom_special_rate;
+                            row.custom_selling_price = it.custom_selling_price;
+                            row.custom_margin_value = it.custom_margin_value;
+                            row.custom_margin_ = it.custom_margin_;
+                            row.rate = it.custom_special_rate;
+                            row.amount = it.custom_selling_price;
+                        }
+                    });
+
+                    frm.refresh_field("items");
+                    frm.refresh_fields(["total", "base_total"]);
+                }
+            }
+        });
+    }
+
+
     
 });
 
@@ -417,8 +459,13 @@ function calculate_custom_rate(frm, cdt, cdn) {
     let row = locals[cdt][cdn];
     if (row.qty > 0) {
         let special_rate = row.custom_selling_price / row.qty;
+        let net_selling_rate = row.custom_net_selling_price / row.qty;
         frappe.model.set_value(cdt, cdn, 'custom_special_rate', special_rate);
-        frappe.model.set_value(cdt, cdn, 'rate', special_rate);
+        if (flt(row.custom_net_selling_price) > 0) {
+            frappe.model.set_value(cdt, cdn, 'rate', net_selling_rate);
+        } else {
+            frappe.model.set_value(cdt, cdn, 'rate', special_rate);
+        }
     }
 }
 
@@ -461,32 +508,32 @@ function update_custom_service_totals(frm) {
     let conversion_rate = flt(frm.doc.conversion_rate || 1);
     frm.set_value('custom_total_company_currency', total_amount * conversion_rate);
 }
-function calculate_discount_and_margin(frm, cdt, cdn) {
-    let row = locals[cdt][cdn];
+// function calculate_discount_and_margin(frm, cdt, cdn) {
+//     let row = locals[cdt][cdn];
 
-    let selling_price = flt(row.custom_special_rate);
-    let discount_percentage = flt(row.custom_discount_);
-    let cogs = flt(row.custom_cogs);
+//     let selling_price = flt(row.custom_special_rate);
+//     let discount_percentage = flt(row.custom_discount_);
+//     let cogs = flt(row.custom_cogs);
 
-    // Calculate discount
-    let discount_amount = (selling_price * discount_percentage) / 100;
-    frappe.model.set_value(cdt, cdn, "custom_discount_amount_value", discount_amount);
+//     // Calculate discount
+//     let discount_amount = (selling_price * discount_percentage) / 100;
+//     frappe.model.set_value(cdt, cdn, "custom_discount_amount_value", discount_amount);
 
-    // Net Selling Price
-    let net_selling_price = selling_price - discount_amount;
+//     // Net Selling Price
+//     let net_selling_price = selling_price - discount_amount;
 
-    // Margin
-    let margin = net_selling_price - cogs;
-    frappe.model.set_value(cdt, cdn, "custom_margin_value", margin);
+//     // Margin
+//     let margin = net_selling_price - cogs;
+//     frappe.model.set_value(cdt, cdn, "custom_margin_value", margin);
 
-    // Optional: Margin %
-    let margin_percentage = net_selling_price ? (margin / net_selling_price) * 100 : 0;
-    console.log("Net selling price: ",net_selling_price)
-    frappe.model.set_value(cdt, cdn, "custom_margin_", margin_percentage);
-    // frappe.model.set_value(cdt, cdn, "custom_special_rate", net_selling_price);
+//     // Optional: Margin %
+//     let margin_percentage = net_selling_price ? (margin / net_selling_price) * 100 : 0;
+//     console.log("Net selling price: ",net_selling_price)
+//     frappe.model.set_value(cdt, cdn, "custom_margin_", margin_percentage);
+//     frappe.model.set_value(cdt, cdn, "custom_net_selling_price", net_selling_price);
 
-    frm.refresh_field("items");
-}
+//     frm.refresh_field("items");
+// }
 
 // frappe.ui.form.on('Quotation', {
 //     refresh(frm) {
@@ -857,10 +904,10 @@ qty:function(frm, cdt,cdn){
     //     update_rates(frm,cdt,cdn)
     // }
 },
-custom_discount_: function(frm, cdt, cdn) {
-        calculate_discount_and_margin(frm, cdt, cdn);
-        calculate_custom_rate(frm, cdt, cdn);
-},
+// custom_discount_: function(frm, cdt, cdn) {
+//         calculate_discount_and_margin(frm, cdt, cdn);
+//         calculate_custom_rate(frm, cdt, cdn);
+// },
 // custom_special_rate: function(frm, cdt, cdn) {
 //     calculate_discount_and_margin(frm, cdt, cdn);
 // },
