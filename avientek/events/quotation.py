@@ -13,18 +13,21 @@ def apply_discount(doc, discount_amount):
         frappe.throw("Please enter a valid discount amount")
 
     items = quotation.get("items", []) or []
-    total_qty = sum(Decimal(str(i.get("qty") or 0)) for i in items)
+
+    # Filter only items without discount applied before
+    new_items = [i for i in items if not i.get("custom_discount_amount_value") and not i.get("custom_discount_amount_qty")]
+
+    total_qty = sum(Decimal(str(i.get("qty") or 0)) for i in new_items)
     if total_qty <= 0:
-        frappe.throw("Total quantity is zero, cannot apply discount")
+        frappe.throw("No new items available to apply discount")
 
     per_unit = discount / total_qty
     updated_items = []
     total_new_selling = Decimal('0.0')
 
-    # rounder for 4 decimals
     q = lambda x: float(x.quantize(Decimal('1.0000'), rounding=ROUND_HALF_UP))
 
-    for i in items:
+    for i in new_items:
         name = i.get("name")
         qty = Decimal(str(i.get("qty") or 0))
         unit_price = Decimal(str(i.get("custom_special_rate") if i.get("custom_special_rate") is not None else i.get("rate") or 0))
@@ -48,6 +51,8 @@ def apply_discount(doc, discount_amount):
             "allocated_discount": q(item_discount),
             "custom_special_rate": q(new_unit_price),
             "custom_selling_price": q(new_selling_amount),
+            "custom_discount_amount_value": q(per_unit),
+            "custom_discount_amount_qty": q(item_discount),
             "custom_margin_value": q(new_margin_val),
             "custom_margin_": q(new_margin_pct)
         })
@@ -375,3 +380,11 @@ def set_margin_flags(doc, method=None):
     """
     doc.custom_auto_approve_ok = 1 if rule_1_or_2_pass(doc) else 0
     doc.custom_gm_approve_ok   = 1 if rule_3_pass(doc)      else 0
+
+def validate_total_discount(doc, method):
+    """Ensure sum of child discounts matches parent discount amount"""
+    parent_discount = doc.custom_discount_amount_value or 0
+    total_row_discount = sum((row.custom_discount_amount_qty or 0) for row in doc.items)
+
+    if round(total_row_discount, 2) != round(parent_discount, 2):
+        frappe.throw("Sum of item discount amounts must equal parent discount amount")

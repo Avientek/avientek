@@ -110,7 +110,8 @@ fixtures = [
 					"Quotation-custom_auto_approve_ok","Quotation-custom_gm_approve_ok",
 					"Quotation-custom_quote_project","Quotation-custom_discount",
 					"Quotation-custom_discount_amount_value","Quotation-custom_discount_",
-     				"Quotation-custom_column_break_lqu6l","Quotation-custom_apply_discount"
+     				"Quotation-custom_column_break_lqu6l","Quotation-custom_apply_discount",
+					"Quotation Item-custom_discount_amount_value","Quotation Item-custom_discount_amount_qty",
      ),
 			]
 		],
@@ -285,7 +286,8 @@ doc_events = {
     "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
     "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
     "Quotation": {
-        "validate": "avientek.events.quotation.set_margin_flags"
+        "validate": "avientek.events.quotation.set_margin_flags",
+        "before_save": "avientek.events.quotation.validate_total_discount"
     },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
 }

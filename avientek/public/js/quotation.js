@@ -1,8 +1,6 @@
 frappe.ui.form.on('Quotation', {
     validate: function(frm) {
-        console.log("hii")
         calculate_brand_summary(frm);
-        // frm.fields_dict.custom_brand_summary.grid.add_totals_row = true;
     },
     custom_apply_discount: function(frm) {
         if (!frm.doc.custom_discount_amount_value) {
@@ -20,30 +18,26 @@ frappe.ui.form.on('Quotation', {
                 if (r.message) {
                     frm.set_value("custom_discount_amount_value", r.message.custom_discount_amount_value);
                     frm.set_value("custom_discount_", r.message.custom_discount_);
-                    frm.set_value("total", r.message.total);
-                    frm.set_value("base_total", r.message.base_total);
-                    frm.set_value("grand_total",r.message.total)
-                    frm.set_value("base_grand_total",r.message.base_total)
-                    frm.set_value("rounded_total",r.message.total)
-                    frm.set_value("base_rounded_total",r.message.base_total)
+
+                    // only update items returned from server (newly discounted)
                     (r.message.items || []).forEach(it => {
-                        const row = frm.doc.items.find(r => r.name === it.name);
-                        if (row) {
-                            row.custom_special_rate = it.custom_special_rate;
-                            row.custom_selling_price = it.custom_selling_price;
-                            row.custom_margin_value = it.custom_margin_value;
-                            row.custom_margin_ = it.custom_margin_;
-                            row.rate = it.custom_special_rate;
-                            row.amount = it.custom_selling_price;
-                        }
+                        frappe.model.set_value("Quotation Item", it.name, "custom_special_rate", it.custom_special_rate);
+                        frappe.model.set_value("Quotation Item", it.name, "custom_selling_price", it.custom_selling_price);
+                        frappe.model.set_value("Quotation Item", it.name, "custom_margin_value", it.custom_margin_value);
+                        frappe.model.set_value("Quotation Item", it.name, "custom_margin_", it.custom_margin_);
+                        frappe.model.set_value("Quotation Item", it.name, "rate", it.custom_special_rate);
+                        frappe.model.set_value("Quotation Item", it.name, "amount", it.custom_selling_price);
+                        frappe.model.set_value("Quotation Item", it.name, "custom_discount_amount_value", it.custom_discount_amount_value);
+                        frappe.model.set_value("Quotation Item", it.name, "custom_discount_amount_qty", it.custom_discount_amount_qty);
                     });
 
                     frm.refresh_field("items");
-                    frm.refresh_fields(["total", "base_total"]);
+                    frm.trigger("calculate_taxes_and_totals");
                 }
             }
         });
     }
+
 
 
     
@@ -904,6 +898,49 @@ qty:function(frm, cdt,cdn){
     //     update_rates(frm,cdt,cdn)
     // }
 },
+custom_discount_amount_qty: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+
+        let discount_amount = flt(row.custom_discount_amount_qty);
+        let qty = flt(row.qty);
+        if (!discount_amount || qty <= 0) {
+            return;
+        }
+
+        // per-unit discount for this row
+        let per_unit_discount = discount_amount / qty;
+
+        // base price (use special rate if available, else rate)
+        let unit_price = flt(row.custom_special_rate || row.rate);
+
+        // new unit price after discount
+        let new_unit_price = unit_price - per_unit_discount;
+        if (new_unit_price < 0) new_unit_price = 0;
+
+        // new selling amount
+        let new_selling_amount = new_unit_price * qty;
+
+        // recalc margin value
+        let old_margin_val = flt(row.custom_margin_value || 0);
+        let new_margin_val = old_margin_val - discount_amount;
+        if (new_margin_val < 0) new_margin_val = 0;
+
+        // recalc margin %
+        let new_margin_pct = new_selling_amount > 0 ? (new_margin_val / new_selling_amount) * 100 : 0;
+
+        // set values in row
+        frappe.model.set_value(cdt, cdn, "custom_special_rate", new_unit_price);
+        frappe.model.set_value(cdt, cdn, "custom_selling_price", new_selling_amount);
+        frappe.model.set_value(cdt, cdn, "custom_margin_value", new_margin_val);
+        frappe.model.set_value(cdt, cdn, "custom_margin_", new_margin_pct);
+        frappe.model.set_value(cdt, cdn, "rate", new_unit_price);
+        frappe.model.set_value(cdt, cdn, "amount", new_selling_amount);
+        frappe.model.set_value(cdt, cdn, "custom_discount_amount_value", per_unit_discount);
+
+        // recalc totals at parent level
+        // frm.trigger("calculate_taxes_and_totals");
+    },
+
 // custom_discount_: function(frm, cdt, cdn) {
 //         calculate_discount_and_margin(frm, cdt, cdn);
 //         calculate_custom_rate(frm, cdt, cdn);
