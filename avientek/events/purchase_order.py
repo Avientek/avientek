@@ -554,7 +554,7 @@ def make_inter_company_transaction(doctype, source_name, target_doc=None):
 			doctype + " Item": item_field_map,
 		},
 		target_doc,
-		# set_missing_values,
+		set_missing_values,
 	)
 
 	return doclist
