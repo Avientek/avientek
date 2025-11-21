@@ -439,6 +439,47 @@ def create_payment_request(source_name, target_doc=None, args=None):
 
     return target_doc
 
+@frappe.whitelist()
+def get_items_from_internal_so(source_name, target_doc=None):
+    from frappe.model.mapper import get_mapped_doc
+
+    def update_item(source, target, source_parent):
+        # Only copy desired fields
+        target.item_code = source.item_code
+        target.item_name = source.item_name
+        target.description = source.description
+        target.uom = source.uom
+        target.qty = source.qty
+        target.schedule_date = source.delivery_date
+        target.rate = source.rate
+
+    # ✅ MUST ACCEPT 3 PARAMETERS
+    def update_parent(source, target, source_parent):
+        # Prevent copying of terms & conditions
+        target.tc_name = None
+        target.terms = None
+
+        # Also remove hidden auto-copied fields
+        if hasattr(target, "terms_and_conditions"):
+            target.terms_and_conditions = None
+
+    doc = get_mapped_doc(
+        "Sales Order",
+        source_name,
+        {
+            "Sales Order": {
+                "doctype": "Purchase Order",
+                "postprocess": update_parent
+            },
+            "Sales Order Item": {
+                "doctype": "Purchase Order Item",
+                "postprocess": update_item
+            }
+        },
+        target_doc
+    )
+
+    return doc
 
 # from erpnext.controllers.item_variant import create_variant
 
@@ -613,7 +654,7 @@ def make_inter_company_transaction(doctype, source_name, target_doc=None):
 			doctype + " Item": item_field_map,
 		},
 		target_doc,
-		# set_missing_values,
+		set_missing_values,
 	)
 
 	return doclist
