@@ -7,28 +7,36 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
-  "project_name",
+  "lead",
+  "date",
   "project_owner",
+  "project_name",
   "country",
-  "state",
-  "end_user_name",
-  "column_break_rruy",
-  "project_value",
-  "start_date",
-  "end_date",
-  "sales_person",
-  "contact_section",
-  "contact_name",
-  "designation",
-  "mobile",
-  "column_break_pqhs",
-  "email",
-  "address",
+  "column_break_lhjn",
+  "open_for_all",
+  "expected_start_date",
+  "expected_end_date",
+  "probability",
+  "end_user_section",
+  "end_user",
+  "end_user_contact_name",
+  "column_break_wgqr",
+  "end_user_country",
+  "consultant_details_section",
+  "consultant",
+  "consultant_contact",
+  "column_break_fhhi",
+  "consultant_country",
+  "contractor_details_section",
+  "contractor",
+  "contractor_contact",
+  "column_break_qkmy",
+  "contractor_country",
   "section_break_avtx",
   "project_details",
-  "compitition_name",
+  "competition_details",
   "column_break_xyux",
-  "additional_note"
+  "progress_note"
  ],
  "fields": [
   {
@@ -53,76 +61,10 @@
    "options": "User"
   },
   {
-   "fieldname": "column_break_rruy",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "project_value",
-   "fieldtype": "Data",
-   "label": "Value"
-  },
-  {
-   "fieldname": "start_date",
-   "fieldtype": "Date",
-   "label": "Start Date"
-  },
-  {
-   "fieldname": "end_date",
-   "fieldtype": "Date",
-   "label": "End Date"
-  },
-  {
    "fieldname": "country",
    "fieldtype": "Link",
    "label": "Country",
    "options": "Country"
-  },
-  {
-   "fieldname": "state",
-   "fieldtype": "Data",
-   "label": "State"
-  },
-  {
-   "fieldname": "end_user_name",
-   "fieldtype": "Data",
-   "label": "End User Name"
-  },
-  {
-   "fieldname": "contact_section",
-   "fieldtype": "Section Break",
-   "label": "Contact"
-  },
-  {
-   "fieldname": "contact_name",
-   "fieldtype": "Link",
-   "label": "Contact Name",
-   "options": "Contact"
-  },
-  {
-   "fieldname": "designation",
-   "fieldtype": "Link",
-   "label": "Designation",
-   "options": "Designation"
-  },
-  {
-   "fieldname": "mobile",
-   "fieldtype": "Data",
-   "label": "Mobile"
-  },
-  {
-   "fieldname": "column_break_pqhs",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "email",
-   "fieldtype": "Data",
-   "label": "Email"
-  },
-  {
-   "fieldname": "address",
-   "fieldtype": "Link",
-   "label": "Address",
-   "options": "Address"
   },
   {
    "fieldname": "section_break_avtx",
@@ -130,35 +72,142 @@
   },
   {
    "fieldname": "project_details",
-   "fieldtype": "Text",
+   "fieldtype": "Small Text",
    "label": "Project Details"
-  },
-  {
-   "fieldname": "compitition_name",
-   "fieldtype": "Text",
-   "label": "Compitition Name"
   },
   {
    "fieldname": "column_break_xyux",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "additional_note",
-   "fieldtype": "Text",
-   "label": "Additional Note"
+   "fieldname": "lead",
+   "fieldtype": "Link",
+   "label": "Lead",
+   "options": "Lead"
   },
   {
-   "fieldname": "sales_person",
-   "fieldtype": "Table MultiSelect",
-   "label": "Sales Person",
-   "options": "Sales Person Project"
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date"
+  },
+  {
+   "fieldname": "column_break_lhjn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "open_for_all",
+   "fieldtype": "Select",
+   "label": "Open for All",
+   "options": "\nSelf\nAll"
+  },
+  {
+   "fieldname": "expected_start_date",
+   "fieldtype": "Date",
+   "label": "Expected Start Date"
+  },
+  {
+   "fieldname": "expected_end_date",
+   "fieldtype": "Date",
+   "label": "Expected End Date"
+  },
+  {
+   "fieldname": "probability",
+   "fieldtype": "Select",
+   "label": "Probability",
+   "options": "\nBeginning\nLess\nAverage\nHigh\nLost\nWin"
+  },
+  {
+   "fieldname": "end_user_section",
+   "fieldtype": "Section Break",
+   "label": "End User Details"
+  },
+  {
+   "fieldname": "end_user",
+   "fieldtype": "Data",
+   "label": "End User"
+  },
+  {
+   "fieldname": "end_user_contact_name",
+   "fieldtype": "Data",
+   "label": "End User Contact Name"
+  },
+  {
+   "fieldname": "column_break_wgqr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "end_user_country",
+   "fieldtype": "Link",
+   "label": "End User Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "consultant_details_section",
+   "fieldtype": "Section Break",
+   "label": "Consultant Details"
+  },
+  {
+   "fieldname": "consultant",
+   "fieldtype": "Data",
+   "label": "Consultant"
+  },
+  {
+   "fieldname": "consultant_contact",
+   "fieldtype": "Data",
+   "label": "Consultant Contact"
+  },
+  {
+   "fieldname": "column_break_fhhi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "consultant_country",
+   "fieldtype": "Link",
+   "label": "Consultant Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "contractor_details_section",
+   "fieldtype": "Section Break",
+   "label": "Contractor Details"
+  },
+  {
+   "fieldname": "contractor",
+   "fieldtype": "Data",
+   "label": "Contractor"
+  },
+  {
+   "fieldname": "contractor_contact",
+   "fieldtype": "Data",
+   "label": "Contractor Contact"
+  },
+  {
+   "fieldname": "column_break_qkmy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "contractor_country",
+   "fieldtype": "Link",
+   "label": "Contractor Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "competition_details",
+   "fieldtype": "Small Text",
+   "label": "Competition Details"
+  },
+  {
+   "fieldname": "progress_note",
+   "fieldtype": "Small Text",
+   "label": "Progress Note"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-02 14:43:13.758377",
- "modified_by": "Administrator",
+ "modified": "2026-01-15 08:58:44.371009",
+ "modified_by": "support@quarkcs.com",
  "module": "Avientek",
  "name": "Project Quotation",
  "naming_rule": "By \"Naming Series\" field",

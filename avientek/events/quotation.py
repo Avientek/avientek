@@ -74,72 +74,174 @@ def apply_discount(doc, discount_amount):
     }
 
 @frappe.whitelist()
-def get_last_transactions(customer, item_code):
-    # Step 1: Get up to 5 submitted Sales Invoices
-    invoice_data = frappe.db.sql("""
-        SELECT 'Sales Invoice' AS doctype, si.name AS name, sii.rate, si.posting_date AS date,
-               sii.sales_order
-        FROM `tabSales Invoice Item` sii
-        JOIN `tabSales Invoice` si ON sii.parent = si.name
-        WHERE si.customer = %s AND sii.item_code = %s AND si.docstatus = 1
+def get_item_all_details(item_code, customer,price_list):
+    return {
+        "history": get_last_5_transactions(item_code, customer),
+        "stock": get_company_stock(item_code),
+        "shipment_margin": get_shipment_and_margin(item_code, price_list)
+    }
+
+def get_last_5_transactions(item_code, customer):
+    result = []
+
+    # -----------------------
+    # 1️⃣ SALES INVOICE
+    # -----------------------
+    invoices = frappe.db.sql("""
+        SELECT si.name, sii.qty, sii.rate, si.posting_date AS date
+        FROM `tabSales Invoice` si
+        JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+        WHERE si.customer=%s
+          AND sii.item_code=%s
+          AND si.docstatus=1
         ORDER BY si.posting_date DESC
-        LIMIT 5
     """, (customer, item_code), as_dict=True)
 
-    # Step 2: Get Sales Orders that have never been invoiced (draft or submitted)
-    # Find all orders already linked to invoices
-    invoiced_orders = frappe.db.sql("""
-        SELECT DISTINCT sii.sales_order
-        FROM `tabSales Invoice Item` sii
-        JOIN `tabSales Invoice` si ON sii.parent = si.name
-        WHERE si.customer = %s AND sii.item_code = %s
-          AND sii.sales_order IS NOT NULL
-    """, (customer, item_code))
-    invoiced_orders = {row[0] for row in invoiced_orders if row[0]}
+    for r in invoices:
+        if len(result) >= 5:
+            return result
+        result.append({
+            "doctype": "Sales Invoice",
+            "name": r.name,
+            "qty": r.qty,
+            "rate": r.rate,
+            "date": r.date
+        })
 
-    remaining_count = 5 - len(invoice_data)
-    order_data = []
+    # -----------------------
+    # 2️⃣ SALES ORDER (not invoiced)
+    # -----------------------
+    orders = frappe.db.sql("""
+        SELECT so.name, soi.qty, soi.rate, so.transaction_date AS date
+        FROM `tabSales Order` so
+        JOIN `tabSales Order Item` soi ON soi.parent = so.name
+        WHERE so.customer=%s
+          AND soi.item_code=%s
+          AND so.docstatus=1
+          AND so.name NOT IN (
+              SELECT DISTINCT sii.sales_order
+              FROM `tabSales Invoice Item` sii
+              WHERE sii.sales_order IS NOT NULL
+          )
+        ORDER BY so.transaction_date DESC
+    """, (customer, item_code), as_dict=True)
 
-    if remaining_count > 0:
-        order_data = frappe.db.sql("""
-            SELECT 'Sales Order' AS doctype, so.name AS name, soi.rate, so.transaction_date AS date
-            FROM `tabSales Order Item` soi
-            JOIN `tabSales Order` so ON soi.parent = so.name
-            WHERE so.customer = %(customer)s
-              AND soi.item_code = %(item_code)s
-              AND so.docstatus = 1
-              AND so.name NOT IN %(exclude_orders)s
-            ORDER BY so.transaction_date DESC
-            LIMIT %(limit)s
-        """, {
-            "customer": customer,
-            "item_code": item_code,
-            "exclude_orders": tuple(invoiced_orders) if invoiced_orders else ("",),
-            "limit": remaining_count
-        }, as_dict=True)
+    for r in orders:
+        if len(result) >= 5:
+            return result
+        result.append({
+            "doctype": "Sales Order",
+            "name": r.name,
+            "qty": r.qty,
+            "rate": r.rate,
+            "date": r.date
+        })
 
-    # Step 3: Combine
-    combined_data = invoice_data + order_data
+    # -----------------------
+    # 3️⃣ QUOTATION (not ordered)
+    # -----------------------
+    quotations = frappe.db.sql("""
+        SELECT q.name, qi.qty, qi.rate, q.transaction_date AS date
+        FROM `tabQuotation` q
+        JOIN `tabQuotation Item` qi ON qi.parent = q.name
+        WHERE q.party_name=%s
+          AND qi.item_code=%s
+          AND q.docstatus=1
+          AND q.name NOT IN (
+              SELECT DISTINCT soi.prevdoc_docname
+              FROM `tabSales Order Item` soi
+              WHERE soi.prevdoc_docname IS NOT NULL
+          )
+        ORDER BY q.transaction_date DESC
+    """, (customer, item_code), as_dict=True)
 
-    # Step 4: If no invoices at all, just show orders without invoices
-    if not invoice_data:
-        combined_data = frappe.db.sql("""
-            SELECT 'Sales Order' AS doctype, so.name AS name, soi.rate, so.transaction_date AS date
-            FROM `tabSales Order Item` soi
-            JOIN `tabSales Order` so ON soi.parent = so.name
-            WHERE so.customer = %(customer)s
-              AND soi.item_code = %(item_code)s
-              AND so.docstatus = 1
-              AND so.name NOT IN %(exclude_orders)s
-            ORDER BY so.transaction_date DESC
-            LIMIT 5
-        """, {
-            "customer": customer,
-            "item_code": item_code,
-            "exclude_orders": tuple(invoiced_orders) if invoiced_orders else ("",)
-        }, as_dict=True)
+    for r in quotations:
+        if len(result) >= 5:
+            return result
+        result.append({
+            "doctype": "Quotation",
+            "name": r.name,
+            "qty": r.qty,
+            "rate": r.rate,
+            "date": r.date
+        })
 
-    return combined_data
+    return result
+@frappe.whitelist()
+def get_company_stock(item_code):
+    stock = []
+
+    companies = frappe.get_all("Company", pluck="name")
+
+    for company in companies:
+        warehouses = frappe.get_all(
+            "Warehouse",
+            filters={
+                "company": company,
+                "is_group": 0
+            },
+            pluck="name"
+        )
+
+        if not warehouses:
+            continue
+
+        bin_data = frappe.db.sql("""
+            SELECT
+                SUM(actual_qty) AS actual_qty,
+                SUM(reserved_qty) AS reserved_qty,
+                SUM(projected_qty) AS projected_qty
+            FROM `tabBin`
+            WHERE item_code = %s
+              AND warehouse IN %s
+        """, (item_code, tuple(warehouses)), as_dict=True)[0]
+
+        actual = flt(bin_data.actual_qty)
+        reserved = flt(bin_data.reserved_qty)
+        projected = flt(bin_data.projected_qty)
+        free_stock = max(actual - reserved, 0)
+
+        # 🚨 IMPORTANT FILTER
+        if actual == 0 and free_stock == 0 and projected == 0:
+            continue
+
+        stock.append({
+            "company": company,
+            "actual_stock": actual,
+            "free_stock": free_stock,
+            "projected_stock": projected
+        })
+
+    return stock
+
+@frappe.whitelist()
+def get_shipment_and_margin(item_code, price_list):
+    if not item_code or not price_list:
+        return {}
+
+    data = frappe.db.get_value(
+        "Price List",
+        {
+            "custom_item": item_code,
+            "name": price_list
+        },
+        [
+            "custom_shipping__air_",
+            "custom_shipping__sea_",
+            "custom_min_margin_"
+        ],
+        as_dict=True
+    )
+
+    if not data:
+        return {}
+
+    return {
+        "ship_air": data.custom_shipping__air_ or 0,
+        "ship_sea": data.custom_shipping__sea_ or 0,
+        "std_margin": data.custom_min_margin_ or 0
+    }
+
 
 # ──────────────────────────────────────────────────────────────
 # SMALL HELPERS
@@ -203,65 +305,65 @@ def calc_item_totals(it):
 # 2)  BRAND SUMMARY  (server-side replacement of JS
 #     calculate_brand_summary)
 # ──────────────────────────────────────────────────────────────
-def rebuild_brand_summary(doc):
-    buckets = {}
+# def rebuild_brand_summary(doc):
+#     buckets = {}
 
-    for it in doc.items:
-        b = it.brand or "?"
-        if b not in buckets:
-            buckets[b] = {
-                "shipping":0,"shipping_percent":0,
-                "finance":0,"finance_percent":0,
-                "transport":0,"transport_percent":0,
-                "reward":0,"reward_percent":0,
-                "incentive":0,"incentive_percent":0,
-                "customs":0,"customs_percent":0,
-                "total_cost":0,"total_selling":0,
-                "margin":0,"margin_percent":0,
-                "cnt":0,
-            }
+#     for it in doc.items:
+#         b = it.brand or "?"
+#         if b not in buckets:
+#             buckets[b] = {
+#                 "shipping":0,"shipping_percent":0,
+#                 "finance":0,"finance_percent":0,
+#                 "transport":0,"transport_percent":0,
+#                 "reward":0,"reward_percent":0,
+#                 "incentive":0,"incentive_percent":0,
+#                 "customs":0,"customs_percent":0,
+#                 "total_cost":0,"total_selling":0,
+#                 "margin":0,"margin_percent":0,
+#                 "cnt":0,
+#             }
 
-        bk = buckets[b]
-        bk["shipping"]          += it.shipping
-        bk["shipping_percent"]  += _to_flt(it.shipping_per)
-        bk["finance"]           += it.custom_finance_value
-        bk["finance_percent"]   += _to_flt(it.custom_finance_)
-        bk["transport"]         += it.custom_transport_value
-        bk["transport_percent"] += _to_flt(it.custom_transport_)
-        bk["reward"]            += it.reward
-        bk["reward_percent"]    += _to_flt(it.reward_per)
-        bk["incentive"]         += it.custom_incentive_value
-        bk["incentive_percent"] += _to_flt(it.custom_incentive_)
-        bk["customs"]           += it.custom_customs_value
-        bk["customs_percent"]   += _to_flt(it.custom_customs_)
-        bk["total_cost"]        += it.custom_cogs
-        bk["total_selling"]     += it.custom_selling_price
-        bk["margin"]            += it.custom_markup_value
-        bk["margin_percent"]    += it.custom_margin_
-        bk["cnt"]               += 1
+#         bk = buckets[b]
+#         bk["shipping"]          += it.shipping
+#         bk["shipping_percent"]  += _to_flt(it.shipping_per)
+#         bk["finance"]           += it.custom_finance_value
+#         bk["finance_percent"]   += _to_flt(it.custom_finance_)
+#         bk["transport"]         += it.custom_transport_value
+#         bk["transport_percent"] += _to_flt(it.custom_transport_)
+#         bk["reward"]            += it.reward
+#         bk["reward_percent"]    += _to_flt(it.reward_per)
+#         bk["incentive"]         += it.custom_incentive_value
+#         bk["incentive_percent"] += _to_flt(it.custom_incentive_)
+#         bk["customs"]           += it.custom_customs_value
+#         bk["customs_percent"]   += _to_flt(it.custom_customs_)
+#         bk["total_cost"]        += it.custom_cogs
+#         bk["total_selling"]     += it.custom_selling_price
+#         bk["margin"]            += it.custom_markup_value
+#         bk["margin_percent"]    += it.custom_margin_
+#         bk["cnt"]               += 1
 
-    doc.set("custom_brand_summary", [])
-    for brand, d in buckets.items():
-        n = d.pop("cnt") or 1
-        doc.append("custom_brand_summary", {
-            "brand": brand,
-            "shipping": d["shipping"],
-            "shipping_percent": d["shipping_percent"]/n,
-            "finance": d["finance"],
-            "finance_percent": d["finance_percent"]/n,
-            "transport": d["transport"],
-            "transport_percent": d["transport_percent"]/n,
-            "reward": d["reward"],
-            "reward_percent": d["reward_percent"]/n,
-            "incentive": d["incentive"],
-            "incentive_percent": d["incentive_percent"]/n,
-            "customs": d["customs"],
-            "customs_": d["customs_percent"]/n,
-            "total_cost": d["total_cost"],
-            "total_selling": d["total_selling"],
-            "margin": d["margin"],
-            "margin_percent": d["margin_percent"]/n,
-        })
+#     doc.set("custom_brand_summary", [])
+#     for brand, d in buckets.items():
+#         n = d.pop("cnt") or 1
+#         doc.append("custom_brand_summary", {
+#             "brand": brand,
+#             "shipping": d["shipping"],
+#             "shipping_percent": d["shipping_percent"]/n,
+#             "finance": d["finance"],
+#             "finance_percent": d["finance_percent"]/n,
+#             "transport": d["transport"],
+#             "transport_percent": d["transport_percent"]/n,
+#             "reward": d["reward"],
+#             "reward_percent": d["reward_percent"]/n,
+#             "incentive": d["incentive"],
+#             "incentive_percent": d["incentive_percent"]/n,
+#             "customs": d["customs"],
+#             "customs_": d["customs_percent"]/n,
+#             "total_cost": d["total_cost"],
+#             "total_selling": d["total_selling"],
+#             "margin": d["margin"],
+#             "margin_percent": d["margin_percent"]/n,
+#         })
 
 
 # ──────────────────────────────────────────────────────────────
@@ -276,111 +378,6 @@ def recalc_totals(doc):
     doc.total_std_margin= sum(it.total_std_margin or 0 for it in doc.items)
 
 
-
-# -*- coding: utf-8 -*-
-"""
-Compute two Boolean flags on Quotation so that Workflow conditions
-need only read doc.auto_approve_ok / doc.gm_approve_ok.
-"""
-
-
-# ------------------------------------------------------------------ #
-#  Helper functions — you already wrote these
-# ------------------------------------------------------------------ #
-def rule_1_or_2_pass(doc):
-    """Return True when either margin Rule 1 or Rule 2 passes."""
-    salesperson = (
-        doc.sales_team[0].sales_person
-        if doc.get("sales_team")
-        else doc.get("sales_person")
-    )
-
-    # --------------- helper for Rule 2 ------------------
-    def avg_margin(brand):
-        if not (brand and salesperson):
-            frappe.errprint(f"Brand {brand} or salesperson missing → avg_margin = 0")
-            return 0
-        date_cut = frappe.db.get_single_value(
-            "Selling Settings", "custom_applicable_date"
-        )
-        frappe.errprint(f"Brand {brand} salesperson {salesperson} date_cut {date_cut}")
-        cond = """
-            so.docstatus = 1
-            AND st.sales_person = %(sp)s
-            AND soi.brand = %(br)s
-            AND qi.rate > 0
-        """
-        if date_cut:
-            cond += " AND so.transaction_date >= %(dc)s"
-
-        rows = frappe.db.sql(
-            f"""
-            SELECT qi.rate, qi.custom_cogs, qi.qty
-              FROM `tabSales Order` so
-              JOIN `tabSales Team` st  ON st.parent = so.name
-              JOIN `tabSales Order Item` soi ON soi.parent = so.name
-              JOIN `tabQuotation Item`  qi
-                    ON qi.parent      = soi.prevdoc_docname
-                   AND qi.item_code   = soi.item_code
-             WHERE {cond}
-            """,
-            {"sp": salesperson, "br": brand, "dc": date_cut},
-            as_dict=True,
-        )
-        frappe.errprint(f"Brand {brand} salesperson {salesperson} rows: {rows}")
-        if not rows:
-            frappe.errprint(f"No previous sales orders found for Brand: {brand}")
-            return 0
-        margins = [
-            # (flt(r.rate) - flt(r.custom_cogs) / flt(r.qty or 1)) / flt(r.rate) * 100
-            ((flt(r.rate) - (flt(r.custom_cogs) / flt(r.qty or 1))) / flt(r.rate)) * 100
-
-            for r in rows
-        ]
-        frappe.errprint(f"Brand {brand} margins: {margins}")
-        frappe.errprint(f"Brand {brand} margins: {sum(margins) / len(margins)}")
-        return sum(margins) / len(margins)
-
-    # --------------- apply rules over all items ----------
-    for row in doc.items:
-        std = flt(row.std_margin_per)
-        frappe.errprint(f"Checking item {row.item_code} (Brand: {row.brand}) → Std Margin: {std}, Item Margin: {row.custom_margin_}")
-
-        if flt(row.custom_margin_) >= std:
-            frappe.errprint(f"Rule 1 passed for item {row.item_code} → Item Margin: {row.custom_margin_} >= Std Margin: {std}")# Rule 1
-            return True
-        brand_avg_margin = avg_margin(row.brand)
-        if brand_avg_margin >= std:
-            frappe.errprint(f"Rule 2 passed for item {row.item_code} → Avg Margin: {brand_avg_margin} >= Std Margin: {std}")
-            return True
-        frappe.errprint(f"No rule passed for item {row.item_code}")
-    return False
-
-
-def rule_3_pass(doc):
-    """Return True if GM is allowed to approve the quotation."""
-    for row in doc.items:
-        target = 0.20 * flt(row.custom_selling_price)
-        diff   = target - flt(row.custom_margin_value or 0)
-        if target and (diff / target) * 100 > 20:
-            frappe.errprint(f"Rule 3 failed for item {row.item_code} → {diff / target * 100}% below target margin")
-            return False
-    frappe.errprint("Rule 3 passed for all items")
-
-    return True
-
-
-# ------------------------------------------------------------------ #
-#                Doc-event hook – called on validate
-# ------------------------------------------------------------------ #
-def set_margin_flags(doc, method=None):
-    """
-    Compute & store the two Booleans so Workflow can read them
-    without evaluating Python in the Condition column.
-    """
-    doc.custom_auto_approve_ok = 1 if rule_1_or_2_pass(doc) else 0
-    doc.custom_gm_approve_ok   = 1 if rule_3_pass(doc)      else 0
-
 def validate_total_discount(doc, method):
     """Ensure sum of child discounts matches parent discount amount"""
     parent_discount = doc.custom_discount_amount_value or 0
@@ -388,3 +385,114 @@ def validate_total_discount(doc, method):
 
     if round(total_row_discount, 2) != round(parent_discount, 2):
         frappe.throw("Sum of item discount amounts must equal parent discount amount")
+
+
+def get_overall_margin(salesperson, brand):
+    if not (salesperson and brand):
+        frappe.errprint(f"No salesperson or brand → overall margin = 0")
+        return 0
+
+    date_cut = frappe.db.get_single_value(
+        "Selling Settings", "custom_applicable_date"
+    )
+    frappe.errprint(f"Overall Margin Calculation → Salesperson: {salesperson}, Brand: {brand}, Start Date: {date_cut}")
+
+    cond = """
+        q.docstatus = 1
+        AND q.sales_person = %(sp)s
+        AND qi.brand = %(br)s
+        AND qi.rate > 0
+    """
+
+    if date_cut:
+        cond += " AND q.transaction_date >= %(dc)s"
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT qi.rate, qi.custom_cogs, qi.qty
+        FROM `tabQuotation` q
+        JOIN `tabQuotation Item` qi ON qi.parent = q.name
+        WHERE {cond}
+        """,
+        {"sp": salesperson, "br": brand, "dc": date_cut},
+        as_dict=True,
+    )
+
+    if not rows:
+        frappe.errprint(f"No previous quotations found for Salesperson: {salesperson}, Brand: {brand}")
+        return 0
+
+    margins = []
+    for r in rows:
+        cogs_per_unit = flt(r.custom_cogs) / flt(r.qty or 1)
+        margin = ((flt(r.rate) - cogs_per_unit) / flt(r.rate)) * 100
+        margins.append(margin)
+
+    overall_margin = sum(margins) / len(margins)
+    frappe.errprint(f"Overall Margin: {overall_margin}")
+    frappe.errprint(f"Overall Margin for Salesperson: {salesperson}, Brand: {brand} → {overall_margin}% based on {len(margins)} rows")
+    return overall_margin
+
+
+def set_margin_flags(doc, method=None):
+    doc.custom_auto_approve_ok = 1
+    doc.custom_level_1_approve_ok = 0
+
+    salesperson = doc.sales_person
+
+    level_1_required = False
+    level_2_required = False
+
+    frappe.errprint(
+        f"Starting margin evaluation for Quotation: {doc.name}, Salesperson: {salesperson}"
+    )
+
+    for row in doc.items:
+        std = flt(row.std_margin_per)
+        new = flt(row.custom_margin_)
+        brand = row.brand
+
+        frappe.errprint(
+            f"Item: {row.item_code}, Brand: {brand}, Std Margin: {std}, Custom Margin: {new}"
+        )
+
+        # 1️⃣ Auto approval (no warning)
+        if new >= std or new >= (0.80 * std):
+            frappe.errprint("Auto approval (OK)")
+            continue
+
+        # 2️⃣ Auto approval with warning
+        if new >= (0.60 * std):
+            overall = get_overall_margin(salesperson, brand)
+
+            if overall >= (0.80 * std):
+                frappe.msgprint(
+                    "Current margin below standard, but historical overall margin is healthy."
+                )
+                frappe.errprint("Auto approval with warning")
+                continue
+
+            level_1_required = True
+            frappe.errprint("Level 1 approval required")
+            continue
+
+        # 3️⃣ Level 2 approval
+        level_2_required = True
+        frappe.errprint("Level 2 approval required")
+
+    # 🔻 Final decision (AFTER checking all items)
+
+    if level_2_required:
+        doc.custom_auto_approve_ok = 0
+        doc.custom_level_1_approve_ok = 0
+
+        if not doc.custom_low_margin_reason:
+            frappe.throw("Reason for low margin is mandatory.")
+
+    elif level_1_required:
+        doc.custom_auto_approve_ok = 0
+        doc.custom_level_1_approve_ok = 1
+
+    frappe.errprint(
+        f"Finished margin evaluation → Auto: {doc.custom_auto_approve_ok}, Level 1: {doc.custom_level_1_approve_ok}"
+    )

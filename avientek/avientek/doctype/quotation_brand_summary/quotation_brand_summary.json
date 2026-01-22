@@ -23,7 +23,8 @@
   "total_cost",
   "total_selling",
   "margin",
-  "margin_percent"
+  "margin_percent",
+  "buying_price"
  ],
  "fields": [
   {
@@ -124,17 +125,24 @@
    "fieldname": "margin_percent",
    "fieldtype": "Percent",
    "label": "Margin (%)"
+  },
+  {
+   "fieldname": "buying_price",
+   "fieldtype": "Currency",
+   "label": "Buying Price",
+   "options": "currency"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-06-11 14:33:37.834841",
- "modified_by": "Administrator",
+ "modified": "2026-01-20 15:48:43.665655",
+ "modified_by": "support@quarkcs.com",
  "module": "Avientek",
  "name": "Quotation Brand Summary",
  "owner": "Administrator",
  "permissions": [],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []

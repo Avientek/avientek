@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-01-19 09:58:20.331198",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "ship_air",
+  "ship_sea",
+  "std_margin",
+  "margin"
+ ],
+ "fields": [
+  {
+   "fieldname": "ship_air",
+   "fieldtype": "Percent",
+   "label": "Ship Air %"
+  },
+  {
+   "fieldname": "ship_sea",
+   "fieldtype": "Percent",
+   "label": "Ship Sea %"
+  },
+  {
+   "fieldname": "std_margin",
+   "fieldtype": "Percent",
+   "label": "Std Margin"
+  },
+  {
+   "fieldname": "margin",
+   "fieldtype": "Percent",
+   "label": "Margin %"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-01-22 13:41:31.916994",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Shipment and Margin",
+ "owner": "support@quarkcs.com",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

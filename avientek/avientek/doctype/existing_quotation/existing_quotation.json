@@ -1,0 +1,190 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:quotation_id",
+ "creation": "2026-01-15 08:51:01.187247",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_oq0r",
+  "amended_from",
+  "quotation_id",
+  "quote_by",
+  "source",
+  "sales_person",
+  "company",
+  "column_break_ooka",
+  "posting_date",
+  "closing_date",
+  "probability",
+  "country",
+  "contact",
+  "section_break_xobo",
+  "end_user",
+  "column_break_kdki",
+  "end_user_contact_name",
+  "section_break_aien",
+  "items",
+  "additional_information_section",
+  "note",
+  "dep",
+  "column_break_rbqw",
+  "send"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_oq0r",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Existing Quotation",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "quotation_id",
+   "fieldtype": "Data",
+   "label": "Quotation ID",
+   "unique": 1
+  },
+  {
+   "fieldname": "quote_by",
+   "fieldtype": "Data",
+   "label": "Quote By"
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source"
+  },
+  {
+   "fieldname": "sales_person",
+   "fieldtype": "Link",
+   "label": "Sales Person",
+   "options": "Sales Person"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "column_break_ooka",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Posting Date"
+  },
+  {
+   "fieldname": "closing_date",
+   "fieldtype": "Date",
+   "label": "Closing Date"
+  },
+  {
+   "fieldname": "probability",
+   "fieldtype": "Data",
+   "label": "Probability"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "contact",
+   "fieldtype": "Data",
+   "label": "Contact"
+  },
+  {
+   "fieldname": "section_break_xobo",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "end_user",
+   "fieldtype": "Data",
+   "label": "End User"
+  },
+  {
+   "fieldname": "column_break_kdki",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "end_user_contact_name",
+   "fieldtype": "Data",
+   "label": "End User Contact Name"
+  },
+  {
+   "fieldname": "section_break_aien",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Existing Quotation Item"
+  },
+  {
+   "fieldname": "additional_information_section",
+   "fieldtype": "Section Break",
+   "label": "Additional Information"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Note"
+  },
+  {
+   "fieldname": "dep",
+   "fieldtype": "Data",
+   "label": "Dep"
+  },
+  {
+   "fieldname": "column_break_rbqw",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "send",
+   "fieldtype": "Data",
+   "label": "Send"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-01-22 13:42:03.577116",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Existing Quotation",
+ "naming_rule": "By fieldname",
+ "owner": "support@quarkcs.com",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
