@@ -126,10 +126,9 @@ fixtures = [
      				"Lead-custom_avientek_rating","Lead-custom_reference_from","Lead-custom_section_break_21cky","Lead-custom_focused_brands","Lead-custom_column_break_wq4gu",
          			"Lead-custom_show","Lead-custom_credit_limit_and_payment_terms","Lead-custom_payment_terms","Lead-custom_credit_limit","Lead-custom_party_type","Lead-custom_section_break_szjmi","Lead-custom_contact_details","Lead-custom_partner_type",
 					"Lead Source-custom_column_break_wjdic","Lead Source-custom_country","Lead Source-custom_year","Lead Source-custom_show",
-					"Price List-custom_section_break_inlpb","Price List-custom_brand","Price List-custom_item","Price List-custom_part_number","Price List-custom_standard_price","Price List-custom_msrp","Price List-custom_column_break_bhdgu",
-					"Price List-custom_description","Price List-custom_show","Price List-custom_charges_and_percentage","Price List-custom_shipping__air_","Price List-custom_shipping__sea_","Price List-custom_processing_",
-					"Price List-custom_column_break_3mppj","Price List-custom_min_finance_charge_","Price List-custom_min_margin_","Price List-custom_customs_","Price List-custom_gst__vat_","Price List-custom_section_break_ovokx",
-					"Price List-custom_link","Price List-custom_recommended_products","Price List-custom_section_break_khvp5","Price List-custom_must_quote","Price List-custom_date"
+     				"Item Price-custom_date","Item Price-custom_company","Item Price-custom_part_number","Item Price-custom_link","Item Price-custom_standard_price","Item Price-custom_msrp",
+                    "Item Price-custom_section_break_wquw3","Item Price-custom_recommended_products","Item Price-custom_must_quote","Item Price-custom_charges_and_percentage","Item Price-custom_shipping__air_","Item Price-custom_shipping__sea_",
+                    "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_"
      ),
 			]
 		],

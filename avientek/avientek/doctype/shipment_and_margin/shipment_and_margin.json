@@ -15,21 +15,25 @@
   {
    "fieldname": "ship_air",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Ship Air %"
   },
   {
    "fieldname": "ship_sea",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Ship Sea %"
   },
   {
    "fieldname": "std_margin",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Std Margin"
   },
   {
    "fieldname": "margin",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Margin %"
   }
  ],
@@ -37,7 +41,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-01-22 13:41:31.916994",
+ "modified": "2026-01-24 15:50:05.412549",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Shipment and Margin",

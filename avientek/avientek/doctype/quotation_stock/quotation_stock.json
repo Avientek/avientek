@@ -15,22 +15,26 @@
   {
    "fieldname": "company",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Company",
    "options": "Company"
   },
   {
    "fieldname": "actual_stock",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Actual Stock"
   },
   {
    "fieldname": "free_stock",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Free Stock"
   },
   {
    "fieldname": "projected_stock",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Projected Stock"
   }
  ],
@@ -38,7 +42,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-01-22 13:41:51.910356",
+ "modified": "2026-01-24 15:49:45.001755",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Quotation Stock",

@@ -231,7 +231,7 @@ function update_rates(frm,cdt,cdn){
         let customer_currency = cur_frm.doc.currency;
         let price_list_exchange_rate = cur_frm.doc.plc_conversion_rate || 1; // Price List Exchange Rate
         console.log("Price List rate copy: ",row.price_list_rate_copy)
-        frappe.db.get_value("Price List", {"custom_item": row.item_code,"name":frm.doc.selling_price_list}, "custom_standard_price", (d) => {
+        frappe.db.get_value("Item Price", {"item_code": row.item_code,"price_list":frm.doc.selling_price_list}, "custom_standard_price", (d) => {
             if (customer_currency === price_list_currency) {
             // No conversion needed
                 frappe.model.set_value(row.doctype, row.name, 'custom_standard_price_', d.custom_standard_price);
@@ -302,10 +302,11 @@ frappe.db.get_value(
 
         console.log("Brand values:", b);
 
-        frappe.db.get_list("Price List", {
+        frappe.db.get_list("Item Price", {
             filters: {
-                name: row.selling_price_list,
-                custom_item: row.item_code
+                item_code: row.item_code,
+                price_list: frm.doc.selling_price_list,
+                
             },
             fields: [
                 "name",
@@ -873,7 +874,7 @@ item_code:function(frm, cdt,cdn){
         });
     setTimeout(() => {
         var row = locals[cdt][cdn]
-        frappe.db.get_value("Price List", {"custom_item": row.item_code,"name":frm.doc.selling_price_list}, "custom_standard_price", (d) => {
+        frappe.db.get_value("Item Price", {"item_code": row.item_code,"price_list":frm.doc.selling_price_list}, "custom_standard_price", (d) => {
             // console.log("custom duty",d.price_list_rate)
             if(d.custom_standard_price){
                 frappe.model.set_value(row.doctype,row.name,'usd_price_list_rate',d.custom_standard_price)
@@ -924,6 +925,7 @@ price_list_rate_copy:function(frm,cdt,cdn){
     }
     update_rates(frm,cdt,cdn)
 },
+
 custom_special_price:function(frm,cdt,cdn){
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
@@ -933,6 +935,7 @@ custom_special_price:function(frm,cdt,cdn){
             update_custom_service_totals(frm);
     }
 },
+
 reward_per:function(frm, cdt,cdn){
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
@@ -1078,7 +1081,7 @@ std_margin_per:function(frm, cdt,cdn){
         // }
         update_rates(frm,cdt,cdn)
     }
-s
+
 },
 custom_margin_:function(frm, cdt,cdn){
     sync_shipment_margin_percent(frm, cdt, cdn);
@@ -1092,10 +1095,6 @@ qty:function(frm, cdt,cdn){
             handle_qty_or_rate_change(frm, cdt, cdn);
             update_custom_service_totals(frm);
     }
-    // var row = locals[cdt][cdn]
-    // if(row.brand && row.price_list_rate_copy){
-    //     update_rates(frm,cdt,cdn)
-    // }
 },
 custom_discount_amount_qty: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];

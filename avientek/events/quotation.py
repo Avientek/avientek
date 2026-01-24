@@ -220,10 +220,10 @@ def get_shipment_and_margin(item_code, price_list):
         return {}
 
     data = frappe.db.get_value(
-        "Price List",
+        "Item Price",
         {
-            "custom_item": item_code,
-            "name": price_list
+            "item_code": item_code,
+            "price_list": price_list
         },
         [
             "custom_shipping__air_",
@@ -486,8 +486,8 @@ def set_margin_flags(doc, method=None):
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 0
 
-        if not doc.custom_low_margin_reason:
-            frappe.throw("Reason for low margin is mandatory.")
+        # if not doc.custom_low_margin_reason:
+        #     frappe.throw("Reason for low margin is mandatory.")
 
     elif level_1_required:
         doc.custom_auto_approve_ok = 0

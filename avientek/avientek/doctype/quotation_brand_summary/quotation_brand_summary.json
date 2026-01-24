@@ -28,8 +28,10 @@
  ],
  "fields": [
   {
+   "columns": 1,
    "fieldname": "brand",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Brand",
    "options": "Brand"
   },
@@ -40,8 +42,10 @@
    "options": "currency"
   },
   {
+   "columns": 1,
    "fieldname": "shipping_percent",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Shipping (%)"
   },
   {
@@ -51,8 +55,10 @@
    "options": "currency"
   },
   {
+   "columns": 1,
    "fieldname": "finance_percent",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Finance (%)"
   },
   {
@@ -62,8 +68,10 @@
    "options": "currency"
   },
   {
+   "columns": 1,
    "fieldname": "transport_percent",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Transport (%)"
   },
   {
@@ -88,8 +96,10 @@
    "options": "currency"
   },
   {
+   "columns": 1,
    "fieldname": "incentive_percent",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Incentive (%)"
   },
   {
@@ -104,31 +114,41 @@
    "label": "Customs (%)"
   },
   {
+   "columns": 1,
    "fieldname": "total_cost",
    "fieldtype": "Currency",
+   "in_list_view": 1,
    "label": "Total Cost",
    "options": "currency"
   },
   {
+   "columns": 1,
    "fieldname": "total_selling",
    "fieldtype": "Currency",
+   "in_list_view": 1,
    "label": "Total Selling",
    "options": "currency"
   },
   {
+   "columns": 1,
    "fieldname": "margin",
    "fieldtype": "Currency",
+   "in_list_view": 1,
    "label": "Margin",
    "options": "currency"
   },
   {
+   "columns": 1,
    "fieldname": "margin_percent",
    "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Margin (%)"
   },
   {
+   "columns": 1,
    "fieldname": "buying_price",
    "fieldtype": "Currency",
+   "in_list_view": 1,
    "label": "Buying Price",
    "options": "currency"
   }
@@ -136,8 +156,8 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-01-20 15:48:43.665655",
- "modified_by": "support@quarkcs.com",
+ "modified": "2026-01-24 16:05:06.049429",
+ "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Quotation Brand Summary",
  "owner": "Administrator",
