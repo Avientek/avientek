@@ -5,72 +5,108 @@ from frappe.model.workflow import apply_workflow
 import json
 from decimal import Decimal, ROUND_HALF_UP
 
+
 @frappe.whitelist()
 def apply_discount(doc, discount_amount):
     quotation = frappe.parse_json(doc)
+
     discount = Decimal(str(discount_amount or 0))
     if discount <= 0:
         frappe.throw("Please enter a valid discount amount")
 
     items = quotation.get("items", []) or []
 
-    # Filter only items without discount applied before
-    new_items = [i for i in items if not i.get("custom_discount_amount_value") and not i.get("custom_discount_amount_qty")]
+    # Apply only to items which are not discounted already
+    new_items = [
+        i for i in items
+        if not i.get("custom_discount_amount_qty")
+    ]
 
-    total_qty = sum(Decimal(str(i.get("qty") or 0)) for i in new_items)
-    if total_qty <= 0:
-        frappe.throw("No new items available to apply discount")
+    if not new_items:
+        frappe.throw("No items available to apply discount")
 
-    per_unit = discount / total_qty
+    # Calculate total selling value (BEFORE discount)
+    total_selling = Decimal("0.0")
+    for i in new_items:
+        selling = Decimal(str(
+            i.get("custom_selling_price")
+            or i.get("amount")
+            or 0
+        ))
+        total_selling += selling
+
+    if total_selling <= 0:
+        frappe.throw("Invalid selling amount")
+
+    q = lambda x: float(x.quantize(Decimal("1.0000"), rounding=ROUND_HALF_UP))
+
     updated_items = []
-    total_new_selling = Decimal('0.0')
-
-    q = lambda x: float(x.quantize(Decimal('1.0000'), rounding=ROUND_HALF_UP))
+    total_new_selling = Decimal("0.0")
 
     for i in new_items:
         name = i.get("name")
         qty = Decimal(str(i.get("qty") or 0))
-        unit_price = Decimal(str(i.get("custom_special_rate") if i.get("custom_special_rate") is not None else i.get("rate") or 0))
-        item_discount = (per_unit * qty)
 
-        new_unit_price = unit_price - per_unit
-        if new_unit_price < 0:
-            new_unit_price = Decimal('0.0')
+        selling = Decimal(str(
+            i.get("custom_selling_price")
+            or i.get("amount")
+            or 0
+        ))
 
-        new_selling_amount = (new_unit_price * qty)
+        # Proportional discount
+        share = selling / total_selling
+        item_discount = discount * share
 
-        old_margin_val = Decimal(str(i.get("custom_margin_value") or 0))
-        new_margin_val = old_margin_val - item_discount
+        new_selling = selling - item_discount
+        if new_selling < 0:
+            new_selling = Decimal("0.0")
+
+        new_rate = new_selling / qty if qty else Decimal("0.0")
+
+        # Margin recalculation
+        cost_rate = Decimal(str((i.get("custom_cogs") or 0))) / qty if qty else Decimal("0.0")
+        selling_rate = new_rate
+
+        new_margin_val = (selling_rate - cost_rate) * qty
         if new_margin_val < 0:
-            new_margin_val = Decimal('0.0')
+            new_margin_val = Decimal("0.0")
 
-        new_margin_pct = (new_margin_val / new_selling_amount * 100) if new_selling_amount != 0 else Decimal('0.0')
+        new_margin_pct = (
+            ((selling_rate - cost_rate) / selling_rate) * 100
+            if selling_rate else Decimal("0.0")
+        )
+
 
         updated_items.append({
             "name": name,
             "allocated_discount": q(item_discount),
-            "custom_special_rate": q(new_unit_price),
-            "custom_selling_price": q(new_selling_amount),
-            "custom_discount_amount_value": q(per_unit),
+            "custom_special_rate": q(new_rate),
+            "custom_selling_price": q(new_selling),
+            "custom_discount_amount_value": (
+                (item_discount / qty).quantize(Decimal("1.0000"), rounding=ROUND_HALF_UP)
+                if qty else Decimal("0.0")
+            ),
+
             "custom_discount_amount_qty": q(item_discount),
             "custom_margin_value": q(new_margin_val),
-            "custom_margin_": q(new_margin_pct)
+            "custom_margin_": q(new_margin_pct),
         })
 
-        total_new_selling += new_selling_amount
+        total_new_selling += new_selling
 
-    parent_discount_pct = q(discount / total_new_selling * 100) if total_new_selling != 0 else 0.0
+    parent_discount_pct = (
+        q((discount / total_selling) * 100)
+        if total_selling else 0.0
+    )
 
     exchange_rate = Decimal(str(quotation.get("conversion_rate") or 1))
-    grand_total_usd = q(total_new_selling)
-    grand_total_aed = q(total_new_selling * exchange_rate)
 
     return {
         "custom_discount_amount_value": q(discount),
         "custom_discount_": parent_discount_pct,
         "items": updated_items,
-        "total": grand_total_usd,
-        "base_total": grand_total_aed
+        "total": q(total_new_selling),
+        "base_total": q(total_new_selling * exchange_rate),
     }
 
 @frappe.whitelist()
