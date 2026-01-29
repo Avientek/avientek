@@ -216,6 +216,9 @@ frappe.ui.form.on('Quotation', {
 function update_rates(frm,cdt,cdn){
     console.log("update rates")
     var row = locals[cdt][cdn]
+    if (row.__manual_price_override) {
+        return;
+    }
     var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
     if (frm.doc.currency == company_currency){
         var conversion_rate = 1
@@ -936,6 +939,7 @@ function distribute_incentive(frm) {
 frappe.ui.form.on('Quotation Item',{
 item_code:function(frm, cdt,cdn){
         var row = locals[cdt][cdn]
+        row.__manual_price_override = false;
         if (!frm.doc.party_name) {
             frappe.msgprint(__('Customer must be selected before choosing an item.'));
             return;
@@ -1039,11 +1043,16 @@ price_list_rate_copy:function(frm,cdt,cdn){
     }
     update_rates(frm,cdt,cdn)
 },
-
+custom_standard_price_(frm, cdt, cdn) {
+    let row = locals[cdt][cdn];
+    row.__manual_price_override = true;
+},
 custom_special_price:function(frm,cdt,cdn){
+    let row = locals[cdt][cdn];
+    row.__manual_price_override = true;
     calculate_all(frm, cdt, cdn);
     calculate_custom_rate(frm, cdt, cdn);
-    var row = locals[cdt][cdn]
+    // var row = locals[cdt][cdn]
     if (row.parentfield === 'custom_service_items') {
             handle_qty_or_rate_change(frm, cdt, cdn);
             update_custom_service_totals(frm);
