@@ -16,14 +16,22 @@ def apply_discount(doc, discount_amount):
 
     items = quotation.get("items", []) or []
 
-    # Apply only to items which are not discounted already
-    new_items = [
-        i for i in items
-        if not i.get("custom_discount_amount_qty")
-    ]
-
-    if not new_items:
+    if not items:
         frappe.throw("No items available to apply discount")
+
+    new_items = items
+
+
+    # items = quotation.get("items", []) or []
+
+    # # Apply only to items which are not discounted already
+    # new_items = [
+    #     i for i in items
+    #     if not i.get("custom_discount_amount_qty")
+    # ]
+
+    # if not new_items:
+    #     frappe.throw("No items available to apply discount")
 
     # Calculate total selling value (BEFORE discount)
     total_selling = Decimal("0.0")
@@ -58,16 +66,19 @@ def apply_discount(doc, discount_amount):
         item_discount = discount * share
 
         new_selling = selling - item_discount
+        frappe.errprint(f"Item {name}: Original Selling: {selling}, Discount: {item_discount}, New Selling: {new_selling}")
         if new_selling < 0:
             new_selling = Decimal("0.0")
 
         new_rate = new_selling / qty if qty else Decimal("0.0")
-
+        frappe.errprint(f"Item {name}: New Rate: {new_rate}")
         # Margin recalculation
-        cost_rate = Decimal(str((i.get("custom_cogs") or 0))) / qty if qty else Decimal("0.0")
+        cost_rate = Decimal(str((i.get("custom_cogs") or 0)))
+        frappe.errprint(f"Item {name}: Cost Rate: {cost_rate}")
         selling_rate = new_rate
 
-        new_margin_val = (selling_rate - cost_rate) * qty
+        new_margin_val = (selling_rate - cost_rate)
+        frappe.errprint(f"Item {name}: New Margin Value: {new_margin_val}")
         if new_margin_val < 0:
             new_margin_val = Decimal("0.0")
 
@@ -75,7 +86,7 @@ def apply_discount(doc, discount_amount):
             ((selling_rate - cost_rate) / selling_rate) * 100
             if selling_rate else Decimal("0.0")
         )
-
+        frappe.errprint(f"Item {name}: New Margin Percent: {new_margin_pct}")
 
         updated_items.append({
             "name": name,
