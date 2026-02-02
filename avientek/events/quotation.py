@@ -63,7 +63,7 @@ def apply_discount(doc, discount_amount):
         # Margin recalculation
         cost_rate = Decimal(str((i.get("custom_cogs") or 0)))
         frappe.errprint(f"Item {name}: Cost Rate: {cost_rate}")
-        selling_rate = new_rate
+        selling_rate = new_selling
 
         new_margin_val = (selling_rate - cost_rate)
         frappe.errprint(f"Item {name}: New Margin Value: {new_margin_val}")
