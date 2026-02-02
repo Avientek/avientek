@@ -106,7 +106,7 @@ fixtures = [
 					"Quotation-custom_discount_amount_value","Quotation-custom_discount_",
      				"Quotation-custom_column_break_lqu6l","Quotation-custom_apply_discount",
 					"Quotation Item-custom_discount_amount_value","Quotation Item-custom_discount_amount_qty",
-					"Quotation Item-custom_special_price_note","Quotation Item-Quotation Item-custom_delivery_eta_copy",
+					"Quotation Item-custom_special_price_note","Quotation Item-Quotation Item-custom_delivery_eta_copy","Quotation Item-custom_shipping_mode",
 					"Quotation-custom_created_by","Quotation-custom_section_break_tlqc2","Quotation-","Quotation-custom_note"
 					"Quotation-custom_competition_note","Quotation-custom_section_break_ief6u","Quotation-custom_credit_limit","Quotation-custom_overdue",
 					"Quotation-custom_column_break_ak1um","Quotation-custom_outstanding","Quotation-custom_end_user","Quotation-custom_section_break_qx0xq",
@@ -118,7 +118,7 @@ fixtures = [
      				"Quotation-custom_total_cost_new","Quotation-custom_total_selling_new",
 					"Quotation-custom_partial_delivery_accepted","Quotation-custom_shipment_and_margin","Quotation-custom_column_break_uhyss",
      				"Quotation-custom_stock","Quotation-custom_shipping_mode","Quotation-custom_total_buying_price","Quotation-custom_incentive_","Quotation-custom_incentive_amount",
-         			"Quotation-custom_distribute_incentive_based_on","Quotation-custom_low_margin_reason",
+         			"Quotation-custom_distribute_incentive_based_on","Quotation-custom_low_margin_reason","Quotation-custom_apply_incentive",
 					"Brand-custom_column_break_twekt","Brand-custom_date","Brand-custom_company","Brand-custom_city","Brand-custom_country","Brand-custom_contact_details",
      				"Brand-custom_section_break_ntgnq","Brand-custom_type","Brand-custom_industry_rating","Brand-custom_avientek_rating","Brand-custom_column_break_rakhm","Brand-custom_brand_level",
 					"Brand-custom_show","Brand-custom_contacts","Brand-custom_company_1","Brand-custom_supplier_address","Brand-custom_address",
