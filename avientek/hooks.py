@@ -273,15 +273,15 @@ doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
 # has_permission = {
 # "Event": "frappe.desk.doctype.event.event.has_permission",
 # }
-permission_query_conditions = {
-    "Project Quotation": "avientek.events.sales_person_permission.project_quotation_pqc",
-    "Quotation": "avientek.events.sales_person_permission.quotation_pqc",
-}
+# permission_query_conditions = {
+#     "Project Quotation": "avientek.events.sales_person_permission.project_quotation_pqc",
+#     "Quotation": "avientek.events.sales_person_permission.quotation_pqc",
+# }
 
-has_permission = {
-    "Project Quotation": "avientek.events.sales_person_permission.project_quotation_has_perm",
-    "Quotation": "avientek.events.sales_person_permission.quotation_has_perm",
-}
+# has_permission = {
+#     "Project Quotation": "avientek.events.sales_person_permission.project_quotation_has_perm",
+#     "Quotation": "avientek.events.sales_person_permission.quotation_has_perm",
+# }
 # DocType Class
 # ---------------
 # Override standard doctype classes
@@ -305,7 +305,10 @@ doc_events = {
     "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
     "Quotation": {
         "validate": "avientek.events.quotation.set_margin_flags",
-        "before_save": "avientek.events.quotation.validate_total_discount"
+        "before_save": [
+            "avientek.events.quotation.validate_total_discount",
+            "avientek.events.quotation.calculate_additional_discount_percentage"
+        ]
     },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
 }

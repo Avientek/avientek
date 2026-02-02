@@ -21,18 +21,6 @@ def apply_discount(doc, discount_amount):
 
     new_items = items
 
-
-    # items = quotation.get("items", []) or []
-
-    # # Apply only to items which are not discounted already
-    # new_items = [
-    #     i for i in items
-    #     if not i.get("custom_discount_amount_qty")
-    # ]
-
-    # if not new_items:
-    #     frappe.throw("No items available to apply discount")
-
     # Calculate total selling value (BEFORE discount)
     total_selling = Decimal("0.0")
     for i in new_items:
@@ -162,16 +150,18 @@ def get_last_5_transactions(item_code, customer):
         SELECT so.name, soi.qty, soi.rate, so.transaction_date AS date
         FROM `tabSales Order` so
         JOIN `tabSales Order Item` soi ON soi.parent = so.name
-        WHERE so.customer=%s
-          AND soi.item_code=%s
-          AND so.docstatus=1
-          AND so.name NOT IN (
-              SELECT DISTINCT sii.sales_order
-              FROM `tabSales Invoice Item` sii
-              WHERE sii.sales_order IS NOT NULL
-          )
+        WHERE so.customer = %s
+        AND soi.item_code = %s
+        AND so.docstatus = 1
+        AND so.status IN ("To Deliver and Bill", "To Deliver", "To Bill", "Completed", "Closed")
+        AND so.name NOT IN (
+            SELECT DISTINCT sii.sales_order
+            FROM `tabSales Invoice Item` sii
+            WHERE sii.sales_order IS NOT NULL
+        )
         ORDER BY so.transaction_date DESC
     """, (customer, item_code), as_dict=True)
+
 
     for r in orders:
         if len(result) >= 5:
@@ -424,6 +414,28 @@ def recalc_totals(doc):
     doc.total_levee     = sum(it.total_levee     or 0 for it in doc.items)
     doc.total_std_margin= sum(it.total_std_margin or 0 for it in doc.items)
 
+def calculate_additional_discount_percentage(doc, method=None):
+    if not doc.discount_amount:
+        return
+
+    if not doc.apply_discount_on:
+        return
+
+    # Base amount
+    base_amount = 0
+    if doc.apply_discount_on == "Net Total":
+        base_amount = doc.net_total
+    elif doc.apply_discount_on == "Grand Total":
+        base_amount = doc.grand_total
+
+    if not base_amount:
+        return
+
+    # Convert amount → percentage
+    percentage = (doc.discount_amount / base_amount) * 100
+
+    # Set percentage so core uses it
+    doc.additional_discount_percentage = round(percentage, 2)
 
 def validate_total_discount(doc, method):
     """Ensure sum of child discounts matches parent discount amount"""
@@ -436,13 +448,11 @@ def validate_total_discount(doc, method):
 
 def get_overall_margin(salesperson, brand):
     if not (salesperson and brand):
-        frappe.errprint(f"No salesperson or brand → overall margin = 0")
         return 0
 
     date_cut = frappe.db.get_single_value(
         "Selling Settings", "custom_applicable_date"
     )
-    frappe.errprint(f"Overall Margin Calculation → Salesperson: {salesperson}, Brand: {brand}, Start Date: {date_cut}")
 
     cond = """
         q.docstatus = 1
@@ -466,7 +476,6 @@ def get_overall_margin(salesperson, brand):
     )
 
     if not rows:
-        frappe.errprint(f"No previous quotations found for Salesperson: {salesperson}, Brand: {brand}")
         return 0
 
     margins = []
@@ -476,8 +485,6 @@ def get_overall_margin(salesperson, brand):
         margins.append(margin)
 
     overall_margin = sum(margins) / len(margins)
-    frappe.errprint(f"Overall Margin: {overall_margin}")
-    frappe.errprint(f"Overall Margin for Salesperson: {salesperson}, Brand: {brand} → {overall_margin}% based on {len(margins)} rows")
     return overall_margin
 
 
@@ -490,56 +497,48 @@ def set_margin_flags(doc, method=None):
     level_1_required = False
     level_2_required = False
 
-    frappe.errprint(
-        f"Starting margin evaluation for Quotation: {doc.name}, Salesperson: {salesperson}"
-    )
-
     for row in doc.items:
         std = flt(row.std_margin_per)
         new = flt(row.custom_margin_)
         brand = row.brand
 
-        frappe.errprint(
-            f"Item: {row.item_code}, Brand: {brand}, Std Margin: {std}, Custom Margin: {new}"
-        )
-
         # 1️⃣ Auto approval (no warning)
         if new >= std or new >= (0.80 * std):
-            frappe.errprint("Auto approval (OK)")
             continue
 
         # 2️⃣ Auto approval with warning
         if new >= (0.60 * std):
             overall = get_overall_margin(salesperson, brand)
-
+            frappe.errprint(f"Overall margin for SP {salesperson} and brand {brand}: {overall}%")
             if overall >= (0.80 * std):
                 frappe.msgprint(
-                    "Current margin below standard, but historical overall margin is healthy."
+                    f"""
+                    Brand <b>{brand}</b><br>
+                    Current Margin : <b>{round(new, 2)}%</b><br>
+                    Standard Margin : <b>{round(std, 2)}%</b><br>
+                    Short by : <b>{round(std - new, 2)}%</b><br>
+                    Historical Overall Margin : <b>{round(overall, 2)}%</b>
+                    """,
+                    title="Margin Warning",
+                    indicator="orange"
                 )
-                frappe.errprint("Auto approval with warning")
+
+                # frappe.msgprint(
+                #     "Current margin below standard, but historical overall margin is healthy."
+                # )
                 continue
 
             level_1_required = True
-            frappe.errprint("Level 1 approval required")
             continue
 
         # 3️⃣ Level 2 approval
         level_2_required = True
-        frappe.errprint("Level 2 approval required")
-
     # 🔻 Final decision (AFTER checking all items)
 
     if level_2_required:
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 0
 
-        # if not doc.custom_low_margin_reason:
-        #     frappe.throw("Reason for low margin is mandatory.")
-
     elif level_1_required:
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 1
-
-    frappe.errprint(
-        f"Finished margin evaluation → Auto: {doc.custom_auto_approve_ok}, Level 1: {doc.custom_level_1_approve_ok}"
-    )

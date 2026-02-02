@@ -1,7 +1,24 @@
+let QUOTATION_ALLOW_WRITE = true;
+let QUOTATION_ITEM_ADD_IN_PROGRESS = false;
+
 frappe.ui.form.on('Quotation', {
     validate: function(frm) {
         calculate_brand_summary(frm);
     },
+    before_save(frm) {
+        QUOTATION_ALLOW_WRITE = true;
+    },
+
+    after_save(frm) {
+        QUOTATION_ITEM_ADD_IN_PROGRESS = false;
+
+        QUOTATION_ALLOW_WRITE = false;
+
+        setTimeout(() => {
+            frm.doc.__unsaved = 0;
+        }, 300);
+    },
+
     custom_shipping_mode: function (frm) {
         update_items_shipping_percent(frm);
     },
@@ -204,10 +221,13 @@ frappe.ui.form.on('Quotation', {
         distribute_incentive(frm);
     },
 
-    custom_distribute_incentive_based_on(frm) {
+    // custom_distribute_incentive_based_on(frm) {
+    //     distribute_incentive(frm);
+    // },
+    custom_apply_incentive(frm) {
         distribute_incentive(frm);
-    }
-
+    },
+    
 
 });
 
@@ -264,142 +284,135 @@ function update_rates(frm,cdt,cdn){
         })
     },100)
 
-    setTimeout(() => {
-
-        },100)
-        
-    frm.trigger('calculate_total')
-
 }
 
 
 function rate_calculation(frm,cdt,cdn){
-// console.log("rate calc")
-var row = locals[cdt][cdn]
-var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
-if (!frm.doc.amended_from){
-if (frm.doc.currency == company_currency){
-    var conversion_rate = 1
-}
-else {
-    var conversion_rate = frm.doc.conversion_rate
-}
+    var row = locals[cdt][cdn]
+    var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
+    if (!frm.doc.amended_from){
+    if (frm.doc.currency == company_currency){
+        var conversion_rate = 1
+    }
+    else {
+        var conversion_rate = frm.doc.conversion_rate
+    }
 
-
-}
-
-frappe.db.get_value(
-    "Brand",
-    { brand: row.brand },
-    [
-        "shipping",
-        "processing_charges",
-        "reward",
-        "levee",
-        "std_margin",
-        "custom_finance_",
-        "custom_transport"
-    ],
-    (b) => {
-        if (!b) return;
-
-        console.log("Brand values:", b);
-
-        frappe.db.get_list("Item Price", {
-            filters: {
-                item_code: row.item_code,
-                price_list: frm.doc.selling_price_list,
-                
-            },
-            fields: [
-                "name",
-                "custom_shipping__air_",
-                "custom_shipping__sea_",
-                "custom_processing_",
-                "custom_min_finance_charge_",
-                "custom_min_margin_",
-                "custom_customs_",
-                "custom_gst__vat_"  
-
-            ],
-            limit: 1
-        }).then((res) => {
-
-            if (!res || !res.length) {
-                console.log(
-                    "No Price List found for",
-                    "Price List:", row.selling_price_list,
-                    "Item:", row.item_code
-                );
-                return;
-            }
-
-            const p = res[0];
-
-            // 🔍 DEBUG LOGS
-            console.log("Matched Price List row:", p);
-            console.log("Shipping Air %:", p.custom_shipping__air_);
-            console.log("Shipping Sea %:", p.custom_shipping__sea_);
-            console.log("Processing %:", p.custom_processing_);
-            console.log("Min Finance Charge %:", p.custom_min_finance_charge_);
-            console.log("Min Margin %:", p.custom_min_margin_);
-            console.log("Customs %:", p.custom_customs_);
-            console.log("GST / VAT %:", p.custom_gst__vat_);
-
-            // ─────────────────────────────────────
-            // SET VALUES IN QUOTATION ITEM ROW
-            // ─────────────────────────────────────
-
-            if (!row.shipping_per) {
-                frappe.model.set_value(
-                    row.doctype,
-                    row.name,
-                    "shipping_per",
-                    p.custom_shipping__air_
-                );
-            }
-
-            if (!row.processing_charges_per) {
-                frappe.model.set_value(
-                    row.doctype,
-                    row.name,
-                    "processing_charges_per",
-                    p.custom_processing_
-                );
-            }
-
-            if (!row.std_margin_per) {
-                frappe.model.set_value(
-                    row.doctype,
-                    row.name,
-                    "std_margin_per",
-                    p.custom_min_margin_
-                );
-            }
-
-            if (!row.custom_finance_) {
-                frappe.model.set_value(
-                    row.doctype,
-                    row.name,
-                    "custom_finance_",
-                    p.custom_min_finance_charge_
-                );
-            }
-
-            if (!row.custom_customs_) {
-                frappe.model.set_value(
-                    row.doctype,
-                    row.name,
-                    "custom_customs_",
-                    p.custom_customs_
-                );
-            }
-
-            update_rates(frm, cdt, cdn);
-        });
 
     }
-);
+
+    frappe.db.get_value(
+        "Brand",
+        { brand: row.brand },
+        [
+            "shipping",
+            "processing_charges",
+            "reward",
+            "levee",
+            "std_margin",
+            "custom_finance_",
+            "custom_transport"
+        ],
+        (b) => {
+            if (!b) return;
+
+            console.log("Brand values:", b);
+
+            frappe.db.get_list("Item Price", {
+                filters: {
+                    item_code: row.item_code,
+                    price_list: frm.doc.selling_price_list,
+                    
+                },
+                fields: [
+                    "name",
+                    "custom_shipping__air_",
+                    "custom_shipping__sea_",
+                    "custom_processing_",
+                    "custom_min_finance_charge_",
+                    "custom_min_margin_",
+                    "custom_customs_",
+                    "custom_gst__vat_"  
+
+                ],
+                limit: 1
+            }).then((res) => {
+
+                if (!res || !res.length) {
+                    console.log(
+                        "No Price List found for",
+                        "Price List:", row.selling_price_list,
+                        "Item:", row.item_code
+                    );
+                    return;
+                }
+
+                const p = res[0];
+
+                // 🔍 DEBUG LOGS
+                console.log("Matched Price List row:", p);
+                console.log("Shipping Air %:", p.custom_shipping__air_);
+                console.log("Shipping Sea %:", p.custom_shipping__sea_);
+                console.log("Processing %:", p.custom_processing_);
+                console.log("Min Finance Charge %:", p.custom_min_finance_charge_);
+                console.log("Min Margin %:", p.custom_min_margin_);
+                console.log("Customs %:", p.custom_customs_);
+                console.log("GST / VAT %:", p.custom_gst__vat_);
+
+                // ─────────────────────────────────────
+                // SET VALUES IN QUOTATION ITEM ROW
+                // ─────────────────────────────────────
+
+                if (!row.shipping_per) {
+                    frappe.model.set_value(
+                        row.doctype,
+                        row.name,
+                        "shipping_per",
+                        p.custom_shipping__air_
+                    );
+                }
+
+                if (!row.processing_charges_per) {
+                    frappe.model.set_value(
+                        row.doctype,
+                        row.name,
+                        "custom_transport_",
+                        p.custom_processing_
+                    );
+                }
+
+                if (!row.std_margin_per) {
+                    frappe.model.set_value(
+                        row.doctype,
+                        row.name,
+                        "std_margin_per",
+                        p.custom_min_margin_
+                    );
+                }
+
+                if (!row.custom_finance_) {
+                    frappe.model.set_value(
+                        row.doctype,
+                        row.name,
+                        "custom_finance_",
+                        p.custom_min_finance_charge_
+                    );
+                }
+
+                if (!row.custom_customs_) {
+                    frappe.model.set_value(
+                        row.doctype,
+                        row.name,
+                        "custom_customs_",
+                        p.custom_customs_
+                    );
+                }
+
+                update_rates(frm, cdt, cdn);
+            });
+
+        }
+    );
 
 
 }
@@ -431,7 +444,7 @@ function calculate_all(frm, cdt, cdn) {
 
     let shipping = (shipping_per * std_price / 100) * qty;
     let finance = (finance_per * sp / 100) * qty;
-    let transport = (transport_per * std_price / 100) * qty;
+    let transport = (transport_per * sp / 100) * qty;
     let reward = (reward_per * sp / 100) * qty;
 
     let base_amount = (sp * qty) + shipping + finance + transport + reward;
@@ -461,75 +474,6 @@ function calculate_all(frm, cdt, cdn) {
     frappe.model.set_value(cdt, cdn, 'custom_customs_value', customs);
     frappe.model.set_value(cdt, cdn, 'custom_selling_price', selling_price);
 }
-function calculate_percentages_from_values(frm, cdt, cdn) {
-    let row = locals[cdt][cdn];
-
-    function flt(val) {
-        return parseFloat(val) || 0;
-    }
-
-    let qty = flt(row.qty) || 1;
-
-    let std_price = flt(row.custom_standard_price_);
-    let sp = flt(row.custom_special_price);
-
-    let shipping_val = flt(row.shipping);
-    let finance_val = flt(row.custom_finance_value);
-    let transport_val = flt(row.custom_transport_value);
-    let reward_val = flt(row.reward);
-    let std_margin_val = flt(row.std_margin);
-    let incentive_val = flt(row.custom_incentive_value);
-    let markup_val = flt(row.custom_markup_value);
-    let customs_val = flt(row.custom_customs_value);
-
-    // ---------- BASE CALCULATIONS ----------
-    let shipping_base = std_price * qty;
-    let finance_base = sp * qty;
-    let transport_base = std_price * qty;
-    let reward_base = sp * qty;
-    let std_margin_base = std_price * qty;
-
-    let base_amount =
-        (sp * qty) +
-        shipping_val +
-        finance_val +
-        transport_val +
-        reward_val;
-
-    let markup_base = base_amount + incentive_val;
-    let total = markup_base + markup_val;
-    let selling_price = total + customs_val;
-
-    // ---------- PERCENTAGE CONVERSIONS ----------
-    let shipping_per = shipping_base ? (shipping_val / shipping_base) * 100 : 0;
-    let finance_per = finance_base ? (finance_val / finance_base) * 100 : 0;
-    let transport_per = transport_base ? (transport_val / transport_base) * 100 : 0;
-    let reward_per = reward_base ? (reward_val / reward_base) * 100 : 0;
-    let std_margin_per = std_margin_base ? (std_margin_val / std_margin_base) * 100 : 0;
-    let incentive_per = base_amount ? (incentive_val / base_amount) * 100 : 0;
-    let markup_per = markup_base ? (markup_val / markup_base) * 100 : 0;
-    let customs_per = total ? (customs_val / total) * 100 : 0;
-
-    // ---------- MARGIN ----------
-    let margin_percent = selling_price
-        ? (markup_val / selling_price) * 100
-        : 0;
-
-    let margin_value = (margin_percent / 100) * selling_price;
-
-    // ---------- SET PERCENTAGE FIELDS ----------
-    frappe.model.set_value(cdt, cdn, "shipping_per", shipping_per);
-    frappe.model.set_value(cdt, cdn, "custom_finance_", finance_per);
-    frappe.model.set_value(cdt, cdn, "custom_transport_", transport_per);
-    frappe.model.set_value(cdt, cdn, "reward_per", reward_per);
-    frappe.model.set_value(cdt, cdn, "std_margin_per", std_margin_per);
-    frappe.model.set_value(cdt, cdn, "custom_incentive_", incentive_per);
-    frappe.model.set_value(cdt, cdn, "custom_markup_", markup_per);
-    frappe.model.set_value(cdt, cdn, "custom_customs_", customs_per);
-    frappe.model.set_value(cdt, cdn, "custom_margin_", margin_percent);
-    frappe.model.set_value(cdt, cdn, "custom_margin_value", margin_value);
-}
-
 
 function calculate_brand_summary(frm) {
     let brand_data = {};
@@ -544,8 +488,8 @@ function calculate_brand_summary(frm) {
                 shipping_percent: 0,
                 finance: 0,
                 finance_percent: 0,
-                transport: 0,
-                transport_percent: 0,
+                processing: 0,
+                processing_percent: 0,
                 reward: 0,
                 reward_percent: 0,
                 incentive: 0,
@@ -576,10 +520,11 @@ function calculate_brand_summary(frm) {
         let buying_price = sp * qty;
         let shipping = ((flt(row.shipping_per) * std_price) / 100) * qty;
         let finance = ((flt(row.custom_finance_) * sp) / 100) * qty;
-        let transport = ((flt(row.custom_transport_) * std_price) / 100) * qty;
+        let processing = ((flt(row.custom_transport_) * sp) / 100) * qty;
+        // let transport = ((flt(row.custom_transport_) * sp) / 100) * qty;
         let reward = ((flt(row.reward_per) * sp) / 100) * qty;
 
-        let base_amount = (sp * qty) + shipping + finance + transport + reward;
+        let base_amount = (sp * qty) + shipping + finance + processing + reward;
 
         let incentive_percent = flt(row.custom_incentive_);
         let incentive = (base_amount * incentive_percent / 100);
@@ -609,8 +554,8 @@ function calculate_brand_summary(frm) {
         brand_data[brand].shipping_percent += flt(row.shipping_per);
         brand_data[brand].finance += finance;
         brand_data[brand].finance_percent += flt(row.custom_finance_);
-        brand_data[brand].transport += transport;
-        brand_data[brand].transport_percent += flt(row.custom_transport_);
+        brand_data[brand].processing += processing;
+        brand_data[brand].processing_percent += flt(row.custom_transport_);
         brand_data[brand].reward += reward;
         brand_data[brand].reward_percent += flt(row.reward_per);
         brand_data[brand].incentive += incentive;
@@ -631,7 +576,7 @@ function calculate_brand_summary(frm) {
     let total_summary = {
         shipping: 0,
         finance: 0,
-        transport: 0,
+        processing: 0,
         reward: 0,
         incentive: 0,
         margin: 0,
@@ -659,8 +604,8 @@ function calculate_brand_summary(frm) {
             shipping_percent: data.shipping_percent / count,
             finance: data.finance,
             finance_percent: data.finance_percent / count,
-            transport: data.transport,
-            transport_percent: data.transport_percent / count,
+            processing: data.processing,
+            processing_percent: data.processing_percent / count,
             reward: data.reward,
             reward_percent: data.reward_percent / count,
             incentive: data.incentive,
@@ -675,7 +620,8 @@ function calculate_brand_summary(frm) {
 
         total_summary.shipping += data.shipping;
         total_summary.finance += data.finance;
-        total_summary.transport += data.transport;
+        total_summary.processing += data.processing;
+        // console.log("Adding processing:", data.processing);
         total_summary.reward += data.reward;
         total_summary.incentive += data.incentive;
         total_summary.margin += data.margin;
@@ -696,9 +642,10 @@ function calculate_brand_summary(frm) {
             : 0;
 
     // ───────────── Set Form Totals ─────────────
+    // console.log("Total processing:", total_summary.shipping);
     frm.set_value('custom_total_shipping_new', total_summary.shipping);
     frm.set_value('custom_total_finance_new', total_summary.finance);
-    frm.set_value('custom_total_transport_new', total_summary.transport);
+    frm.set_value('custom_total_transport_new', total_summary.processing);
     frm.set_value('custom_total_reward_new', total_summary.reward);
     frm.set_value('custom_total_incentive_new', total_summary.incentive);
     frm.set_value('custom_total_customs_new', total_summary.customs);
@@ -933,10 +880,41 @@ function distribute_incentive(frm) {
     frm.trigger("calculate_taxes_and_totals");
     frm.__distributing_incentive = false;
 }
+function calculate_additional_discount_percentage(frm) {
+    let discount_amount = frm.doc.discount_amount || 0;
+    if (!discount_amount) return;
+
+    let base_amount = 0;
+
+    if (frm.doc.apply_discount_on === "Net Total") {
+        base_amount = frm.doc.net_total || 0;
+    } else if (frm.doc.apply_discount_on === "Grand Total") {
+        base_amount = frm.doc.grand_total || 0;
+    }
+
+    if (!base_amount) return;
+
+    let discount_percentage = (discount_amount / base_amount) * 100;
+    console.log("Calculated additional discount percentage:", discount_percentage);
+    frm.set_value(
+        "additional_discount_percentage",
+        flt(discount_percentage, 2)
+    );
+}
 
 
 
 frappe.ui.form.on('Quotation Item',{
+    items_add(frm, cdt, cdn) {
+        // Allow calculations when item is added
+        QUOTATION_ITEM_ADD_IN_PROGRESS = true;
+        QUOTATION_ALLOW_WRITE = true;
+    },
+
+    items_remove(frm) {
+        QUOTATION_ITEM_ADD_IN_PROGRESS = true;
+        QUOTATION_ALLOW_WRITE = true;
+    },
 item_code:function(frm, cdt,cdn){
         var row = locals[cdt][cdn]
         row.__manual_price_override = false;
@@ -1199,96 +1177,53 @@ qty:function(frm, cdt,cdn){
             update_custom_service_totals(frm);
     }
 },
+custom_shipping_mode:function(frm,cdt,cdn){
+    const item = frappe.get_doc(cdt, cdn);
+        if (!frm.doc.custom_shipment_and_margin || !frm.doc.custom_shipment_and_margin.length) return;
 
-// custom_finance_value:function(frm, cdt,cdn){
-//     calculate_percentages_from_values(frm, cdt, cdn);
-// },
-// custom_transport_value:function(frm, cdt,cdn){
-//     calculate_percentages_from_values(frm, cdt, cdn);
-// },
-// custom_incentive_value:function(frm, cdt,cdn){
-//     calculate_percentages_from_values(frm, cdt, cdn);
-// },
-// custom_customs_value:function(frm, cdt,cdn){
-//     calculate_percentages_from_values(frm, cdt, cdn);
-// },
-// custom_markup_value:function(frm, cdt,cdn){
-//     calculate_percentages_from_values(frm, cdt, cdn);
-// },
-// custom_discount_amount_qty: function(frm, cdt, cdn) {
+        const ship_row = frm.doc.custom_shipment_and_margin[0];
+        let shipping_percent = 0;
 
-//     // 🔴 IMPORTANT: skip if bulk discount is running
-//     if (frm.custom_applying_bulk_discount) {
-//         return;
-//     }
+        if (item.custom_shipping_mode === "Air") shipping_percent = ship_row.ship_air || 0;
+        else if (item.custom_shipping_mode === "Sea") shipping_percent = ship_row.ship_sea || 0;
 
-//     let row = locals[cdt][cdn];
-
-//     let discount_amount = flt(row.custom_discount_amount_qty);
-//     let qty = flt(row.qty);
-//     if (!discount_amount || qty <= 0) return;
-
-//     let per_unit_discount = discount_amount / qty;
-//     let unit_price = flt(row.custom_special_rate || row.rate);
-
-//     let new_unit_price = unit_price - per_unit_discount;
-//     if (new_unit_price < 0) new_unit_price = 0;
-
-//     let new_selling_amount = new_unit_price * qty;
-
-//     let old_margin_val = flt(row.custom_margin_value || 0);
-//     let new_margin_val = old_margin_val - discount_amount;
-//     if (new_margin_val < 0) new_margin_val = 0;
-
-//     let new_margin_pct = new_selling_amount > 0
-//         ? (new_margin_val / new_selling_amount) * 100
-//         : 0;
-
-//     frappe.model.set_value(cdt, cdn, "custom_special_rate", new_unit_price);
-//     frappe.model.set_value(cdt, cdn, "custom_selling_price", new_selling_amount);
-//     frappe.model.set_value(cdt, cdn, "custom_margin_value", new_margin_val);
-//     frappe.model.set_value(cdt, cdn, "custom_margin_", new_margin_pct);
-//     frappe.model.set_value(cdt, cdn, "rate", new_unit_price);
-//     frappe.model.set_value(cdt, cdn, "amount", new_selling_amount);
-//     frappe.model.set_value(cdt, cdn, "custom_discount_amount_value", per_unit_discount);
-// },
-
+        frappe.model.set_value(item.doctype, item.name, "shipping_per", shipping_percent);
+},
 
 custom_service_items_remove: function(frm, cdt, cdn) {
     update_custom_service_totals(frm);
 },
-before_save:function(frm,cdt,cdn){
-    frm.trigger('calculate_total')
-},
-items_remove:function(frm){
-    frm.trigger('calculate_total')
-},
+// before_save:function(frm,cdt,cdn){
+//     frm.trigger('calculate_total')
+// },
+// items_remove:function(frm){
+//     frm.trigger('calculate_total')
+// },
 
 })
 
 
 
 frappe.ui.form.on('Quotation',{
-before_save:function(frm){
-    frm.trigger('calculate_total')
-},
-
 refresh:function(frm){ 
+    if (!QUOTATION_ALLOW_WRITE && !QUOTATION_ITEM_ADD_IN_PROGRESS) {
+        return;
+    }
     update_custom_service_totals(frm);
     // console.log("Workingggg",frm.doc.__islocal,frm.doc.selling_price_list)  
 
     if(frm.doc.__islocal === 1){
         if(frm.doc.selling_price_list){
-            setTimeout(() => {
+            // setTimeout(() => {
                 frm.doc.items.forEach((item) =>{
                     if(item.brand && item.base_price_list_rate){
                         if(!frm.doc.amended_from){
                         frappe.model.set_value(item.doctype,item.name,'price_list_rate_copy',item.base_price_list_rate)
-                        rate_calculation(frm,item.doctype,item.name)
+                        // rate_calculation(frm,item.doctype,item.name)
                     }
                 }
                 });
-            },100)
+            // },100)
         }
     }     
     frm.set_query("selling_price_list", function() {
@@ -1312,71 +1247,71 @@ onload:function(frm){
 
 selling_price_list:function(frm){
     if(frm.doc.selling_price_list){
-        setTimeout(() => {
+        // setTimeout(() => {
             frm.doc.items.forEach((item) =>{
                 if(item.brand && item.base_price_list_rate){
                     frappe.model.set_value(item.doctype,item.name,'price_list_rate_copy',item.base_price_list_rate)
                     rate_calculation(frm,item.doctype,item.name)
                 }
             });
-        },100)
+        // },100)
     }
 },
-calculate_total: function (frm){
-    // triggers when you change row value
-    let doc = frm.doc;
+// calculate_total: function (frm){
+//     // triggers when you change row value
+//     let doc = frm.doc;
 
-    let shipping_total = 0;
-    let pc_total = 0;
-    let reward_total = 0;
-    let levee_total = 0;
-    let std_total = 0;
-    let custom_total = 0;
-    let base_shipping_total = 0;
-    let base_pc_total = 0;
-    let base_reward_total = 0;
-    let base_levee_total = 0;
-    let base_std_total = 0;
+//     let shipping_total = 0;
+//     let pc_total = 0;
+//     let reward_total = 0;
+//     let levee_total = 0;
+//     let std_total = 0;
+//     let custom_total = 0;
+//     let base_shipping_total = 0;
+//     let base_pc_total = 0;
+//     let base_reward_total = 0;
+//     let base_levee_total = 0;
+//     let base_std_total = 0;
 
-    for (let i in doc.items){
-        if (doc.items[i].total_shipping){
-            shipping_total += doc.items[i].total_shipping;
-        }       
-        if (doc.items[i].total_processing_charges){
-            pc_total += doc.items[i].total_processing_charges;
-        }       
-        if (doc.items[i].total_reward){
-            reward_total += doc.items[i].total_reward;
-        }       
-        if (doc.items[i].total_levee){
-            levee_total += doc.items[i].total_levee;
-        }       
-        if (doc.items[i].total_std_margin){
-            std_total += doc.items[i].total_std_margin;
-        } 
-        if (doc.items[i].custom_duty_charges){
-            custom_total += doc.items[i].custom_duty_charges;
-        } 
+//     for (let i in doc.items){
+//         if (doc.items[i].total_shipping){
+//             shipping_total += doc.items[i].total_shipping;
+//         }       
+//         if (doc.items[i].total_processing_charges){
+//             pc_total += doc.items[i].total_processing_charges;
+//         }       
+//         if (doc.items[i].total_reward){
+//             reward_total += doc.items[i].total_reward;
+//         }       
+//         if (doc.items[i].total_levee){
+//             levee_total += doc.items[i].total_levee;
+//         }       
+//         if (doc.items[i].total_std_margin){
+//             std_total += doc.items[i].total_std_margin;
+//         } 
+//         if (doc.items[i].custom_duty_charges){
+//             custom_total += doc.items[i].custom_duty_charges;
+//         } 
 
-    }
+//     }
 
-    frm.refresh_field('items');
-    frm.set_value('total_shipping', shipping_total);
-    frm.set_value('total_processing_charges', pc_total);
-    frm.set_value('total_reward', reward_total);
-    frm.set_value('total_levee', levee_total);
-    frm.set_value('total_std_margin', std_total);
+//     frm.refresh_field('items');
+//     frm.set_value('total_shipping', shipping_total);
+//     frm.set_value('total_processing_charges', pc_total);
+//     frm.set_value('total_reward', reward_total);
+//     frm.set_value('total_levee', levee_total);
+//     frm.set_value('total_std_margin', std_total);
 
-    frm.set_value('total_shipping_per', (shipping_total/frm.doc.total)*100);
-    frm.set_value('total_processing_charges_per', (pc_total/frm.doc.total)*100);
-    frm.set_value('total_reward_per', (reward_total/frm.doc.total)*100);
-    frm.set_value('total_levee_per', (levee_total/frm.doc.total)*100);
-    frm.set_value('total_std_margin_per', (std_total/frm.doc.total)*100);
-    frm.set_value('total_custom_duty_charges', (custom_total/frm.doc.total)*100);
+//     frm.set_value('total_shipping_per', (shipping_total/frm.doc.total)*100);
+//     frm.set_value('total_processing_charges_per', (pc_total/frm.doc.total)*100);
+//     frm.set_value('total_reward_per', (reward_total/frm.doc.total)*100);
+//     frm.set_value('total_levee_per', (levee_total/frm.doc.total)*100);
+//     frm.set_value('total_std_margin_per', (std_total/frm.doc.total)*100);
+//     frm.set_value('total_custom_duty_charges', (custom_total/frm.doc.total)*100);
 
-    frm.set_value('base_total_shipping', base_shipping_total);
-    frm.set_value('base_total_processing_charges', base_pc_total);
-    frm.set_value('base_total_reward', base_reward_total);
-    frm.set_value('base_total_levee', base_levee_total);
-},
+//     frm.set_value('base_total_shipping', base_shipping_total);
+//     frm.set_value('base_total_processing_charges', base_pc_total);
+//     frm.set_value('base_total_reward', base_reward_total);
+//     frm.set_value('base_total_levee', base_levee_total);
+// },
 })

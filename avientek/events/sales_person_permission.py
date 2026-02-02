@@ -126,29 +126,35 @@ def get_project_quotation_for_user(doctype, txt, searchfield, start, page_len, f
 # -------------------------------
 
 def quotation_pqc(user: str) -> str:
-    """Permission query for Quotation (filters based on linked PQ)."""
     if "System Manager" in frappe.get_roles(user):
         return ""
 
     sps = _user_allowed_sales_persons(user)
     if not sps:
-        return "1=0"
+        # allow seeing own drafts at least
+        return "owner = '{user}'".format(user=user)
 
     in_list = ", ".join(f"'{v}'" for v in sps)
     return f"""
-        exists (
-            select 1
-            from `tabProject Quotation` pq
-            join `tab{PQ_CHILD_TABLE}` sp on sp.parent = pq.name
-            where pq.name = `tabQuotation`.{QUOTATION_PQ_LINKFIELD}
-              and sp.{PQ_CHILD_LINK_FIELD} in ({in_list})
+        (
+            `tabQuotation`.owner = '{user}'
+            OR exists (
+                select 1
+                from `tabProject Quotation` pq
+                join `tab{PQ_CHILD_TABLE}` sp on sp.parent = pq.name
+                where pq.name = `tabQuotation`.{QUOTATION_PQ_LINKFIELD}
+                  and sp.{PQ_CHILD_LINK_FIELD} in ({in_list})
+            )
         )
     """
 
 
 def quotation_has_perm(doc, user: str) -> bool:
-    """Hard guard when opening a Quotation directly."""
     if "System Manager" in frappe.get_roles(user):
+        return True
+
+    # ✅ ALWAYS allow CREATE
+    if doc.is_new():
         return True
 
     sps = set(_user_allowed_sales_persons(user))
@@ -159,5 +165,9 @@ def quotation_has_perm(doc, user: str) -> bool:
     if not pq_name:
         return False
 
-    rows = frappe.get_all(PQ_CHILD_TABLE, filters={"parent": pq_name}, pluck=PQ_CHILD_LINK_FIELD)
+    rows = frappe.get_all(
+        PQ_CHILD_TABLE,
+        filters={"parent": pq_name},
+        pluck=PQ_CHILD_LINK_FIELD
+    )
     return bool(set(rows) & sps)
