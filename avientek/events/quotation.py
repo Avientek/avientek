@@ -517,7 +517,6 @@ def set_margin_flags(doc, method=None):
                     Current Margin : <b>{round(new, 2)}%</b><br>
                     Standard Margin : <b>{round(std, 2)}%</b><br>
                     Short by : <b>{round(std - new, 2)}%</b><br>
-                    Historical Overall Margin : <b>{round(overall, 2)}%</b>
                     """,
                     title="Margin Warning",
                     indicator="orange"

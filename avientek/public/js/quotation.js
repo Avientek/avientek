@@ -444,7 +444,7 @@ function calculate_all(frm, cdt, cdn) {
 
     let shipping = (shipping_per * std_price / 100) * qty;
     let finance = (finance_per * sp / 100) * qty;
-    let transport = (transport_per * sp / 100) * qty;
+    let transport = (transport_per * std_price / 100) * qty;
     let reward = (reward_per * sp / 100) * qty;
 
     let base_amount = (sp * qty) + shipping + finance + transport + reward;
@@ -520,7 +520,7 @@ function calculate_brand_summary(frm) {
         let buying_price = sp * qty;
         let shipping = ((flt(row.shipping_per) * std_price) / 100) * qty;
         let finance = ((flt(row.custom_finance_) * sp) / 100) * qty;
-        let processing = ((flt(row.custom_transport_) * sp) / 100) * qty;
+        let processing = ((flt(row.custom_transport_) * std_price) / 100) * qty;
         // let transport = ((flt(row.custom_transport_) * sp) / 100) * qty;
         let reward = ((flt(row.reward_per) * sp) / 100) * qty;
 
@@ -829,7 +829,7 @@ function distribute_incentive(frm) {
 
         let qty = flt(row.qty) || 1;
         let cogs = flt(row.custom_cogs);
-        let markup = flt(row.custom_markup_) || 0;
+        let markup = flt(row.custom_markup_value) || 0;
 
         let row_cost = cogs * qty;
         let row_incentive = 0;
@@ -843,14 +843,15 @@ function distribute_incentive(frm) {
         }
 
         // 🔹 Per-unit incentive (VERY IMPORTANT)
-        let incentive_per_unit = row_incentive / qty;
-
+        let incentive_per_unit = row_incentive * qty;
+        console.log("Incentive per unit:", incentive_per_unit);
         // 🔹 Adjusted cost per unit
         let adjusted_cost = cogs + incentive_per_unit;
+        console.log("Original cost:", cogs);
         console.log("Adjusted cost:", adjusted_cost);
         // 🔹 Customer special price (markup only once)
         let custom_special_price =
-            adjusted_cost + (adjusted_cost * markup / 100);
+            adjusted_cost + markup;
         console.log("Custom special price:", custom_special_price);
         // 🔹 Row values
         row.custom_incentive_value = row_incentive;
@@ -866,10 +867,11 @@ function distribute_incentive(frm) {
         row.amount = custom_special_price * qty;
 
         // 🔹 Margin (clean & correct)
-        let margin_value = (custom_special_price - adjusted_cost) * qty;
+        let special_rate = custom_special_price * qty;
+        let margin_value = (special_rate - adjusted_cost) * qty;
         console.log("Margin value:", margin_value);
-        let margin_percent = custom_special_price
-            ? ((custom_special_price - adjusted_cost) / custom_special_price) * 100
+        let margin_percent = special_rate
+            ? ((special_rate - adjusted_cost) / special_rate) * 100
             : 0;
         console.log("Margin percent:", margin_percent);
         row.custom_margin_value = margin_value;
