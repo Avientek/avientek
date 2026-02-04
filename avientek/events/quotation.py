@@ -293,8 +293,8 @@ def _to_flt(v) -> float:
 
 
 # ──────────────────────────────────────────────────────────────
-# 1)  PER-ITEM CALCULATION  (server-side replacement of JS
-#     calculate_all  +  calculate_custom_rate)
+# 1)  PER-ITEM CALCULATION  (server-side — single source of truth)
+#     Verified formula from client spreadsheet (ERP_Next.ods)
 # ──────────────────────────────────────────────────────────────
 def calc_item_totals(it):
     qty = max(cint(it.qty), 1)
@@ -302,117 +302,304 @@ def calc_item_totals(it):
     std_price = _to_flt(it.custom_standard_price_)
     sp        = _to_flt(it.custom_special_price)
 
-    shipping   = _to_flt(it.shipping_per)      * std_price / 100 * qty
-    finance    = _to_flt(it.custom_finance_)   * sp        / 100 * qty
-    transport  = _to_flt(it.custom_transport_) * std_price / 100 * qty
-    reward     = _to_flt(it.reward_per)        * sp        / 100 * qty
+    # Layer 1: percentage-based charges (total values)
+    shipping  = flt(_to_flt(it.shipping_per)      * std_price / 100 * qty, 4)
+    finance   = flt(_to_flt(it.custom_finance_)   * sp        / 100 * qty, 4)
+    transport = flt(_to_flt(it.custom_transport_)  * std_price / 100 * qty, 4)
+    reward    = flt(_to_flt(it.reward_per)         * sp        / 100 * qty, 4)
 
-    base_amt   = sp * qty + shipping + finance + transport + reward
-    incentive  = _to_flt(it.custom_incentive_) * base_amt / 100
-    cogs       = base_amt + incentive
-    markup     = _to_flt(it.custom_markup_)    * cogs     / 100
-    total      = cogs + markup
+    # Layer 2: base amount
+    base_amt = flt(sp * qty + shipping + finance + transport + reward, 4)
 
-    customs    = _to_flt(it.custom_customs_)   * total    / 100
-    selling    = total + customs
+    # Layer 3: incentive on base
+    incentive = flt(_to_flt(it.custom_incentive_) * base_amt / 100, 4)
 
-    margin_pct = (markup / total * 100) if total else 0
-    margin_val = margin_pct / 100 * total
+    # Layer 4: markup on (base + incentive)
+    cogs_before_customs = flt(base_amt + incentive, 4)
+    markup = flt(_to_flt(it.custom_markup_) * cogs_before_customs / 100, 4)
 
-    # write back on the child doc
+    # Layer 5: subtotal
+    total = flt(cogs_before_customs + markup, 4)
+
+    # Layer 6: customs on subtotal
+    customs = flt(_to_flt(it.custom_customs_) * total / 100, 4)
+
+    # Final values
+    selling = flt(total + customs, 4)
+    cogs    = flt(base_amt + incentive + customs, 4)  # COGS includes customs
+
+    # Margin: selling - cogs = markup (margin is the profit from markup)
+    margin_val = flt(selling - cogs, 4)
+    margin_pct = flt(margin_val / selling * 100, 4) if selling else 0.0
+
+    per_unit_selling = flt(selling / qty, 4)
+
     it.update({
-        "shipping"                 : shipping,
-        "custom_finance_value"     : finance,
-        "custom_transport_value"   : transport,
-        "reward"                   : reward,
-        "custom_incentive_value"   : incentive,
-        "custom_markup_value"      : markup,
-        "custom_cogs"              : cogs,
-        "custom_total_"            : total,
-        "custom_margin_"           : margin_pct,
-        "custom_margin_value"      : margin_val,
-        "custom_customs_value"     : customs,
-        "custom_selling_price"     : selling,
-        "custom_special_rate"      : selling / qty,
-        "rate"                     : selling / qty,
+        "shipping":               shipping,
+        "custom_finance_value":   finance,
+        "custom_transport_value": transport,
+        "reward":                 reward,
+        "custom_incentive_value": incentive,
+        "custom_markup_value":    markup,
+        "custom_cogs":            cogs,
+        "custom_total_":          total,
+        "custom_customs_value":   customs,
+        "custom_selling_price":   selling,
+        "custom_margin_":         margin_pct,
+        "custom_margin_value":    margin_val,
+        "custom_special_rate":    per_unit_selling,
+        "rate":                   per_unit_selling,
+        "amount":                 selling,
     })
 
 
 # ──────────────────────────────────────────────────────────────
-# 2)  BRAND SUMMARY  (server-side replacement of JS
-#     calculate_brand_summary)
+# 2)  BRAND SUMMARY  (server-side — replaces JS calculate_brand_summary)
 # ──────────────────────────────────────────────────────────────
-# def rebuild_brand_summary(doc):
-#     buckets = {}
+def rebuild_brand_summary(doc):
+    buckets = {}
 
-#     for it in doc.items:
-#         b = it.brand or "?"
-#         if b not in buckets:
-#             buckets[b] = {
-#                 "shipping":0,"shipping_percent":0,
-#                 "finance":0,"finance_percent":0,
-#                 "transport":0,"transport_percent":0,
-#                 "reward":0,"reward_percent":0,
-#                 "incentive":0,"incentive_percent":0,
-#                 "customs":0,"customs_percent":0,
-#                 "total_cost":0,"total_selling":0,
-#                 "margin":0,"margin_percent":0,
-#                 "cnt":0,
-#             }
+    for it in doc.items:
+        b = it.brand or "Unbranded"
+        if b not in buckets:
+            buckets[b] = {
+                "shipping": 0, "shipping_percent": 0,
+                "finance": 0, "finance_percent": 0,
+                "processing": 0, "processing_percent": 0,
+                "reward": 0, "reward_percent": 0,
+                "incentive": 0, "incentive_percent": 0,
+                "customs": 0, "customs_percent": 0,
+                "buying_price": 0,
+                "total_cost": 0, "total_selling": 0,
+                "cnt": 0,
+            }
 
-#         bk = buckets[b]
-#         bk["shipping"]          += it.shipping
-#         bk["shipping_percent"]  += _to_flt(it.shipping_per)
-#         bk["finance"]           += it.custom_finance_value
-#         bk["finance_percent"]   += _to_flt(it.custom_finance_)
-#         bk["transport"]         += it.custom_transport_value
-#         bk["transport_percent"] += _to_flt(it.custom_transport_)
-#         bk["reward"]            += it.reward
-#         bk["reward_percent"]    += _to_flt(it.reward_per)
-#         bk["incentive"]         += it.custom_incentive_value
-#         bk["incentive_percent"] += _to_flt(it.custom_incentive_)
-#         bk["customs"]           += it.custom_customs_value
-#         bk["customs_percent"]   += _to_flt(it.custom_customs_)
-#         bk["total_cost"]        += it.custom_cogs
-#         bk["total_selling"]     += it.custom_selling_price
-#         bk["margin"]            += it.custom_markup_value
-#         bk["margin_percent"]    += it.custom_margin_
-#         bk["cnt"]               += 1
+        bk = buckets[b]
+        qty = max(cint(it.qty), 1)
+        sp = _to_flt(it.custom_special_price)
 
-#     doc.set("custom_brand_summary", [])
-#     for brand, d in buckets.items():
-#         n = d.pop("cnt") or 1
-#         doc.append("custom_brand_summary", {
-#             "brand": brand,
-#             "shipping": d["shipping"],
-#             "shipping_percent": d["shipping_percent"]/n,
-#             "finance": d["finance"],
-#             "finance_percent": d["finance_percent"]/n,
-#             "transport": d["transport"],
-#             "transport_percent": d["transport_percent"]/n,
-#             "reward": d["reward"],
-#             "reward_percent": d["reward_percent"]/n,
-#             "incentive": d["incentive"],
-#             "incentive_percent": d["incentive_percent"]/n,
-#             "customs": d["customs"],
-#             "customs_": d["customs_percent"]/n,
-#             "total_cost": d["total_cost"],
-#             "total_selling": d["total_selling"],
-#             "margin": d["margin"],
-#             "margin_percent": d["margin_percent"]/n,
-#         })
+        bk["shipping"]           += _to_flt(it.shipping)
+        bk["shipping_percent"]   += _to_flt(it.shipping_per)
+        bk["finance"]            += _to_flt(it.custom_finance_value)
+        bk["finance_percent"]    += _to_flt(it.custom_finance_)
+        bk["processing"]         += _to_flt(it.custom_transport_value)
+        bk["processing_percent"] += _to_flt(it.custom_transport_)
+        bk["reward"]             += _to_flt(it.reward)
+        bk["reward_percent"]     += _to_flt(it.reward_per)
+        bk["incentive"]          += _to_flt(it.custom_incentive_value)
+        bk["incentive_percent"]  += _to_flt(it.custom_incentive_)
+        bk["customs"]            += _to_flt(it.custom_customs_value)
+        bk["customs_percent"]    += _to_flt(it.custom_customs_)
+        bk["buying_price"]       += flt(sp * qty, 4)
+        bk["total_cost"]         += _to_flt(it.custom_cogs)
+        bk["total_selling"]      += _to_flt(it.custom_selling_price)
+        bk["cnt"]                += 1
+
+    doc.set("custom_quotation_brand_summary", [])
+    for brand, d in buckets.items():
+        n = d.pop("cnt") or 1
+        ts = d["total_selling"]
+        tc = d["total_cost"]
+        brand_margin_pct = flt((ts - tc) / ts * 100, 4) if ts else 0
+
+        doc.append("custom_quotation_brand_summary", {
+            "brand":              brand,
+            "buying_price":       flt(d["buying_price"], 4),
+            "shipping":           flt(d["shipping"], 4),
+            "shipping_percent":   flt(d["shipping_percent"] / n, 4),
+            "finance":            flt(d["finance"], 4),
+            "finance_percent":    flt(d["finance_percent"] / n, 4),
+            "processing":         flt(d["processing"], 4),
+            "processing_percent": flt(d["processing_percent"] / n, 4),
+            "reward":             flt(d["reward"], 4),
+            "reward_percent":     flt(d["reward_percent"] / n, 4),
+            "incentive":          flt(d["incentive"], 4),
+            "incentive_percent":  flt(d["incentive_percent"] / n, 4),
+            "customs":            flt(d["customs"], 4),
+            "customs_":           flt(d["customs_percent"] / n, 4),
+            "total_cost":         flt(tc, 4),
+            "total_selling":      flt(ts, 4),
+            "margin":             flt(ts - tc, 4),
+            "margin_percent":     brand_margin_pct,
+        })
 
 
 # ──────────────────────────────────────────────────────────────
-# 3)  DOC-LEVEL TOTALS (was in JS calculate_total)
-#     – extend as required
+# 3)  DOC-LEVEL TOTALS  (replaces old recalc_totals)
 # ──────────────────────────────────────────────────────────────
-def recalc_totals(doc):
-    doc.total_shipping  = sum(it.total_shipping  or 0 for it in doc.items)
-    doc.total_processing_charges = sum(it.total_processing_charges or 0 for it in doc.items)
-    doc.total_reward    = sum(it.total_reward    or 0 for it in doc.items)
-    doc.total_levee     = sum(it.total_levee     or 0 for it in doc.items)
-    doc.total_std_margin= sum(it.total_std_margin or 0 for it in doc.items)
+def recalc_doc_totals(doc):
+    totals = {
+        "shipping": 0, "finance": 0, "transport": 0, "reward": 0,
+        "incentive": 0, "customs": 0, "cost": 0, "selling": 0,
+        "buying_price": 0,
+    }
+
+    for it in doc.items:
+        totals["shipping"]     += _to_flt(it.shipping)
+        totals["finance"]      += _to_flt(it.custom_finance_value)
+        totals["transport"]    += _to_flt(it.custom_transport_value)
+        totals["reward"]       += _to_flt(it.reward)
+        totals["incentive"]    += _to_flt(it.custom_incentive_value)
+        totals["customs"]      += _to_flt(it.custom_customs_value)
+        totals["cost"]         += _to_flt(it.custom_cogs)
+        totals["selling"]      += _to_flt(it.custom_selling_price)
+
+        qty = max(cint(it.qty), 1)
+        sp = _to_flt(it.custom_special_price)
+        totals["buying_price"] += flt(sp * qty, 4)
+
+    ts = totals["selling"]
+    tc = totals["cost"]
+    margin = flt(ts - tc, 4)
+    margin_pct = flt(margin / ts * 100, 4) if ts else 0
+
+    doc.custom_total_shipping_new       = flt(totals["shipping"], 4)
+    doc.custom_total_finance_new        = flt(totals["finance"], 4)
+    doc.custom_total_transport_new      = flt(totals["transport"], 4)
+    doc.custom_total_reward_new         = flt(totals["reward"], 4)
+    doc.custom_total_incentive_new      = flt(totals["incentive"], 4)
+    doc.custom_total_customs_new        = flt(totals["customs"], 4)
+    doc.custom_total_margin_new         = margin
+    doc.custom_total_margin_percent_new = margin_pct
+    doc.custom_total_cost_new           = flt(tc, 4)
+    doc.custom_total_selling_new        = flt(ts, 4)
+    doc.custom_total_buying_price       = flt(totals["buying_price"], 4)
+
+
+# ──────────────────────────────────────────────────────────────
+# 4)  DISTRIBUTE INCENTIVE  (server-side — replaces JS distribute_incentive)
+# ──────────────────────────────────────────────────────────────
+def distribute_incentive_server(doc):
+    """Distribute parent-level incentive across items.
+    Must be called AFTER calc_item_totals has populated fields on each item.
+    """
+    mode = doc.get("custom_distribute_incentive_based_on")
+    if mode == "Distributed Manually":
+        return
+
+    total_incentive = _to_flt(doc.custom_incentive_amount)
+    if not total_incentive:
+        return
+
+    items = doc.items or []
+    if not items:
+        return
+
+    # Sum of all item COGS (already qty-multiplied from calc_item_totals)
+    total_cost = sum(_to_flt(it.custom_cogs) for it in items)
+    if not total_cost:
+        return
+
+    for it in items:
+        qty = max(cint(it.qty), 1)
+        cogs = _to_flt(it.custom_cogs)
+        markup = _to_flt(it.custom_markup_value)
+
+        # Distribute incentive
+        if mode == "Distributed Equally":
+            row_incentive = flt(total_incentive / len(items), 4)
+        else:  # "Amount" — proportional to cogs
+            row_incentive = flt((cogs / total_cost) * total_incentive, 4)
+
+        # Adjusted cost = original cogs + distributed incentive
+        adjusted_cost = flt(cogs + row_incentive, 4)
+
+        # Selling = adjusted cost + markup (markup stays the same)
+        selling = flt(adjusted_cost + markup, 4)
+        per_unit_selling = flt(selling / qty, 4)
+
+        # Margin
+        margin_val = flt(selling - adjusted_cost, 4)
+        margin_pct = flt(margin_val / selling * 100, 4) if selling else 0
+
+        it.update({
+            "custom_incentive_value": row_incentive,
+            "custom_incentive_":     flt(row_incentive / cogs * 100, 4) if cogs else 0,
+            "custom_cogs":           adjusted_cost,
+            "custom_selling_price":  selling,
+            "custom_total_":         selling,
+            "custom_special_rate":   per_unit_selling,
+            "rate":                  per_unit_selling,
+            "amount":                selling,
+            "custom_margin_value":   margin_val,
+            "custom_margin_":        margin_pct,
+        })
+
+
+# ──────────────────────────────────────────────────────────────
+# 5)  MASTER PIPELINE  (called from before_save hook)
+# ──────────────────────────────────────────────────────────────
+def run_calculation_pipeline(doc, method=None):
+    """Authoritative server-side calculation — runs on every save."""
+    for it in doc.items:
+        calc_item_totals(it)
+
+    # If parent-level incentive is set, redistribute across items
+    if _to_flt(doc.custom_incentive_amount) > 0:
+        distribute_incentive_server(doc)
+
+    rebuild_brand_summary(doc)
+    recalc_doc_totals(doc)
+
+
+# ──────────────────────────────────────────────────────────────
+# 6)  GET ITEM DEFAULTS  (single server call for item selection)
+# ──────────────────────────────────────────────────────────────
+@frappe.whitelist()
+def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_conversion_rate):
+    """Single whitelisted method called when item_code is selected.
+    Returns all default percentages from Item Price + Brand in one response.
+    Replaces the nested JS rate_calculation + update_rates calls.
+    """
+    plc_rate = flt(plc_conversion_rate) or 1.0
+    result = {}
+
+    # 1. Item Price defaults
+    ip = frappe.db.get_value(
+        "Item Price",
+        {"item_code": item_code, "price_list": price_list},
+        [
+            "custom_standard_price",
+            "custom_shipping__air_",
+            "custom_shipping__sea_",
+            "custom_processing_",
+            "custom_min_finance_charge_",
+            "custom_min_margin_",
+            "custom_customs_",
+        ],
+        as_dict=True,
+    )
+
+    if ip:
+        std_price = flt(ip.custom_standard_price)
+        # Convert if customer currency differs from price list currency
+        if currency != price_list_currency:
+            std_price = flt(std_price * plc_rate, 4)
+
+        result["custom_standard_price_"] = std_price
+        result["custom_special_price"]   = std_price  # default SP = standard
+        result["shipping_per_air"]       = flt(ip.custom_shipping__air_)
+        result["shipping_per_sea"]       = flt(ip.custom_shipping__sea_)
+        result["custom_transport_"]      = flt(ip.custom_processing_)
+        result["custom_finance_"]        = flt(ip.custom_min_finance_charge_)
+        result["std_margin_per"]         = flt(ip.custom_min_margin_)
+        result["custom_customs_"]        = flt(ip.custom_customs_)
+
+    # 2. Brand defaults (fallback for fields not on Item Price)
+    item_brand = frappe.db.get_value("Item", item_code, "brand")
+    if item_brand:
+        brand_data = frappe.db.get_value(
+            "Brand", item_brand,
+            ["custom_finance_", "custom_transport"],
+            as_dict=True,
+        )
+        if brand_data:
+            if not result.get("custom_finance_"):
+                result["custom_finance_"] = flt(brand_data.custom_finance_)
+            if not result.get("custom_transport_"):
+                result["custom_transport_"] = flt(brand_data.custom_transport)
+
+    return result
 
 def calculate_additional_discount_percentage(doc, method=None):
     if not doc.discount_amount:

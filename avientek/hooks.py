@@ -306,8 +306,9 @@ doc_events = {
     "Quotation": {
         "validate": "avientek.events.quotation.set_margin_flags",
         "before_save": [
+            "avientek.events.quotation.run_calculation_pipeline",
             "avientek.events.quotation.validate_total_discount",
-            "avientek.events.quotation.calculate_additional_discount_percentage"
+            "avientek.events.quotation.calculate_additional_discount_percentage",
         ]
     },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
