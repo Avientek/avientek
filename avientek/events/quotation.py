@@ -11,7 +11,7 @@ def apply_discount(doc, discount_amount):
     quotation = frappe.parse_json(doc)
 
     discount = Decimal(str(discount_amount or 0))
-    if discount <= 0:
+    if discount < 0:
         frappe.throw("Please enter a valid discount amount")
 
     items = quotation.get("items", []) or []
@@ -311,22 +311,21 @@ def calc_item_totals(it):
     # Layer 2: base amount
     base_amt = flt(sp * qty + shipping + finance + transport + reward, 4)
 
-    # Layer 3: incentive on base
-    incentive = flt(_to_flt(it.custom_incentive_) * base_amt / 100, 4)
+    # Layer 3: incentive on special price
+    incentive = flt(_to_flt(it.custom_incentive_) * sp * qty / 100, 4)
 
-    # Layer 4: markup on (base + incentive)
+    # Layer 4: customs on (base + incentive)
     cogs_before_customs = flt(base_amt + incentive, 4)
-    markup = flt(_to_flt(it.custom_markup_) * cogs_before_customs / 100, 4)
+    customs = flt(_to_flt(it.custom_customs_) * cogs_before_customs / 100, 4)
 
-    # Layer 5: subtotal
-    total = flt(cogs_before_customs + markup, 4)
+    # Layer 5: COGS = base + incentive + customs
+    cogs = flt(cogs_before_customs + customs, 4)
 
-    # Layer 6: customs on subtotal
-    customs = flt(_to_flt(it.custom_customs_) * total / 100, 4)
+    # Layer 6: markup on COGS (after customs)
+    markup = flt(_to_flt(it.custom_markup_) * cogs / 100, 4)
 
     # Final values
-    selling = flt(total + customs, 4)
-    cogs    = flt(base_amt + incentive + customs, 4)  # COGS includes customs
+    selling = flt(cogs + markup, 4)                    # selling = cogs + markup
 
     # Margin: selling - cogs = markup (margin is the profit from markup)
     margin_val = flt(selling - cogs, 4)
@@ -342,7 +341,7 @@ def calc_item_totals(it):
         "custom_incentive_value": incentive,
         "custom_markup_value":    markup,
         "custom_cogs":            cogs,
-        "custom_total_":          total,
+        "custom_total_":          selling,
         "custom_customs_value":   customs,
         "custom_selling_price":   selling,
         "custom_margin_":         margin_pct,
@@ -478,31 +477,34 @@ def distribute_incentive_server(doc):
         return
 
     total_incentive = _to_flt(doc.custom_incentive_amount)
-    if not total_incentive:
-        return
+    if total_incentive < 0:
+        return  # Only reject negative values, allow 0 to clear incentives
 
     items = doc.items or []
     if not items:
         return
 
-    # Sum of all item COGS (already qty-multiplied from calc_item_totals)
-    total_cost = sum(_to_flt(it.custom_cogs) for it in items)
-    if not total_cost:
+    # Sum of all item (sp * qty) for proportional distribution
+    total_sp = sum(flt(_to_flt(it.custom_special_price) * max(cint(it.qty), 1)) for it in items)
+    if not total_sp:
         return
 
     for it in items:
         qty = max(cint(it.qty), 1)
+        sp = _to_flt(it.custom_special_price)
         cogs = _to_flt(it.custom_cogs)
         markup = _to_flt(it.custom_markup_value)
+        old_incentive = _to_flt(it.custom_incentive_value)  # incentive already in cogs
 
         # Distribute incentive
         if mode == "Distributed Equally":
             row_incentive = flt(total_incentive / len(items), 4)
-        else:  # "Amount" — proportional to cogs
-            row_incentive = flt((cogs / total_cost) * total_incentive, 4)
+        else:  # "Amount" — proportional to sp * qty
+            row_incentive = flt((sp * qty / total_sp) * total_incentive, 4)
 
-        # Adjusted cost = original cogs + distributed incentive
-        adjusted_cost = flt(cogs + row_incentive, 4)
+        # Remove old incentive from cogs, then add new distributed incentive
+        cogs_without_incentive = flt(cogs - old_incentive, 4)
+        adjusted_cost = flt(cogs_without_incentive + row_incentive, 4)
 
         # Selling = adjusted cost + markup (markup stays the same)
         selling = flt(adjusted_cost + markup, 4)
@@ -514,7 +516,7 @@ def distribute_incentive_server(doc):
 
         it.update({
             "custom_incentive_value": row_incentive,
-            "custom_incentive_":     flt(row_incentive / cogs * 100, 4) if cogs else 0,
+            "custom_incentive_":     flt(row_incentive / (sp * qty) * 100, 4) if sp else 0,
             "custom_cogs":           adjusted_cost,
             "custom_selling_price":  selling,
             "custom_total_":         selling,
@@ -527,6 +529,61 @@ def distribute_incentive_server(doc):
 
 
 # ──────────────────────────────────────────────────────────────
+# 4b) DISTRIBUTE DISCOUNT (server-side — auto-redistributes on save)
+# ──────────────────────────────────────────────────────────────
+def distribute_discount_server(doc):
+    """Distribute parent-level discount across items proportionally.
+    Must be called AFTER calc_item_totals and distribute_incentive_server.
+    """
+    total_discount = _to_flt(doc.custom_discount_amount_value)
+    if total_discount < 0:
+        return  # Only reject negative values
+
+    items = doc.items or []
+    if not items:
+        return
+
+    # Calculate total selling value (before discount) for proportional distribution
+    total_selling = sum(flt(_to_flt(it.custom_selling_price)) for it in items)
+    if total_selling <= 0:
+        return
+
+    for it in items:
+        qty = max(cint(it.qty), 1)
+        selling = _to_flt(it.custom_selling_price)
+        cogs = _to_flt(it.custom_cogs)
+
+        # Proportional discount based on selling price
+        share = selling / total_selling if total_selling else 0
+        item_discount = flt(total_discount * share, 4)
+
+        # New selling after discount
+        new_selling = flt(selling - item_discount, 4)
+        if new_selling < 0:
+            new_selling = 0
+
+        new_rate = flt(new_selling / qty, 4) if qty else 0
+
+        # Margin recalculation (after discount)
+        margin_val = flt(new_selling - cogs, 4)
+        if margin_val < 0:
+            margin_val = 0
+        margin_pct = flt(margin_val / new_selling * 100, 4) if new_selling else 0
+
+        it.update({
+            "custom_discount_amount_value": flt(item_discount / qty, 4) if qty else 0,
+            "custom_discount_amount_qty": item_discount,
+            "custom_selling_price": new_selling,
+            "custom_total_": new_selling,
+            "custom_special_rate": new_rate,
+            "rate": new_rate,
+            "amount": new_selling,
+            "custom_margin_value": margin_val,
+            "custom_margin_": margin_pct,
+        })
+
+
+# ──────────────────────────────────────────────────────────────
 # 5)  MASTER PIPELINE  (called from before_save hook)
 # ──────────────────────────────────────────────────────────────
 def run_calculation_pipeline(doc, method=None):
@@ -534,9 +591,21 @@ def run_calculation_pipeline(doc, method=None):
     for it in doc.items:
         calc_item_totals(it)
 
-    # If parent-level incentive is set, redistribute across items
-    if _to_flt(doc.custom_incentive_amount) > 0:
+    # If parent-level incentive is set (including 0 to clear), redistribute across items
+    incentive_amount = _to_flt(doc.custom_incentive_amount)
+    has_item_incentives = any(_to_flt(it.custom_incentive_value) > 0 for it in doc.items)
+
+    # Run distribution if: positive incentive to apply, OR 0 to clear existing item incentives
+    if incentive_amount > 0 or (incentive_amount == 0 and has_item_incentives):
         distribute_incentive_server(doc)
+
+    # If parent-level discount is set (including 0 to clear), redistribute across items
+    discount_amount = _to_flt(doc.custom_discount_amount_value)
+    has_item_discounts = any(_to_flt(it.custom_discount_amount_qty) > 0 for it in doc.items)
+
+    # Run distribution if: positive discount to apply, OR 0 to clear existing item discounts
+    if discount_amount > 0 or (discount_amount == 0 and has_item_discounts):
+        distribute_discount_server(doc)
 
     rebuild_brand_summary(doc)
     recalc_doc_totals(doc)
@@ -559,7 +628,7 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
         "Item Price",
         {"item_code": item_code, "price_list": price_list},
         [
-            "custom_standard_price",
+            "price_list_rate",
             "custom_shipping__air_",
             "custom_shipping__sea_",
             "custom_processing_",
@@ -571,7 +640,7 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
     )
 
     if ip:
-        std_price = flt(ip.custom_standard_price)
+        std_price = flt(ip.price_list_rate)
         # Convert if customer currency differs from price list currency
         if currency != price_list_currency:
             std_price = flt(std_price * plc_rate, 4)

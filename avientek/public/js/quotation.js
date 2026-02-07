@@ -12,7 +12,8 @@ frappe.ui.form.on('Quotation', {
     },
 
     after_save(frm) {
-        frm.refresh_fields();
+        // Reload document to sync with server-calculated values
+        frm.reload_doc();
     },
 
     // ── Shipping mode (parent-level) ────────────────────────
@@ -118,18 +119,56 @@ frappe.ui.form.on('Quotation', {
         });
     },
 
+    // ── Discount Type Selection ─────────────────────────────
+    custom_discount_type(frm) {
+        toggle_discount_fields(frm);
+        // Mark discount as not applied when type changes
+        frm._discount_applied = false;
+        toggle_apply_discount_button(frm);
+    },
+
+    custom_discount_amount_value(frm) {
+        // Mark discount as not applied when value changes
+        frm._discount_applied = false;
+        toggle_apply_discount_button(frm);
+    },
+
+    custom_discount_(frm) {
+        // Mark discount as not applied when percentage changes
+        frm._discount_applied = false;
+        toggle_apply_discount_button(frm);
+    },
+
     // ── Discount (already server-side) ──────────────────────
     custom_apply_discount(frm) {
-        if (!frm.doc.custom_discount_amount_value) {
-            frappe.msgprint("Please enter discount amount");
-            return;
+        let discount_type = frm.doc.custom_discount_type || "Amount";
+        let discount_amount = 0;
+
+        if (discount_type === "Percentage") {
+            // Calculate amount from percentage
+            let total_selling = 0;
+            (frm.doc.items || []).forEach(row => {
+                total_selling += flt(row.custom_selling_price) || flt(row.amount) || 0;
+            });
+            if (frm.doc.custom_discount_ == null || frm.doc.custom_discount_ === "") {
+                frappe.msgprint(__("Please enter discount percentage"));
+                return;
+            }
+            discount_amount = (total_selling * flt(frm.doc.custom_discount_)) / 100;
+        } else {
+            // Use amount directly
+            if (frm.doc.custom_discount_amount_value == null || frm.doc.custom_discount_amount_value === "") {
+                frappe.msgprint(__("Please enter discount amount"));
+                return;
+            }
+            discount_amount = flt(frm.doc.custom_discount_amount_value);
         }
 
         frappe.call({
             method: "avientek.events.quotation.apply_discount",
             args: {
                 doc: frm.doc,
-                discount_amount: frm.doc.custom_discount_amount_value
+                discount_amount: discount_amount
             },
             callback(r) {
                 if (r.message) {
@@ -150,26 +189,80 @@ frappe.ui.form.on('Quotation', {
 
                     frm.refresh_field("items");
                     frm.trigger("calculate_taxes_and_totals");
+
+                    // Mark discount as applied and hide button
+                    frm._discount_applied = true;
+                    toggle_apply_discount_button(frm);
+
+                    frappe.show_alert({message: __("Discount applied successfully"), indicator: "green"});
                 }
             }
         });
     },
 
-    // ── Incentive (normalize % ↔ amount, then server handles on save) ─
+    // ── Incentive Type Selection ─────────────────────────────
+    custom_incentive_type(frm) {
+        toggle_incentive_fields(frm);
+        // Mark incentive as not applied when type changes
+        frm._incentive_applied = false;
+        toggle_apply_incentive_button(frm);
+    },
+
     custom_incentive_(frm) {
         if (frm.__normalizing_incentive) return;
         normalize_incentive_percent(frm, "percent");
+        // Mark incentive as not applied when percentage changes
+        frm._incentive_applied = false;
+        toggle_apply_incentive_button(frm);
     },
 
     custom_incentive_amount(frm) {
         if (frm.__normalizing_incentive) return;
         normalize_incentive_percent(frm, "amount");
+        // Mark incentive as not applied when amount changes
+        frm._incentive_applied = false;
+        toggle_apply_incentive_button(frm);
     },
 
     custom_apply_incentive(frm) {
+        let incentive_type = frm.doc.custom_incentive_type || "Percentage";
+        let incentive_amount = 0;
+
+        // Calculate total for incentive distribution
+        let total_cost = 0;
+        (frm.doc.items || []).forEach(row => {
+            total_cost += flt(row.custom_special_price) * (flt(row.qty) || 1);
+        });
+
+        if (incentive_type === "Percentage") {
+            if (frm.doc.custom_incentive_ == null || frm.doc.custom_incentive_ === "") {
+                frappe.msgprint(__("Please enter incentive percentage"));
+                return;
+            }
+            incentive_amount = (total_cost * flt(frm.doc.custom_incentive_)) / 100;
+            frm.set_value("custom_incentive_amount", incentive_amount);
+        } else {
+            if (frm.doc.custom_incentive_amount == null || frm.doc.custom_incentive_amount === "") {
+                frappe.msgprint(__("Please enter incentive amount"));
+                return;
+            }
+            incentive_amount = flt(frm.doc.custom_incentive_amount);
+            // Calculate and set percentage
+            if (total_cost > 0) {
+                let percent = (incentive_amount / total_cost) * 100;
+                frm.set_value("custom_incentive_", percent);
+            }
+        }
+
+        // Mark incentive as applied and hide button
+        frm._incentive_applied = true;
+        toggle_apply_incentive_button(frm);
+
         // Server pipeline handles distribution on save
         frm.dirty();
-        frm.save();
+        frm.save().then(() => {
+            frappe.show_alert({message: __("Incentive applied successfully"), indicator: "green"});
+        });
     },
 
     // ── Refresh / Onload ────────────────────────────────────
@@ -178,6 +271,54 @@ frappe.ui.form.on('Quotation', {
 
         frm.set_query("selling_price_list", function () {
             return { filters: { currency: frm.doc.currency } };
+        });
+
+        // Toggle discount fields based on type selection
+        toggle_discount_fields(frm);
+        toggle_apply_discount_button(frm);
+
+        // Toggle incentive fields based on type selection
+        toggle_incentive_fields(frm);
+        toggle_apply_incentive_button(frm);
+
+        // Hide old tables (replaced by HTML section)
+        frm.set_df_property("custom_history", "hidden", 1);
+        frm.set_df_property("custom_stock", "hidden", 1);
+        frm.set_df_property("custom_shipment_and_margin", "hidden", 1);
+
+        // Add click handler on items grid rows to refresh item info
+        setup_items_grid_click_handler(frm);
+
+        // Set read-only fields on Quotation Item child table
+        // Fields fetched from Price List (not manually editable)
+        const readonly_fields = [
+            "custom_standard_price_",   // from price_list_rate
+            "shipping_per",             // from Item Price (air/sea)
+            "custom_finance_",          // from Item Price / Brand
+            "custom_transport_",        // from Item Price (processing)
+            "custom_customs_",          // from Item Price
+            "std_margin_per",           // from Item Price
+            // Calculated value fields
+            "shipping",
+            "custom_finance_value",
+            "custom_transport_value",
+            "reward",
+            "custom_incentive_",        // controlled at parent level
+            "custom_incentive_value",
+            "custom_markup_value",
+            "custom_cogs",
+            "custom_total_",
+            "custom_customs_value",
+            "custom_selling_price",
+            "custom_margin_",
+            "custom_margin_value",
+            "custom_special_rate",
+            "custom_discount_amount_value",  // controlled at parent level
+            "custom_discount_amount_qty",    // controlled at parent level
+        ];
+
+        readonly_fields.forEach(field => {
+            frm.fields_dict.items.grid.update_docfield_property(field, "read_only", 1);
         });
     },
 
@@ -222,54 +363,18 @@ frappe.ui.form.on('Quotation Item', {
         }
         if (!row.item_code) return;
 
-        // 1. Clear previous item auxiliary data
+        // Clear previous item auxiliary data (keep for backward compatibility)
         frm.clear_table("custom_history");
         frm.clear_table("custom_stock");
         frm.clear_table("custom_shipment_and_margin");
-        frm.refresh_fields(["custom_history", "custom_stock", "custom_shipment_and_margin"]);
 
-        // 2. Load history, stock, shipment info
-        frappe.call({
-            method: "avientek.events.quotation.get_item_all_details",
-            args: {
-                item_code: row.item_code,
-                customer: frm.doc.party_name,
-                price_list: frm.doc.selling_price_list
-            },
-            callback(r) {
-                if (!r.message) return;
+        // Load and render item info (with table population for backward compatibility)
+        refresh_item_info_html(frm, row.item_code, true);
 
-                (r.message.history || []).forEach(d => {
-                    let h = frm.add_child("custom_history");
-                    h.document_type = d.doctype;
-                    h.document_id = d.name;
-                    h.qty = d.qty;
-                    h.unit_price = d.rate;
-                });
-
-                (r.message.stock || []).forEach(s => {
-                    let st = frm.add_child("custom_stock");
-                    st.company = s.company;
-                    st.actual_stock = s.actual_stock;
-                    st.free_stock = s.free_stock;
-                    st.projected_stock = s.projected_stock;
-                });
-
-                if (r.message.shipment_margin) {
-                    let sm = frm.add_child("custom_shipment_and_margin");
-                    sm.ship_air = r.message.shipment_margin.ship_air;
-                    sm.ship_sea = r.message.shipment_margin.ship_sea;
-                    sm.std_margin = r.message.shipment_margin.std_margin;
-                }
-
-                frm.refresh_fields(["custom_history", "custom_stock", "custom_shipment_and_margin"]);
-            }
-        });
-
-        // 3. Load item defaults (single server call)
+        // Load item defaults (single server call)
         load_item_defaults(frm, cdt, cdn);
 
-        // 4. Handle service items
+        // Handle service items
         if (row.parentfield === 'custom_service_items') {
             handle_qty_or_rate_change(frm, cdt, cdn);
         }
@@ -425,14 +530,13 @@ function calculate_all_preview(frm, cdt, cdn) {
     let reward    = flt(row.reward_per) * sp / 100 * qty;
 
     let base_amount = (sp * qty) + shipping + finance + transport + reward;
-    let incentive = flt(row.custom_incentive_) * base_amount / 100;
+    let incentive = flt(row.custom_incentive_) * sp * qty / 100;
     let cogs_pre = base_amount + incentive;
-    let markup = flt(row.custom_markup_) * cogs_pre / 100;
-    let total = cogs_pre + markup;
 
-    let customs = flt(row.custom_customs_) * total / 100;
-    let selling_price = total + customs;
-    let cogs = base_amount + incentive + customs;
+    let customs = flt(row.custom_customs_) * cogs_pre / 100;
+    let cogs = cogs_pre + customs;
+    let markup = flt(row.custom_markup_) * cogs / 100;  // markup on COGS (after customs)
+    let selling_price = cogs + markup;
 
     let margin_value = selling_price - cogs;
     let margin_percent = selling_price ? (margin_value / selling_price) * 100 : 0;
@@ -447,7 +551,7 @@ function calculate_all_preview(frm, cdt, cdn) {
     row.custom_incentive_value = incentive;
     row.custom_markup_value   = markup;
     row.custom_cogs           = cogs;
-    row.custom_total_         = total;
+    row.custom_total_         = selling_price;
     row.custom_customs_value  = customs;
     row.custom_selling_price  = selling_price;
     row.custom_margin_        = margin_percent;
@@ -509,7 +613,7 @@ function normalize_incentive_percent(frm, source) {
 
     let total_cost = 0;
     frm.doc.items.forEach(row => {
-        total_cost += flt(row.custom_cogs);  // cogs already includes qty
+        total_cost += flt(row.custom_special_price) * (flt(row.qty) || 1);  // sp * qty
     });
 
     if (!total_cost) {
@@ -593,5 +697,296 @@ function update_items_shipping_percent(frm) {
 
     frm.doc.items.forEach(item => {
         frappe.model.set_value(item.doctype, item.name, "shipping_per", shipping_percent);
+    });
+}
+
+
+// ── Discount field visibility helpers ────────────────────────
+
+/**
+ * Toggle visibility of discount fields based on discount type selection.
+ * Shows either Amount field or Percentage field, hides the other.
+ */
+function toggle_discount_fields(frm) {
+    let discount_type = frm.doc.custom_discount_type || "Amount";
+
+    if (discount_type === "Percentage") {
+        // Show percentage, hide amount (make amount read-only to show calculated value)
+        frm.set_df_property("custom_discount_", "hidden", 0);
+        frm.set_df_property("custom_discount_", "read_only", 0);
+        frm.set_df_property("custom_discount_amount_value", "hidden", 0);
+        frm.set_df_property("custom_discount_amount_value", "read_only", 1);  // Shows calculated amount
+    } else {
+        // Show amount, hide percentage (make percentage read-only to show calculated value)
+        frm.set_df_property("custom_discount_amount_value", "hidden", 0);
+        frm.set_df_property("custom_discount_amount_value", "read_only", 0);
+        frm.set_df_property("custom_discount_", "hidden", 0);
+        frm.set_df_property("custom_discount_", "read_only", 1);  // Shows calculated percentage
+    }
+}
+
+/**
+ * Toggle Apply Discount button visibility.
+ * Hide if discount has been applied and values haven't changed.
+ */
+function toggle_apply_discount_button(frm) {
+    let has_discount_value = flt(frm.doc.custom_discount_amount_value) > 0 || flt(frm.doc.custom_discount_) > 0;
+    let discount_applied = frm._discount_applied || false;
+
+    // Show button if there's a value to apply and discount hasn't been applied yet
+    if (has_discount_value && !discount_applied) {
+        frm.set_df_property("custom_apply_discount", "hidden", 0);
+    } else if (discount_applied) {
+        // Hide button after discount is applied
+        frm.set_df_property("custom_apply_discount", "hidden", 1);
+    } else {
+        // No value entered yet, show button but it will show error on click
+        frm.set_df_property("custom_apply_discount", "hidden", 0);
+    }
+}
+
+
+// ── Incentive field visibility helpers ────────────────────────
+
+/**
+ * Toggle visibility of incentive fields based on incentive type selection.
+ * Shows either Amount field or Percentage field, hides the other.
+ */
+function toggle_incentive_fields(frm) {
+    let incentive_type = frm.doc.custom_incentive_type || "Percentage";
+
+    if (incentive_type === "Percentage") {
+        // Show percentage as editable, amount as read-only (shows calculated value)
+        frm.set_df_property("custom_incentive_", "hidden", 0);
+        frm.set_df_property("custom_incentive_", "read_only", 0);
+        frm.set_df_property("custom_incentive_amount", "hidden", 0);
+        frm.set_df_property("custom_incentive_amount", "read_only", 1);
+    } else {
+        // Show amount as editable, percentage as read-only (shows calculated value)
+        frm.set_df_property("custom_incentive_amount", "hidden", 0);
+        frm.set_df_property("custom_incentive_amount", "read_only", 0);
+        frm.set_df_property("custom_incentive_", "hidden", 0);
+        frm.set_df_property("custom_incentive_", "read_only", 1);
+    }
+}
+
+/**
+ * Toggle Apply Incentive button visibility.
+ * Hide if incentive has been applied and values haven't changed.
+ */
+function toggle_apply_incentive_button(frm) {
+    let has_incentive_value = flt(frm.doc.custom_incentive_amount) > 0 || flt(frm.doc.custom_incentive_) > 0;
+    let incentive_applied = frm._incentive_applied || false;
+
+    // Show button if there's a value to apply and incentive hasn't been applied yet
+    if (has_incentive_value && !incentive_applied) {
+        frm.set_df_property("custom_apply_incentive", "hidden", 0);
+    } else if (incentive_applied) {
+        // Hide button after incentive is applied
+        frm.set_df_property("custom_apply_incentive", "hidden", 1);
+    } else {
+        // No value entered yet, show button but it will show error on click
+        frm.set_df_property("custom_apply_incentive", "hidden", 0);
+    }
+}
+
+
+// ── Item Info HTML Renderer ───────────────────────────────────
+
+/**
+ * Render item information (stock, history, shipment/margin) as HTML.
+ * Uses Frappe's row/col classes for proper responsive columns.
+ */
+function render_item_info_html(data, item_code) {
+    // Stock section - list format
+    let stockHtml = '';
+    if (data.stock && data.stock.length > 0) {
+        stockHtml = `
+            <table class="table table-sm table-borderless" style="margin: 0; font-size: 12px;">
+                <tbody>
+                    ${data.stock.map(s => {
+                        let statusColor = s.free_stock > 0 ? '#28a745' : '#dc3545';
+                        let statusBg = s.free_stock > 0 ? '#d4edda' : '#f8d7da';
+                        return `
+                            <tr>
+                                <td style="width: 55%;">${s.company}</td>
+                                <td style="text-align: right;">
+                                    <span style="background:${statusBg}; color:${statusColor}; padding: 2px 8px; border-radius: 4px; font-weight: bold;">
+                                        ${s.free_stock}
+                                    </span>
+                                </td>
+                                <td style="text-align: right; color: #888; font-size: 11px;">of ${s.actual_stock}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+    } else {
+        stockHtml = '<span class="text-muted">No stock data available</span>';
+    }
+
+    // History section
+    let historyHtml = '';
+    if (data.history && data.history.length > 0) {
+        historyHtml = `
+            <table class="table table-sm table-borderless" style="margin: 0; font-size: 12px;">
+                <tbody>
+                    ${data.history.map(h => {
+                        let badge = h.doctype === 'Sales Invoice'
+                            ? '<span class="badge" style="background:#28a745;color:#fff;">INV</span>'
+                            : (h.doctype === 'Sales Order'
+                                ? '<span class="badge" style="background:#007bff;color:#fff;">SO</span>'
+                                : '<span class="badge" style="background:#6c757d;color:#fff;">QN</span>');
+                        return `
+                            <tr>
+                                <td style="width:50px;">${badge}</td>
+                                <td><a href="/app/${h.doctype.toLowerCase().replace(/ /g, '-')}/${h.name}" target="_blank">${h.name}</a></td>
+                                <td style="text-align:right;"><strong>${h.qty}</strong> pcs</td>
+                                <td style="text-align:right;"><strong>${format_currency(h.rate)}</strong></td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+    } else {
+        historyHtml = '<span class="text-muted">No previous transactions</span>';
+    }
+
+    // Shipping & Margin section
+    let shippingHtml = '';
+    if (data.shipment_margin) {
+        let sm = data.shipment_margin;
+        shippingHtml = `
+            <div class="row" style="text-align: center;">
+                <div class="col-4">
+                    <div style="font-size: 10px; color: #888;">AIR</div>
+                    <div style="font-size: 16px; font-weight: bold;">${sm.ship_air || 0}%</div>
+                </div>
+                <div class="col-4">
+                    <div style="font-size: 10px; color: #888;">SEA</div>
+                    <div style="font-size: 16px; font-weight: bold;">${sm.ship_sea || 0}%</div>
+                </div>
+                <div class="col-4">
+                    <div style="font-size: 10px; color: #888;">MARGIN</div>
+                    <div style="font-size: 16px; font-weight: bold;">${sm.std_margin || 0}%</div>
+                </div>
+            </div>
+        `;
+    } else {
+        shippingHtml = '<span class="text-muted">No data</span>';
+    }
+
+    // Combine into 3-column layout
+    let html = `
+        <div class="row" style="margin: 0 0 15px 0; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+            <div class="col-md-4">
+                <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
+                    STOCK AVAILABILITY
+                </div>
+                ${stockHtml}
+            </div>
+            <div class="col-md-6">
+                <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
+                    TRANSACTION HISTORY
+                </div>
+                ${historyHtml}
+            </div>
+            <div class="col-md-2">
+                <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
+                    SHIPPING
+                </div>
+                ${shippingHtml}
+            </div>
+        </div>
+    `;
+
+    return html;
+}
+
+
+/**
+ * Fetch and refresh item info HTML for a given item code.
+ * @param {object} frm - Form object
+ * @param {string} item_code - Item code to fetch info for
+ * @param {boolean} populate_tables - Also populate the hidden tables (for backward compatibility)
+ */
+function refresh_item_info_html(frm, item_code, populate_tables = false) {
+    if (!item_code || !frm.doc.party_name) return;
+
+    frappe.call({
+        method: "avientek.events.quotation.get_item_all_details",
+        args: {
+            item_code: item_code,
+            customer: frm.doc.party_name,
+            price_list: frm.doc.selling_price_list
+        },
+        callback(r) {
+            if (!r.message) {
+                frm.set_df_property("custom_item_info_html", "options",
+                    '<div class="text-muted">No item data available</div>');
+                frm.refresh_field("custom_item_info_html");
+                return;
+            }
+
+            // Populate tables for backward compatibility (only on new item selection)
+            if (populate_tables) {
+                (r.message.history || []).forEach(d => {
+                    let h = frm.add_child("custom_history");
+                    h.document_type = d.doctype;
+                    h.document_id = d.name;
+                    h.qty = d.qty;
+                    h.unit_price = d.rate;
+                });
+
+                (r.message.stock || []).forEach(s => {
+                    let st = frm.add_child("custom_stock");
+                    st.company = s.company;
+                    st.actual_stock = s.actual_stock;
+                    st.free_stock = s.free_stock;
+                    st.projected_stock = s.projected_stock;
+                });
+
+                if (r.message.shipment_margin) {
+                    let sm = frm.add_child("custom_shipment_and_margin");
+                    sm.ship_air = r.message.shipment_margin.ship_air;
+                    sm.ship_sea = r.message.shipment_margin.ship_sea;
+                    sm.std_margin = r.message.shipment_margin.std_margin;
+                }
+            }
+
+            // Render HTML section
+            let html = render_item_info_html(r.message, item_code);
+            frm.set_df_property("custom_item_info_html", "options", html);
+            frm.refresh_field("custom_item_info_html");
+        }
+    });
+}
+
+
+/**
+ * Setup click handler on items grid to refresh item info when a row is clicked.
+ */
+function setup_items_grid_click_handler(frm) {
+    // Remove existing handler to avoid duplicates
+    frm.fields_dict.items.grid.wrapper.off('click.item_info');
+
+    // Add click handler on grid rows
+    frm.fields_dict.items.grid.wrapper.on('click.item_info', '.grid-row', function() {
+        let $row = $(this);
+        let idx = $row.data('idx');
+
+        if (!idx) return;
+
+        // Get the item from the row index (idx is 1-based)
+        let item = frm.doc.items[idx - 1];
+        if (item && item.item_code) {
+            // Only refresh if it's a different item than currently displayed
+            if (frm._current_item_info !== item.item_code) {
+                frm._current_item_info = item.item_code;
+                refresh_item_info_html(frm, item.item_code);
+            }
+        }
     });
 }

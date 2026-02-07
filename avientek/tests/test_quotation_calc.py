@@ -1,7 +1,9 @@
 """
 Tests for Quotation calculation pipeline.
-Verifies calc_item_totals against the 3 worked examples from the client's
-ERP_Next.ods Quote sheet (rows 53-56, 85-88, 95-98).
+Verifies calc_item_totals against the corrected formula where:
+  - Incentive is calculated on sp * qty
+  - Customs is calculated on COGS (before markup)
+  - Selling = COGS + customs + markup
 """
 import unittest
 from unittest.mock import MagicMock
@@ -111,10 +113,58 @@ def make_doc(items, **parent_kwargs):
 
 
 class TestCalcItemTotals(unittest.TestCase):
-    """Verify per-item calculation against client spreadsheet examples."""
+    """Verify per-item calculation with corrected formula."""
+
+    def test_simple_all_10pct(self):
+        """Verify against the user's Excel example:
+        Std=100, Spl=100, all charges at 10%, qty=1
+        Expected: COGS=150, customs=15, markup=15, selling=180"""
+        it = make_item(
+            qty=1,
+            custom_standard_price_=100,
+            custom_special_price=100,
+            shipping_per=10,
+            custom_finance_=10,
+            custom_transport_=10,
+            reward_per=10,
+            custom_incentive_=10,
+            custom_markup_=10,
+            custom_customs_=10,
+        )
+
+        calc_item_totals(it)
+
+        # shipping = 10% of std(100) = 10
+        self.assertAlmostEqual(it.shipping, 10.0, places=2)
+        # finance = 10% of sp(100) = 10
+        self.assertAlmostEqual(it.custom_finance_value, 10.0, places=2)
+        # transport = 10% of std(100) = 10
+        self.assertAlmostEqual(it.custom_transport_value, 10.0, places=2)
+        # reward = 10% of sp(100) = 10
+        self.assertAlmostEqual(it.reward, 10.0, places=2)
+
+        # incentive = 10% of sp*qty = 10% of 100 = 10
+        self.assertAlmostEqual(it.custom_incentive_value, 10.0, places=2)
+
+        # base = 100 + 10 + 10 + 10 + 10 = 140
+        # cogs_before_customs = 140 + 10 = 150
+        # markup = 10% of 150 = 15
+        self.assertAlmostEqual(it.custom_markup_value, 15.0, places=2)
+
+        # customs = 10% of 150 = 15
+        self.assertAlmostEqual(it.custom_customs_value, 15.0, places=2)
+
+        # cogs = 150 + 15 = 165
+        self.assertAlmostEqual(it.custom_cogs, 165.0, places=2)
+
+        # selling = 165 + 15 = 180
+        self.assertAlmostEqual(it.custom_selling_price, 180.0, places=2)
+
+        # margin = 15 / 180 * 100 = 8.33%
+        self.assertAlmostEqual(it.custom_margin_, 8.33, places=1)
 
     def test_example1_qty2_no_customs(self):
-        """Row 53-56: Std=587.6, Spl=500, Ship=10%, Fin=1.5%, Trans=2%, Rew=1.5%,
+        """Std=587.6, Spl=500, Ship=10%, Fin=1.5%, Trans=2%, Rew=1.5%,
         Inc=5%, Markup=100%, Customs=0%, Qty=2"""
         it = make_item(
             qty=2,
@@ -131,41 +181,33 @@ class TestCalcItemTotals(unittest.TestCase):
 
         calc_item_totals(it)
 
-        # Per-unit expected: shipping=58.76, finance=7.5, transport=11.752, reward=7.5
-        # Total shipping = 58.76*2 = 117.52, etc.
         self.assertAlmostEqual(it.shipping, 117.52, places=2)
         self.assertAlmostEqual(it.custom_finance_value, 15.0, places=2)
         self.assertAlmostEqual(it.custom_transport_value, 23.504, places=2)
         self.assertAlmostEqual(it.reward, 15.0, places=2)
 
+        # incentive = 5% * 500 * 2 = 50.0
+        self.assertAlmostEqual(it.custom_incentive_value, 50.0, places=2)
+
         # base = 1000 + 117.52 + 15 + 23.504 + 15 = 1171.024
-        # incentive = 5% * 1171.024 = 58.5512
-        self.assertAlmostEqual(it.custom_incentive_value, 58.5512, places=2)
-
-        # cogs_pre = 1171.024 + 58.5512 = 1229.5752
-        # markup = 100% * 1229.5752 = 1229.5752
-        self.assertAlmostEqual(it.custom_markup_value, 1229.5752, places=1)
-
-        # total = 1229.5752 + 1229.5752 = 2459.1504
-        self.assertAlmostEqual(it.custom_total_, 2459.1504, places=1)
+        # cogs_pre = 1171.024 + 50 = 1221.024
+        # markup = 100% * 1221.024 = 1221.024
+        self.assertAlmostEqual(it.custom_markup_value, 1221.024, places=1)
 
         # customs = 0
         self.assertAlmostEqual(it.custom_customs_value, 0, places=2)
 
-        # selling = 2459.15
-        self.assertAlmostEqual(it.custom_selling_price, 2459.15, places=0)
+        # cogs = 1221.024
+        self.assertAlmostEqual(it.custom_cogs, 1221.024, places=1)
 
-        # cogs = base + incentive + customs = 1229.58
-        self.assertAlmostEqual(it.custom_cogs, 1229.58, places=0)
+        # selling = 1221.024 + 1221.024 = 2442.048
+        self.assertAlmostEqual(it.custom_selling_price, 2442.05, places=0)
 
-        # margin% = 50%
+        # margin = 50%
         self.assertAlmostEqual(it.custom_margin_, 50.0, places=0)
 
-        # rate = selling / qty
-        self.assertAlmostEqual(it.rate, 2459.15 / 2, places=0)
-
     def test_example2_qty1_customs1(self):
-        """Row 85-88: Std=271.73, Spl=250, Ship=20%, Fin=2%, Trans=1.5%,
+        """Std=271.73, Spl=250, Ship=20%, Fin=2%, Trans=1.5%,
         Rew=1.5%, Inc=5%, Markup=21%, Customs=1%, Qty=1"""
         it = make_item(
             qty=1,
@@ -187,29 +229,28 @@ class TestCalcItemTotals(unittest.TestCase):
         self.assertAlmostEqual(it.custom_transport_value, 4.08, places=1)
         self.assertAlmostEqual(it.reward, 3.75, places=2)
 
-        # incentive = 5% * 317.17 = 15.86
-        self.assertAlmostEqual(it.custom_incentive_value, 15.86, places=1)
+        # incentive = 5% * 250 = 12.5
+        self.assertAlmostEqual(it.custom_incentive_value, 12.5, places=2)
 
-        # markup = 21% * 333.03 = 69.94
-        self.assertAlmostEqual(it.custom_markup_value, 69.94, places=1)
+        # base = 250 + 54.346 + 5 + 4.076 + 3.75 = 317.172
+        # cogs_pre = 317.172 + 12.5 = 329.672
+        # markup = 21% * 329.672 = 69.2311
+        self.assertAlmostEqual(it.custom_markup_value, 69.23, places=1)
 
-        # total = 402.97
-        self.assertAlmostEqual(it.custom_total_, 402.97, places=1)
+        # customs = 1% * 329.672 = 3.2967
+        self.assertAlmostEqual(it.custom_customs_value, 3.30, places=1)
 
-        # customs = 1% * 402.97 = 4.03
-        self.assertAlmostEqual(it.custom_customs_value, 4.03, places=1)
+        # cogs = 329.672 + 3.2967 = 332.969
+        self.assertAlmostEqual(it.custom_cogs, 332.97, places=1)
 
-        # selling = 407.00
-        self.assertAlmostEqual(it.custom_selling_price, 407.0, places=0)
+        # selling = 332.969 + 69.231 = 402.20
+        self.assertAlmostEqual(it.custom_selling_price, 402.20, places=0)
 
-        # cogs = 317.17 + 15.86 + 4.03 = 337.06
-        self.assertAlmostEqual(it.custom_cogs, 337.06, places=1)
-
-        # margin% = 17.18%
-        self.assertAlmostEqual(it.custom_margin_, 17.18, places=0)
+        # margin% = 69.23 / 402.20 * 100 = 17.22%
+        self.assertAlmostEqual(it.custom_margin_, 17.2, places=0)
 
     def test_example3_qty1_customs1_lower_markup(self):
-        """Row 95-98: Std=160, Spl=140, Ship=20%, Fin=2%, Trans=1.5%,
+        """Std=160, Spl=140, Ship=20%, Fin=2%, Trans=1.5%,
         Rew=1.5%, Inc=3%, Markup=15%, Customs=1%, Qty=1"""
         it = make_item(
             qty=1,
@@ -231,13 +272,25 @@ class TestCalcItemTotals(unittest.TestCase):
         self.assertAlmostEqual(it.custom_transport_value, 2.40, places=2)
         self.assertAlmostEqual(it.reward, 2.10, places=2)
 
-        self.assertAlmostEqual(it.custom_incentive_value, 5.38, places=1)
-        self.assertAlmostEqual(it.custom_markup_value, 27.70, places=1)
-        self.assertAlmostEqual(it.custom_total_, 212.38, places=1)
-        self.assertAlmostEqual(it.custom_customs_value, 2.12, places=1)
-        self.assertAlmostEqual(it.custom_selling_price, 214.50, places=0)
-        self.assertAlmostEqual(it.custom_cogs, 186.80, places=0)
-        self.assertAlmostEqual(it.custom_margin_, 12.91, places=0)
+        # incentive = 3% * 140 = 4.2
+        self.assertAlmostEqual(it.custom_incentive_value, 4.2, places=2)
+
+        # base = 140 + 32 + 2.8 + 2.4 + 2.1 = 179.3
+        # cogs_pre = 179.3 + 4.2 = 183.5
+        # markup = 15% * 183.5 = 27.525
+        self.assertAlmostEqual(it.custom_markup_value, 27.525, places=1)
+
+        # customs = 1% * 183.5 = 1.835
+        self.assertAlmostEqual(it.custom_customs_value, 1.835, places=2)
+
+        # cogs = 183.5 + 1.835 = 185.335
+        self.assertAlmostEqual(it.custom_cogs, 185.335, places=1)
+
+        # selling = 185.335 + 27.525 = 212.86
+        self.assertAlmostEqual(it.custom_selling_price, 212.86, places=0)
+
+        # margin% = 27.525 / 212.86 * 100 = 12.93%
+        self.assertAlmostEqual(it.custom_margin_, 12.93, places=0)
 
 
 class TestRecalcDocTotals(unittest.TestCase):
@@ -282,7 +335,7 @@ class TestRecalcDocTotals(unittest.TestCase):
 
 
 class TestDistributeIncentive(unittest.TestCase):
-    """Verify incentive distribution logic."""
+    """Verify incentive distribution logic (proportional to sp*qty)."""
 
     def test_proportional_distribution(self):
         it1 = make_item(
@@ -308,15 +361,14 @@ class TestDistributeIncentive(unittest.TestCase):
 
         distribute_incentive_server(doc)
 
-        # Incentive should be distributed proportional to cogs
-        total_cogs_before = it1.custom_cogs + it2.custom_cogs
-        # After distribution, selling should increase by markup on the extra incentive...
-        # but actually distribute_incentive_server adds incentive to cogs and keeps markup fixed.
-        # So selling = adjusted_cogs + original_markup
-
-        # Just verify incentive values sum to total
+        # Incentive should be distributed proportional to sp*qty
+        # it1 sp*qty = 250, it2 sp*qty = 140, total = 390
+        # it1 share = 250/390 * 50 = 32.05, it2 share = 140/390 * 50 = 17.95
         total_distributed = it1.custom_incentive_value + it2.custom_incentive_value
         self.assertAlmostEqual(total_distributed, total_incentive, places=2)
+
+        self.assertAlmostEqual(it1.custom_incentive_value, 250.0 / 390.0 * 50, places=1)
+        self.assertAlmostEqual(it2.custom_incentive_value, 140.0 / 390.0 * 50, places=1)
 
 
 class TestFullPipeline(unittest.TestCase):
@@ -332,9 +384,9 @@ class TestFullPipeline(unittest.TestCase):
         doc = make_doc([it1])
         run_calculation_pipeline(doc)
 
-        # After pipeline: item should be calculated, totals set
-        self.assertAlmostEqual(it1.custom_selling_price, 2459.15, places=0)
-        self.assertAlmostEqual(doc.custom_total_selling_new, 2459.15, places=0)
+        # selling = 2442.05 (with corrected incentive on sp*qty)
+        self.assertAlmostEqual(it1.custom_selling_price, 2442.05, places=0)
+        self.assertAlmostEqual(doc.custom_total_selling_new, 2442.05, places=0)
         self.assertAlmostEqual(doc.custom_total_margin_percent_new, 50.0, places=0)
 
 
