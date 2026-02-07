@@ -1,0 +1,233 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2025-08-14 10:06:33.905801",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "lead",
+  "date",
+  "project_owner",
+  "project_name",
+  "country",
+  "column_break_lhjn",
+  "open_for_all",
+  "expected_start_date",
+  "expected_end_date",
+  "probability",
+  "end_user_section",
+  "end_user",
+  "end_user_contact_name",
+  "column_break_wgqr",
+  "end_user_country",
+  "consultant_details_section",
+  "consultant",
+  "consultant_contact",
+  "column_break_fhhi",
+  "consultant_country",
+  "contractor_details_section",
+  "contractor",
+  "contractor_contact",
+  "column_break_qkmy",
+  "contractor_country",
+  "section_break_avtx",
+  "project_details",
+  "competition_details",
+  "column_break_xyux",
+  "progress_note"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Series",
+   "options": "PROJ-QUOT-.####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "project_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Project Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "project_owner",
+   "fieldtype": "Link",
+   "label": "Project Owner",
+   "options": "User"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "section_break_avtx",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "project_details",
+   "fieldtype": "Small Text",
+   "label": "Project Details"
+  },
+  {
+   "fieldname": "column_break_xyux",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "lead",
+   "fieldtype": "Link",
+   "label": "Lead",
+   "options": "Lead"
+  },
+  {
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date"
+  },
+  {
+   "fieldname": "column_break_lhjn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "open_for_all",
+   "fieldtype": "Select",
+   "label": "Open for All",
+   "options": "\nSelf\nAll"
+  },
+  {
+   "fieldname": "expected_start_date",
+   "fieldtype": "Date",
+   "label": "Expected Start Date"
+  },
+  {
+   "fieldname": "expected_end_date",
+   "fieldtype": "Date",
+   "label": "Expected End Date"
+  },
+  {
+   "fieldname": "probability",
+   "fieldtype": "Select",
+   "label": "Probability",
+   "options": "\nBeginning\nLess\nAverage\nHigh\nLost\nWin"
+  },
+  {
+   "fieldname": "end_user_section",
+   "fieldtype": "Section Break",
+   "label": "End User Details"
+  },
+  {
+   "fieldname": "end_user",
+   "fieldtype": "Data",
+   "label": "End User"
+  },
+  {
+   "fieldname": "end_user_contact_name",
+   "fieldtype": "Data",
+   "label": "End User Contact Name"
+  },
+  {
+   "fieldname": "column_break_wgqr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "end_user_country",
+   "fieldtype": "Link",
+   "label": "End User Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "consultant_details_section",
+   "fieldtype": "Section Break",
+   "label": "Consultant Details"
+  },
+  {
+   "fieldname": "consultant",
+   "fieldtype": "Data",
+   "label": "Consultant"
+  },
+  {
+   "fieldname": "consultant_contact",
+   "fieldtype": "Data",
+   "label": "Consultant Contact"
+  },
+  {
+   "fieldname": "column_break_fhhi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "consultant_country",
+   "fieldtype": "Link",
+   "label": "Consultant Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "contractor_details_section",
+   "fieldtype": "Section Break",
+   "label": "Contractor Details"
+  },
+  {
+   "fieldname": "contractor",
+   "fieldtype": "Data",
+   "label": "Contractor"
+  },
+  {
+   "fieldname": "contractor_contact",
+   "fieldtype": "Data",
+   "label": "Contractor Contact"
+  },
+  {
+   "fieldname": "column_break_qkmy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "contractor_country",
+   "fieldtype": "Link",
+   "label": "Contractor Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "competition_details",
+   "fieldtype": "Small Text",
+   "label": "Competition Details"
+  },
+  {
+   "fieldname": "progress_note",
+   "fieldtype": "Small Text",
+   "label": "Progress Note"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-01-15 08:58:44.371009",
+ "modified_by": "support@quarkcs.com",
+ "module": "Avientek",
+ "name": "Project Quotation",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

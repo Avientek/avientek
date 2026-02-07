@@ -77,7 +77,7 @@ fixtures = [
 					"Quotation Item-custom_selling_price",
 					"Brand-custom_finance_",
 					"Brand-custom_transport",
-					"Quotation-custom_section_break_tiek0",
+					"Quotation-custom_section_break_pdpgu",
 					"Quotation-custom_brand_summary",
 					"Quotation Item-custom_section_break_dkbzh",
 					"Quotation Item-custom_standard_price_",
@@ -88,9 +88,48 @@ fixtures = [
 					"Quotation-custom_company_currency",
 					"Quotation Item-custom_special_rate",
 					"Quotation Item-custom_final_valuation_rate",
+					"Quotation-custom_section_break_m2mfs",
+					"Quotation-custom_service_items",
+     				"Quotation-custom_section_break_iz6bt",
+					"Quotation-custom_total_qty","Quotation-custom_column_break_fkkaf",
+					"Quotation-custom_total_company_currency","Quotation-custom_column_break_d6xvc",
+					"Quotation-custom_total","Journal Entry-custom_sales_invoice",
+					"Sales Order Item-custom_incentive_value","Sales Invoice Item-custom_incentive_value",
+					"Quotation-custom_next_state","Quotation-custom_quote_type",
+					"Sales Order-custom_quote_type","Sales Invoice-custom_quote_type",
 					"Delivery Note-custom_customers_purchase_order",
-					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company"
-				),
+					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company",
+					"Selling Settings-custom_applicable_date","Department-custom_payment_approver",
+					"Journal Entry-custom_payment_request_form",
+					"Quotation-custom_auto_approve_ok","Quotation-custom_gm_approve_ok",
+					"Quotation-custom_quote_project","Quotation-custom_discount",
+					"Quotation-custom_discount_amount_value","Quotation-custom_discount_",
+     				"Quotation-custom_column_break_lqu6l","Quotation-custom_apply_discount",
+					"Quotation Item-custom_discount_amount_value","Quotation Item-custom_discount_amount_qty",
+					"Quotation Item-custom_special_price_note","Quotation Item-Quotation Item-custom_delivery_eta_copy","Quotation Item-custom_shipping_mode",
+					"Quotation-custom_created_by","Quotation-custom_section_break_tlqc2","Quotation-","Quotation-custom_note"
+					"Quotation-custom_competition_note","Quotation-custom_section_break_ief6u","Quotation-custom_credit_limit","Quotation-custom_overdue",
+					"Quotation-custom_column_break_ak1um","Quotation-custom_outstanding","Quotation-custom_end_user","Quotation-custom_section_break_qx0xq",
+     				"Quotation-custom_history","Quotation-custom_existing_payment_term","Quotation-custom_column_break_jd9pb","Quotation-custom_new_payment_term_",
+         			"Quotation-custom_level_1_approve_ok","Quotation-custom_section_break_0inv7",
+					"Quotation-custom_quotation_brand_summary","Quotation-custom_section_break_5hv6r","Quotation-custom_total_shipping_new","Quotation-custom_total_finance_new",
+     				"Quotation-custom_total_transport_new","Quotation-custom_total_reward_new","Quotation-custom_total_incentive_new",
+					"Quotation-custom_column_break_ojhw1","Quotation-custom_total_customs_new","Quotation-custom_total_margin_percent_new","Quotation-custom_total_margin_new",
+     				"Quotation-custom_total_cost_new","Quotation-custom_total_selling_new",
+					"Quotation-custom_partial_delivery_accepted","Quotation-custom_shipment_and_margin","Quotation-custom_column_break_uhyss",
+     				"Quotation-custom_stock","Quotation-custom_shipping_mode","Quotation-custom_total_buying_price","Quotation-custom_incentive_","Quotation-custom_incentive_amount",
+         			"Quotation-custom_distribute_incentive_based_on","Quotation-custom_low_margin_reason","Quotation-custom_apply_incentive",
+					"Brand-custom_column_break_twekt","Brand-custom_date","Brand-custom_company","Brand-custom_city","Brand-custom_country","Brand-custom_contact_details",
+     				"Brand-custom_section_break_ntgnq","Brand-custom_type","Brand-custom_industry_rating","Brand-custom_avientek_rating","Brand-custom_column_break_rakhm","Brand-custom_brand_level",
+					"Brand-custom_show","Brand-custom_contacts","Brand-custom_company_1","Brand-custom_supplier_address","Brand-custom_address",
+					"Lead-custom_date","Lead-custom_designation","Lead-custom_department","Lead-custom_business_size","Lead-custom_industry_rating",
+     				"Lead-custom_avientek_rating","Lead-custom_reference_from","Lead-custom_section_break_21cky","Lead-custom_focused_brands","Lead-custom_column_break_wq4gu",
+         			"Lead-custom_show","Lead-custom_credit_limit_and_payment_terms","Lead-custom_payment_terms","Lead-custom_credit_limit","Lead-custom_party_type","Lead-custom_section_break_szjmi","Lead-custom_contact_details","Lead-custom_partner_type",
+					"Lead Source-custom_column_break_wjdic","Lead Source-custom_country","Lead Source-custom_year","Lead Source-custom_show",
+     				"Item Price-custom_date","Item Price-custom_company","Item Price-custom_part_number","Item Price-custom_link","Item Price-custom_standard_price","Item Price-custom_msrp",
+                    "Item Price-custom_section_break_wquw3","Item Price-custom_recommended_products","Item Price-custom_must_quote","Item Price-custom_charges_and_percentage","Item Price-custom_shipping__air_","Item Price-custom_shipping__sea_",
+                    "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_"
+     ),
 			]
 		],
 	},
@@ -140,9 +179,14 @@ doctype_js = {
 	"Purchase Order": "public/js/purchase_order.js",
 	"Sales Order" : "public/js/sales_order.js",
 	"Company": "public/js/send_email.js",
+	"Brand": "public/js/brand.js",
+	# "Journal Entry": "public/js/journal_entry.js",
+	# "Purchase Invoice": "public/js/purchase_invoice.js"
 	# "Purchase Receipt" : "public/js/purchase_receipt.js",
 }
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
+	"Quotation": "public/js/quotation_list.js"
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -219,11 +263,25 @@ doctype_js = {
 # permission_query_conditions = {
 # "Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
 # }
+# hooks.py
+
+# permission_query_conditions = {
+#     "Payment Request Form": "avientek.avientek.doctype.payment_request_form.payment_request_form.get_permission_query_conditions"
+# }
+
 #
 # has_permission = {
 # "Event": "frappe.desk.doctype.event.event.has_permission",
 # }
+# permission_query_conditions = {
+#     "Project Quotation": "avientek.events.sales_person_permission.project_quotation_pqc",
+#     "Quotation": "avientek.events.sales_person_permission.quotation_pqc",
+# }
 
+# has_permission = {
+#     "Project Quotation": "avientek.events.sales_person_permission.project_quotation_has_perm",
+#     "Quotation": "avientek.events.sales_person_permission.quotation_has_perm",
+# }
 # DocType Class
 # ---------------
 # Override standard doctype classes
@@ -245,11 +303,15 @@ doc_events = {
     },
     "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
     "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
-    # "Quotation": {
-    #     # "validate":      "avientek.events.quotation.validate",                   # server maths
-    #     "before_submit": "avientek.events.quotation.validate_margin_before_submit",
-    # },
-    # "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
+    "Quotation": {
+        "validate": "avientek.events.quotation.set_margin_flags",
+        "before_save": [
+            "avientek.events.quotation.run_calculation_pipeline",
+            "avientek.events.quotation.validate_total_discount",
+            "avientek.events.quotation.calculate_additional_discount_percentage",
+        ]
+    },
+    "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
 }
 
 
