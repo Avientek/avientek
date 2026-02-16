@@ -111,8 +111,11 @@ def get_outstanding_reference_documents(args):
     common_filter = [
         ple.party_type == args.get("party_type"),
         ple.party == args.get("party"),
-        ple.company == args.get("company")  # ✅ Add this line
+        ple.company == args.get("company"),
     ]
+
+    if args.get("reference_doctype"):
+        common_filter.append(ple.voucher_type == args.get("reference_doctype"))
 
 
     query_voucher_amount = (
@@ -212,8 +215,9 @@ def get_outstanding_reference_documents(args):
                 row["bill_no"] = voucher_no
 
             row["posting_date"] = invoice.get("posting_date")
+            row["grand_total"] = invoice.get("grand_total") or invoice.get("total")
             row["invoice_amount"] = invoice.get("total") or invoice.get("grand_total")
-            row["outstanding"] = invoice.get("base_total") or row.get("outstanding")
+            row["outstanding"] = invoice.get("outstanding_amount") or row.get("outstanding")
             row["total_amount"] = row["invoice_amount"]
             row["currency"] = invoice.get("currency")
             row["exchange_rate"] = invoice.get("conversion_rate")
