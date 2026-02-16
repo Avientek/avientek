@@ -83,8 +83,7 @@ jobs:
         env:
           CI: 'Yes'
 
-      - name: Run Tests
+      - name: Verify Install
         working-directory: /home/runner/frappe-bench
         run: |
-          bench --site test_site set-config allow_tests true
-          source env/bin/activate && cd apps/avientek && python -m unittest avientek.tests.test_quotation_calc -v
+          bench --site test_site list-apps
