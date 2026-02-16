@@ -87,4 +87,4 @@ jobs:
         working-directory: /home/runner/frappe-bench
         run: |
           bench --site test_site set-config allow_tests true
-          cd apps/avientek && python -m unittest avientek.tests.test_quotation_calc -v
+          source env/bin/activate && cd apps/avientek && python -m unittest avientek.tests.test_quotation_calc -v
