@@ -405,18 +405,24 @@ def create_payment_request(source_name, target_doc=None, args=None):
         sales_order = source.items[0].sales_order if source.items else ""
 
         # 3. Append to payment references
+        exchange_rate = source.conversion_rate or 1
+        # PO doesn't have outstanding_amount, use grand_total as full amount
+        os_company = source.base_grand_total or 0
+        os_invoice = source.grand_total or 0
+
         target.append("payment_references", {
             "reference_doctype": "Purchase Order",
             "reference_name": source.name,
-            "total_amount": source.total,
-            "payment_amount": source.total,
-            "outstanding_amount": source.base_total,
+            "grand_total": source.grand_total,
+            "base_grand_total": source.base_grand_total,
+            "outstanding_amount": os_invoice,
+            "base_outstanding_amount": os_company,
+            "payment_amount": 0,
             "invoice_date": source.transaction_date,
             "due_date": source.schedule_date,
-            "exchange_rate": source.conversion_rate,
+            "exchange_rate": exchange_rate,
             "document_reference": sales_order,
             "currency": source.currency,
-            # "reference_attachment": attachment_html
         })
 
         # 4. Calculate totals

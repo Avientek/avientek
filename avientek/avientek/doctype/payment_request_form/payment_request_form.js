@@ -52,7 +52,7 @@ frappe.ui.form.on('Payment Request Form', {
 		frm.set_query('party_type', function() {
             return {
                 filters: {
-                    name: ['in', ['Customer', 'Supplier', 'Employee']]
+                    name: ['in', ['Supplier', 'Employee']]
                 }
             };
         });
@@ -80,66 +80,108 @@ frappe.ui.form.on('Payment Request Form', {
             });
         }
 
+        // "Bulk Payment % Update" button — applies a % to all payment reference rows
+        if (frm.doc.docstatus === 0 && (frm.doc.payment_references || []).length) {
+            frm.fields_dict.payment_references.$wrapper.find('.btn-update-paid').remove();
+            let $btn = $(`<button class="btn btn-xs btn-default btn-update-paid" style="margin-left:10px;">
+                ${__('Bulk Payment % Update')}
+            </button>`);
+            frm.fields_dict.payment_references.$wrapper.find('.grid-footer .grid-add-row').after($btn);
+            $btn.on('click', function() {
+                let d = new frappe.ui.Dialog({
+                    title: __('Bulk Payment % Update'),
+                    fields: [
+                        {
+                            fieldname: 'payment_pct',
+                            fieldtype: 'Percent',
+                            label: __('Payment %'),
+                            default: 100,
+                            reqd: 1
+                        }
+                    ],
+                    primary_action_label: __('Apply'),
+                    primary_action: function(values) {
+                        let pct = flt(values.payment_pct) / 100;
+                        (frm.doc.payment_references || []).forEach(row => {
+                            let base = flt(row.outstanding_amount);
+                            let rate = flt(row.exchange_rate || 1);
+                            row.payment_percentage = flt(values.payment_pct);
+                            row.payment_amount = flt(base * rate * pct, precision('payment_amount', row));
+                            row.deduction = flt(base * rate, precision('payment_amount', row)) - row.payment_amount;
+                        });
+                        frm.refresh_field('payment_references');
+                        frm.events.recalculate_totals(frm);
+                        frm.dirty();
+                        d.hide();
+                        frappe.show_alert({message: __('Updated {0} rows at {1}%', [(frm.doc.payment_references || []).length, values.payment_pct]), indicator: 'green'});
+                    }
+                });
+                d.show();
+            });
+        }
+
         
         if (frm.doc.docstatus === 0 ) {
-            frm.add_custom_button(
-                __("Purchase Order"),
-                function () {
-                    erpnext.utils.map_current_doc({
-                        method: "avientek.events.purchase_order.create_payment_request",
-                        source_doctype: "Purchase Order",
-                        target: frm,
-                        setters: {
-                            supplier: frm.doc.party,
-                            
-                        },
-                        get_query_filters: {
-                            docstatus: 1,
-                            status: ["not in", ["Closed", "On Hold"]],  
-                            company: frm.doc.company
-                        }
-                    });
-                },
-                __("Get Invoices From")
-            );
-			frm.add_custom_button(
-                __("Purchase Invoice"),
-                function () {
-                    erpnext.utils.map_current_doc({
-                        method: "avientek.events.purchase_invoice.create_payment_request",
-                        source_doctype: "Purchase Invoice",
-                        target: frm,
-                        setters: {
-                            supplier: frm.doc.party
-                        },
-                        get_query_filters: {
-                            docstatus: 1,
-                            status: ["not in", ["Closed", "On Hold"]],  
-                            company: frm.doc.company
-                        }
-                    });
-                },
-                __("Get Invoices From")
-            );
-			frm.add_custom_button(
-                __("Expense Claim"),
-                function () {
-                    erpnext.utils.map_current_doc({
-                        method: "avientek.events.expense_claim.create_payment_request",
-                        source_doctype: "Expense Claim",
-                        target: frm,
-                        setters: {
-                            employee: frm.doc.party
-                        },
-                        get_query_filters: {
-                            docstatus: 1,
-                            // status: ["not in", ["Closed", "On Hold"]],  
-                            company: frm.doc.company
-                        }
-                    });
-                },
-                __("Get Invoices From")
-            );
+            if (frm.doc.party_type === "Supplier") {
+                frm.add_custom_button(
+                    __("Purchase Order"),
+                    function () {
+                        erpnext.utils.map_current_doc({
+                            method: "avientek.events.purchase_order.create_payment_request",
+                            source_doctype: "Purchase Order",
+                            target: frm,
+                            setters: {
+                                supplier: frm.doc.party,
+                            },
+                            get_query_filters: {
+                                docstatus: 1,
+                                status: ["not in", ["Closed", "On Hold"]],
+                                company: frm.doc.company
+                            }
+                        });
+                    },
+                    __("Get Invoices From")
+                );
+                frm.add_custom_button(
+                    __("Purchase Invoice"),
+                    function () {
+                        erpnext.utils.map_current_doc({
+                            method: "avientek.events.purchase_invoice.create_payment_request",
+                            source_doctype: "Purchase Invoice",
+                            target: frm,
+                            setters: {
+                                supplier: frm.doc.party
+                            },
+                            get_query_filters: {
+                                docstatus: 1,
+                                status: ["not in", ["Closed", "On Hold"]],
+                                company: frm.doc.company
+                            }
+                        });
+                    },
+                    __("Get Invoices From")
+                );
+            }
+            if (frm.doc.party_type === "Employee") {
+                frm.add_custom_button(
+                    __("Expense Claim"),
+                    function () {
+                        erpnext.utils.map_current_doc({
+                            method: "avientek.events.expense_claim.create_payment_request",
+                            source_doctype: "Expense Claim",
+                            target: frm,
+                            setters: {
+                                employee: frm.doc.party
+                            },
+                            get_query_filters: {
+                                docstatus: 1,
+                                company: frm.doc.company
+                            }
+                        });
+                    },
+                    __("Get Invoices From")
+                );
+            }
 			// frm.add_custom_button(
             // 	__("Journal Entry"),
             // 	function () {
@@ -175,6 +217,21 @@ frappe.ui.form.on('Payment Request Form', {
                     });
                 },
                 __("Create") // Group under 'Create'
+            );
+
+        }
+
+        // Create Payment Order button (Supplier only, any submitted state)
+        if (frm.doc.docstatus === 1 && frm.doc.party_type === "Supplier") {
+            frm.add_custom_button(
+                __("Payment Order"),
+                function () {
+                    frappe.model.open_mapped_doc({
+                        method: "avientek.avientek.doctype.payment_request_form.payment_request_form.make_payment_order",
+                        frm: frm
+                    });
+                },
+                __("Create")
             );
         }
 
@@ -228,52 +285,55 @@ frappe.ui.form.on('Payment Request Form', {
 		}
 	}
 	},
-	get_outstanding_invoice: function(frm) {
+	get_purchase_invoice: function(frm) {
+		frm.events._fetch_outstanding(frm, "Purchase Invoice");
+	},
+	get_purchase_order: function(frm) {
+		frm.events._fetch_outstanding(frm, "Purchase Order");
+	},
+	get_expense_claim: function(frm) {
+		frm.events._fetch_outstanding(frm, "Expense Claim");
+	},
+	_fetch_outstanding: function(frm, reference_doctype) {
 		frm.clear_table("payment_references");
 
 		if(!frm.doc.party) {
 			return;
 		}
 
-		var company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
 		var args = {
             "posting_date": frm.doc.posting_date,
             "company": frm.doc.company,
             "party": frm.doc.party,
-            "party_type": frm.doc.party_type // Add this
+            "party_type": frm.doc.party_type,
+            "reference_doctype": reference_doctype
         };
 
-		return  frappe.call({
+		return frappe.call({
 			method: 'avientek.avientek.doctype.payment_request_form.payment_request_form.get_outstanding_reference_documents',
 			args: {
-				args:args
+				args: args
 			},
-			callback: function(r,rt) {
-                console.log("Outstanding Invoices", r.message);
+			callback: function(r) {
 				if(r.message) {
-                    
-
 					$.each(r.message, function(i, d) {
                         let c = frm.add_child("payment_references");
                         c.reference_doctype = d.voucher_type;
-                        // c.reference_name = d.voucher_no;  // Always use voucher_no for reference_name
-                        c.reference_name = d.bill_no;            // Display bill_no if available
+                        c.reference_name = d.voucher_no;
+                        c.bill_no = d.bill_no;
                         c.due_date = d.due_date;
                         c.invoice_date = d.posting_date;
-                        c.total_amount = d.invoice_amount;
+                        c.grand_total = d.grand_total;
+                        c.base_grand_total = d.base_grand_total;
                         c.outstanding_amount = d.outstanding;
-                        c.payment_amount = d.invoice_amount;
+                        c.base_outstanding_amount = d.base_outstanding;
+                        c.payment_amount = 0;
                         c.exchange_rate = d.exchange_rate;
                         c.currency = d.currency;
-                        c.document_reference = d.document_reference
-;
+                        c.document_reference = d.document_reference;
                     });
 					frm.refresh_fields();
-					frm.events.set_total_payment_amount(frm);
-					frm.events.set_total_amount(frm);
                     frm.events.recalculate_totals(frm);
-                    frm.events.set_total_outstanding_amount(frm);
-
 				}
 			}
 		});
@@ -306,19 +366,25 @@ frappe.ui.form.on('Payment Request Form', {
 
 	},
     recalculate_totals: function(frm) {
+        is_updating_fields = true;
+
         let total_payment = 0;
-        let total_outstanding = 0;
-        let total_amount = 0;
+        let total_deduction = 0;
+        let total_base_outstanding = 0;
 
         (frm.doc.payment_references || []).forEach(row => {
             total_payment += flt(row.payment_amount);
-            total_outstanding += flt(row.outstanding_amount);
-            total_amount += flt(row.total_amount);
+            total_deduction += flt(row.deduction);
+            total_base_outstanding += flt(row.base_outstanding_amount);
         });
 
-        frm.set_value("total_payment_amount", total_payment);
-        frm.set_value("total_outstanding_amount", total_outstanding);
-        frm.set_value("total_amount", total_amount);
+        frappe.run_serially([
+            () => frm.set_value("total_amount", total_base_outstanding),
+            () => frm.set_value("total_payment_amount", total_payment),
+            () => frm.set_value("total_outstanding_amount", total_base_outstanding),
+            () => frm.set_value("deduction", total_deduction),
+            () => { is_updating_fields = false; }
+        ]);
     },
     set_total_outstanding_amount: function(frm) {
 		console.log("outstanding_amount")
@@ -649,46 +715,25 @@ function fetch_supplier_details(frm) {
 }
 frappe.ui.form.on('Payment Request Reference', {
     payment_percentage: function(frm, cdt, cdn) {
-    let row = locals[cdt][cdn];
-    let perc = 0;
+        let row = locals[cdt][cdn];
+        let perc = flt(row.payment_percentage) / 100;
+        let base = flt(row.outstanding_amount);
+        let rate = flt(row.exchange_rate || 1);
 
-    if (row.payment_percentage) {
-        perc = flt(row.payment_percentage) / 100;
-    }
-
-    if (perc > 0 && row.total_amount) {
-        row.payment_amount = flt(row.total_amount) * perc;
-        row.outstanding_amount = row.payment_amount * flt(row.exchange_rate || 1);
-        row.deduction = flt(row.total_amount) - flt(row.payment_amount);
-        console.log("Outstanding Amount", row.outstanding_amount)
-        console.log("Deduction", row.deduction);
-        frm.refresh_field("payment_references");
-
-        let total_payment = 0;
-        let total_outstanding = 0;
-		let total_amount = 0;
-        (frm.doc.payment_references || []).forEach(r => {
-            total_payment += flt(r.payment_amount);
-            total_outstanding += flt(r.outstanding_amount);
-			total_amount += flt(r.total_amount);
-        });
-		console.log("total_payment",total_payment)
-		console.log("total_outstanding",total_outstanding)
-		console.log("total_amount",total_amount)
-        frm.set_value("total_payment_amount", total_payment);
-        frm.set_value("total_outstanding_amount", total_outstanding);
-		frm.set_value("total_amount", total_amount);
-
-    }
+        if (perc > 0 && base) {
+            row.payment_amount = flt(base * rate * perc);
+            row.deduction = flt(base * rate) - flt(row.payment_amount);
+            frm.refresh_field("payment_references");
+            frm.events.recalculate_totals(frm);
+        }
     },
     deduction: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        let total = flt(row.total_amount);
+        let base = flt(row.outstanding_amount) * flt(row.exchange_rate || 1);
         let deduction = flt(row.deduction);
-        row.payment_amount = total - deduction;
-        row.outstanding_amount = row.payment_amount * flt(row.exchange_rate || 1);
-        console.log("Payment Amount", row.payment_amount);
-        frm.refresh_field("payment_references"); // replace with your child table fieldname
+        row.payment_amount = flt(base - deduction);
+        frm.refresh_field("payment_references");
+        frm.events.recalculate_totals(frm);
     },
     payment_amount: function(frm, cdt, cdn) {
         frm.events.recalculate_totals(frm);

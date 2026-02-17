@@ -128,7 +128,8 @@ fixtures = [
 					"Lead Source-custom_column_break_wjdic","Lead Source-custom_country","Lead Source-custom_year","Lead Source-custom_show",
      				"Item Price-custom_date","Item Price-custom_company","Item Price-custom_part_number","Item Price-custom_link","Item Price-custom_standard_price","Item Price-custom_msrp",
                     "Item Price-custom_section_break_wquw3","Item Price-custom_recommended_products","Item Price-custom_must_quote","Item Price-custom_charges_and_percentage","Item Price-custom_shipping__air_","Item Price-custom_shipping__sea_",
-                    "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_"
+                    "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_",
+					"Workflow-custom_enable_confirmation",
      ),
 			]
 		],
@@ -157,7 +158,7 @@ fixtures = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/avientek/css/avientek.css"
-# app_include_js = "/assets/avientek/js/avientek.js"
+app_include_js = "/assets/avientek/js/workflow_confirm.js?v=5"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/avientek/css/avientek.css"

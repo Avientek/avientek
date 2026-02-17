@@ -61,18 +61,23 @@ def create_payment_request(source_name, target_doc=None, args=None):
                         frappe.log_error(frappe.get_traceback(), "Failed to attach Quotation PDF")
 
         # Add row to Payment References
+        exchange_rate = source.conversion_rate or 1
+        os_company = source.outstanding_amount or 0  # in company currency (AED)
+        os_invoice = os_company / exchange_rate if exchange_rate else os_company  # in invoice currency
+
         target.append("payment_references", {
             "reference_doctype": "Purchase Invoice",
             "reference_name": source.name,
-            "total_amount": source.total,
-            "payment_amount": source.total,
-            "outstanding_amount": source.base_total,
+            "grand_total": source.grand_total,
+            "base_grand_total": source.base_grand_total,
+            "outstanding_amount": os_invoice,
+            "base_outstanding_amount": os_company,
+            "payment_amount": 0,
             "invoice_date": source.bill_date,
             "document_reference": purchase_order,
             "currency": source.currency,
             "due_date": source.due_date,
-            "exchange_rate": source.conversion_rate,
-            # "reference_attachment": attachment_html
+            "exchange_rate": exchange_rate,
         })
 
         # Set totals
