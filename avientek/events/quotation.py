@@ -117,11 +117,10 @@ def get_item_all_details(item_code, customer,price_list):
     }
 
 def get_last_5_transactions(item_code, customer):
-    result = []
+    """Get last 5 transactions for item+customer, sorted by date across all doc types."""
+    all_results = []
 
-    # -----------------------
     # 1️⃣ SALES INVOICE
-    # -----------------------
     invoices = frappe.db.sql("""
         SELECT si.name, sii.qty, sii.rate, si.posting_date AS date
         FROM `tabSales Invoice` si
@@ -129,13 +128,10 @@ def get_last_5_transactions(item_code, customer):
         WHERE si.customer=%s
           AND sii.item_code=%s
           AND si.docstatus=1
-        ORDER BY si.posting_date DESC
     """, (customer, item_code), as_dict=True)
 
     for r in invoices:
-        if len(result) >= 5:
-            return result
-        result.append({
+        all_results.append({
             "doctype": "Sales Invoice",
             "name": r.name,
             "qty": r.qty,
@@ -143,9 +139,7 @@ def get_last_5_transactions(item_code, customer):
             "date": r.date
         })
 
-    # -----------------------
     # 2️⃣ SALES ORDER (not invoiced)
-    # -----------------------
     orders = frappe.db.sql("""
         SELECT so.name, soi.qty, soi.rate, so.transaction_date AS date
         FROM `tabSales Order` so
@@ -159,14 +153,10 @@ def get_last_5_transactions(item_code, customer):
             FROM `tabSales Invoice Item` sii
             WHERE sii.sales_order IS NOT NULL
         )
-        ORDER BY so.transaction_date DESC
     """, (customer, item_code), as_dict=True)
 
-
     for r in orders:
-        if len(result) >= 5:
-            return result
-        result.append({
+        all_results.append({
             "doctype": "Sales Order",
             "name": r.name,
             "qty": r.qty,
@@ -174,9 +164,7 @@ def get_last_5_transactions(item_code, customer):
             "date": r.date
         })
 
-    # -----------------------
     # 3️⃣ QUOTATION (not ordered)
-    # -----------------------
     quotations = frappe.db.sql("""
         SELECT q.name, qi.qty, qi.rate, q.transaction_date AS date
         FROM `tabQuotation` q
@@ -189,13 +177,10 @@ def get_last_5_transactions(item_code, customer):
               FROM `tabSales Order Item` soi
               WHERE soi.prevdoc_docname IS NOT NULL
           )
-        ORDER BY q.transaction_date DESC
     """, (customer, item_code), as_dict=True)
 
     for r in quotations:
-        if len(result) >= 5:
-            return result
-        result.append({
+        all_results.append({
             "doctype": "Quotation",
             "name": r.name,
             "qty": r.qty,
@@ -203,7 +188,9 @@ def get_last_5_transactions(item_code, customer):
             "date": r.date
         })
 
-    return result
+    # Sort all results by date descending and return top 5
+    all_results.sort(key=lambda x: x["date"] or "", reverse=True)
+    return all_results[:5]
 @frappe.whitelist()
 def get_company_stock(item_code):
     stock = []
@@ -430,7 +417,7 @@ def recalc_doc_totals(doc):
     totals = {
         "shipping": 0, "finance": 0, "transport": 0, "reward": 0,
         "incentive": 0, "customs": 0, "cost": 0, "selling": 0,
-        "buying_price": 0,
+        "buying_price": 0, "qty": 0,
     }
 
     for it in doc.items:
@@ -442,6 +429,7 @@ def recalc_doc_totals(doc):
         totals["customs"]      += _to_flt(it.custom_customs_value)
         totals["cost"]         += _to_flt(it.custom_cogs)
         totals["selling"]      += _to_flt(it.custom_selling_price)
+        totals["qty"]          += flt(it.qty)
 
         qty = max(cint(it.qty), 1)
         sp = _to_flt(it.custom_special_price)
@@ -452,6 +440,7 @@ def recalc_doc_totals(doc):
     margin = flt(ts - tc, 4)
     margin_pct = flt(margin / ts * 100, 4) if ts else 0
 
+    # Custom total fields
     doc.custom_total_shipping_new       = flt(totals["shipping"], 4)
     doc.custom_total_finance_new        = flt(totals["finance"], 4)
     doc.custom_total_transport_new      = flt(totals["transport"], 4)
@@ -463,6 +452,25 @@ def recalc_doc_totals(doc):
     doc.custom_total_cost_new           = flt(tc, 4)
     doc.custom_total_selling_new        = flt(ts, 4)
     doc.custom_total_buying_price       = flt(totals["buying_price"], 4)
+
+    # Update standard ERPNext total fields so they display correctly on form
+    conversion_rate = flt(doc.conversion_rate) or 1.0
+
+    doc.total_qty = flt(totals["qty"], 4)
+    doc.total = flt(ts, 4)
+    doc.net_total = flt(ts, 4)
+    doc.base_total = flt(ts * conversion_rate, 4)
+    doc.base_net_total = flt(ts * conversion_rate, 4)
+
+    # Grand total = net_total + taxes (calculate from existing taxes if any)
+    total_taxes = flt(doc.total_taxes_and_charges) if doc.get("total_taxes_and_charges") else 0
+    doc.grand_total = flt(ts + total_taxes, 4)
+    doc.base_grand_total = flt((ts + total_taxes) * conversion_rate, 4)
+
+    # Rounded total (if not disabled)
+    if not doc.get("disable_rounded_total"):
+        doc.rounded_total = round(doc.grand_total)
+        doc.base_rounded_total = round(doc.base_grand_total)
 
 
 # ──────────────────────────────────────────────────────────────

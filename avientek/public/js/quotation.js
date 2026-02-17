@@ -13,7 +13,14 @@ frappe.ui.form.on('Quotation', {
 
     after_save(frm) {
         // Reload document to sync with server-calculated values
-        frm.reload_doc();
+        // Use callback to ensure form state is clean after reload
+        frm.reload_doc().then(() => {
+            // Reset discount/incentive applied flags after reload
+            frm._discount_applied = true;
+            frm._incentive_applied = true;
+            // Ensure form is marked as clean (not dirty)
+            frm.doc.__unsaved = 0;
+        });
     },
 
     // ── Shipping mode (parent-level) ────────────────────────
@@ -368,8 +375,16 @@ frappe.ui.form.on('Quotation Item', {
         frm.clear_table("custom_stock");
         frm.clear_table("custom_shipment_and_margin");
 
+        // Pass item margin data (may be empty for new items)
+        let item_margin = {
+            margin_percent: row.custom_margin_ || 0,
+            margin_value: row.custom_margin_value || 0,
+            selling_price: row.custom_selling_price || 0,
+            cogs: row.custom_cogs || 0
+        };
+
         // Load and render item info (with table population for backward compatibility)
-        refresh_item_info_html(frm, row.item_code, true);
+        refresh_item_info_html(frm, row.item_code, true, item_margin);
 
         // Load item defaults (single server call)
         load_item_defaults(frm, cdt, cdn);
@@ -794,28 +809,40 @@ function toggle_apply_incentive_button(frm) {
 // ── Item Info HTML Renderer ───────────────────────────────────
 
 /**
- * Render item information (stock, history, shipment/margin) as HTML.
+ * Render item information (stock, history, shipment/margin, calculated margin) as HTML.
  * Uses Frappe's row/col classes for proper responsive columns.
+ * @param {object} data - Data from get_item_all_details (stock, history, shipment_margin)
+ * @param {object} item_margin - Calculated margin from selected item row (optional)
  */
-function render_item_info_html(data, item_code) {
+function render_item_info_html(data, item_margin = null) {
     // Stock section - list format
     let stockHtml = '';
     if (data.stock && data.stock.length > 0) {
         stockHtml = `
             <table class="table table-sm table-borderless" style="margin: 0; font-size: 12px;">
+                <thead>
+                    <tr style="font-size: 10px; color: #888; text-transform: uppercase;">
+                        <th>Company</th>
+                        <th style="text-align: right;">Free</th>
+                        <th style="text-align: right;">Actual</th>
+                        <th style="text-align: right;">Projected</th>
+                    </tr>
+                </thead>
                 <tbody>
                     ${data.stock.map(s => {
                         let statusColor = s.free_stock > 0 ? '#28a745' : '#dc3545';
                         let statusBg = s.free_stock > 0 ? '#d4edda' : '#f8d7da';
+                        let projColor = s.projected_stock > 0 ? '#007bff' : '#6c757d';
                         return `
                             <tr>
-                                <td style="width: 55%;">${s.company}</td>
+                                <td>${s.company}</td>
                                 <td style="text-align: right;">
                                     <span style="background:${statusBg}; color:${statusColor}; padding: 2px 8px; border-radius: 4px; font-weight: bold;">
                                         ${s.free_stock}
                                     </span>
                                 </td>
-                                <td style="text-align: right; color: #888; font-size: 11px;">of ${s.actual_stock}</td>
+                                <td style="text-align: right; color: #888;">${s.actual_stock}</td>
+                                <td style="text-align: right; color: ${projColor}; font-weight: 500;">${s.projected_stock}</td>
                             </tr>
                         `;
                     }).join('')}
@@ -878,16 +905,38 @@ function render_item_info_html(data, item_code) {
         shippingHtml = '<span class="text-muted">No data</span>';
     }
 
-    // Combine into 3-column layout
+    // Calculated Margin section (from selected item row)
+    let marginHtml = '';
+    if (item_margin && (item_margin.margin_percent || item_margin.margin_value)) {
+        let marginColor = item_margin.margin_percent >= 10 ? '#28a745' : (item_margin.margin_percent >= 5 ? '#ffc107' : '#dc3545');
+        marginHtml = `
+            <div style="text-align: center;">
+                <div style="font-size: 24px; font-weight: bold; color: ${marginColor};">
+                    ${flt(item_margin.margin_percent, 2)}%
+                </div>
+                <div style="font-size: 12px; color: #666;">
+                    ${format_currency(item_margin.margin_value)}
+                </div>
+                <div style="font-size: 10px; color: #888; margin-top: 5px;">
+                    Sell: ${format_currency(item_margin.selling_price)}<br>
+                    Cost: ${format_currency(item_margin.cogs)}
+                </div>
+            </div>
+        `;
+    } else {
+        marginHtml = '<span class="text-muted">Select item to view</span>';
+    }
+
+    // Combine into 4-column layout
     let html = `
         <div class="row" style="margin: 0 0 15px 0; padding: 10px; background: #f8f9fa; border-radius: 8px;">
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
                     STOCK AVAILABILITY
                 </div>
                 ${stockHtml}
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
                     TRANSACTION HISTORY
                 </div>
@@ -898,6 +947,12 @@ function render_item_info_html(data, item_code) {
                     SHIPPING
                 </div>
                 ${shippingHtml}
+            </div>
+            <div class="col-md-3">
+                <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
+                    CALCULATED MARGIN
+                </div>
+                ${marginHtml}
             </div>
         </div>
     `;
@@ -912,7 +967,7 @@ function render_item_info_html(data, item_code) {
  * @param {string} item_code - Item code to fetch info for
  * @param {boolean} populate_tables - Also populate the hidden tables (for backward compatibility)
  */
-function refresh_item_info_html(frm, item_code, populate_tables = false) {
+function refresh_item_info_html(frm, item_code, populate_tables = false, item_margin = null) {
     if (!item_code || !frm.doc.party_name) return;
 
     frappe.call({
@@ -956,8 +1011,8 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
                 }
             }
 
-            // Render HTML section
-            let html = render_item_info_html(r.message, item_code);
+            // Render HTML section with item margin data
+            let html = render_item_info_html(r.message, item_margin);
             frm.set_df_property("custom_item_info_html", "options", html);
             frm.refresh_field("custom_item_info_html");
         }
@@ -982,11 +1037,16 @@ function setup_items_grid_click_handler(frm) {
         // Get the item from the row index (idx is 1-based)
         let item = frm.doc.items[idx - 1];
         if (item && item.item_code) {
-            // Only refresh if it's a different item than currently displayed
-            if (frm._current_item_info !== item.item_code) {
-                frm._current_item_info = item.item_code;
-                refresh_item_info_html(frm, item.item_code);
-            }
+            // Always refresh to show current item's margin (even if same item)
+            frm._current_item_info = item.item_code;
+            // Pass item margin data
+            let item_margin = {
+                margin_percent: item.custom_margin_ || 0,
+                margin_value: item.custom_margin_value || 0,
+                selling_price: item.custom_selling_price || 0,
+                cogs: item.custom_cogs || 0
+            };
+            refresh_item_info_html(frm, item.item_code, false, item_margin);
         }
     });
 }
