@@ -218,6 +218,21 @@ frappe.ui.form.on('Payment Request Form', {
                 },
                 __("Create") // Group under 'Create'
             );
+
+        }
+
+        // Create Payment Order button (Supplier only, any submitted state)
+        if (frm.doc.docstatus === 1 && frm.doc.party_type === "Supplier") {
+            frm.add_custom_button(
+                __("Payment Order"),
+                function () {
+                    frappe.model.open_mapped_doc({
+                        method: "avientek.avientek.doctype.payment_request_form.payment_request_form.make_payment_order",
+                        frm: frm
+                    });
+                },
+                __("Create")
+            );
         }
 
     },
@@ -309,17 +324,16 @@ frappe.ui.form.on('Payment Request Form', {
                         c.due_date = d.due_date;
                         c.invoice_date = d.posting_date;
                         c.grand_total = d.grand_total;
+                        c.base_grand_total = d.base_grand_total;
                         c.outstanding_amount = d.outstanding;
-                        c.payment_amount = flt(d.outstanding) * flt(d.exchange_rate || 1);
+                        c.base_outstanding_amount = d.base_outstanding;
+                        c.payment_amount = 0;
                         c.exchange_rate = d.exchange_rate;
                         c.currency = d.currency;
                         c.document_reference = d.document_reference;
                     });
 					frm.refresh_fields();
-					frm.events.set_total_payment_amount(frm);
-					frm.events.set_total_amount(frm);
                     frm.events.recalculate_totals(frm);
-                    frm.events.set_total_outstanding_amount(frm);
 				}
 			}
 		});
@@ -352,19 +366,25 @@ frappe.ui.form.on('Payment Request Form', {
 
 	},
     recalculate_totals: function(frm) {
+        is_updating_fields = true;
+
         let total_payment = 0;
-        let total_outstanding = 0;
-        let total_amount = 0;
+        let total_deduction = 0;
+        let total_base_outstanding = 0;
 
         (frm.doc.payment_references || []).forEach(row => {
             total_payment += flt(row.payment_amount);
-            total_outstanding += flt(row.outstanding_amount);
-            total_amount += flt(row.total_amount);
+            total_deduction += flt(row.deduction);
+            total_base_outstanding += flt(row.base_outstanding_amount);
         });
 
-        frm.set_value("total_payment_amount", total_payment);
-        frm.set_value("total_outstanding_amount", total_outstanding);
-        frm.set_value("total_amount", total_amount);
+        frappe.run_serially([
+            () => frm.set_value("total_amount", total_base_outstanding),
+            () => frm.set_value("total_payment_amount", total_payment),
+            () => frm.set_value("total_outstanding_amount", total_base_outstanding),
+            () => frm.set_value("deduction", total_deduction),
+            () => { is_updating_fields = false; }
+        ]);
     },
     set_total_outstanding_amount: function(frm) {
 		console.log("outstanding_amount")

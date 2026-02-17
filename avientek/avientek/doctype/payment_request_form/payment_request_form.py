@@ -217,10 +217,18 @@ def get_outstanding_reference_documents(args):
             row["posting_date"] = invoice.get("posting_date")
             row["grand_total"] = invoice.get("grand_total") or invoice.get("total")
             row["invoice_amount"] = invoice.get("total") or invoice.get("grand_total")
-            row["outstanding"] = invoice.get("outstanding_amount") or row.get("outstanding")
-            row["total_amount"] = row["invoice_amount"]
             row["currency"] = invoice.get("currency")
-            row["exchange_rate"] = invoice.get("conversion_rate")
+            row["exchange_rate"] = invoice.get("conversion_rate") or 1
+
+            # outstanding_amount in ERPNext is in company currency;
+            # convert back to invoice currency so the grid is consistent
+            os_company = invoice.get("outstanding_amount") or row.get("outstanding") or 0
+            row["outstanding"] = os_company / row["exchange_rate"] if row["exchange_rate"] else os_company
+            row["total_amount"] = row["invoice_amount"]
+
+            # Company currency equivalents
+            row["base_grand_total"] = (row["grand_total"] or 0) * row["exchange_rate"]
+            row["base_outstanding"] = os_company
 
             if voucher_type == "Purchase Invoice":
                 purchase_order = frappe.get_value(
@@ -358,6 +366,45 @@ def create_journal_entry(source_name, target_doc=None, args=None):
         },
         target_doc,
         # postprocess=set_single_reference
+    )
+
+    return target_doc
+
+
+@frappe.whitelist()
+def make_payment_order(source_name, target_doc=None):
+    source = frappe.get_doc("Payment Request Form", source_name)
+
+    def set_missing_values(source, target):
+        target.payment_order_type = "Payment Request"
+        target.company = source.company
+        target.company_bank_account = source.issued_bank
+
+        for row in source.payment_references:
+            target.append("references", {
+                "reference_doctype": row.reference_doctype,
+                "reference_name": row.reference_name,
+                "amount": row.payment_amount,
+                "supplier": source.party,
+                "mode_of_payment": source.payment_mode,
+                "bank_account": source.supplier_bank_account,
+                "account": source.account,
+            })
+
+    target_doc = get_mapped_doc(
+        "Payment Request Form",
+        source_name,
+        {
+            "Payment Request Form": {
+                "doctype": "Payment Order",
+                "validation": {"docstatus": ["=", 1]},
+                "field_map": {
+                    "company": "company",
+                },
+            },
+        },
+        target_doc,
+        set_missing_values,
     )
 
     return target_doc
