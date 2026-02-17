@@ -80,6 +80,46 @@ frappe.ui.form.on('Payment Request Form', {
             });
         }
 
+        // "Bulk Payment % Update" button — applies a % to all payment reference rows
+        if (frm.doc.docstatus === 0 && (frm.doc.payment_references || []).length) {
+            frm.fields_dict.payment_references.$wrapper.find('.btn-update-paid').remove();
+            let $btn = $(`<button class="btn btn-xs btn-default btn-update-paid" style="margin-left:10px;">
+                ${__('Bulk Payment % Update')}
+            </button>`);
+            frm.fields_dict.payment_references.$wrapper.find('.grid-footer .grid-add-row').after($btn);
+            $btn.on('click', function() {
+                let d = new frappe.ui.Dialog({
+                    title: __('Bulk Payment % Update'),
+                    fields: [
+                        {
+                            fieldname: 'payment_pct',
+                            fieldtype: 'Percent',
+                            label: __('Payment %'),
+                            default: 100,
+                            reqd: 1
+                        }
+                    ],
+                    primary_action_label: __('Apply'),
+                    primary_action: function(values) {
+                        let pct = flt(values.payment_pct) / 100;
+                        (frm.doc.payment_references || []).forEach(row => {
+                            let base = flt(row.outstanding_amount);
+                            let rate = flt(row.exchange_rate || 1);
+                            row.payment_percentage = flt(values.payment_pct);
+                            row.payment_amount = flt(base * rate * pct, precision('payment_amount', row));
+                            row.deduction = flt(base * rate, precision('payment_amount', row)) - row.payment_amount;
+                        });
+                        frm.refresh_field('payment_references');
+                        frm.events.recalculate_totals(frm);
+                        frm.dirty();
+                        d.hide();
+                        frappe.show_alert({message: __('Updated {0} rows at {1}%', [(frm.doc.payment_references || []).length, values.payment_pct]), indicator: 'green'});
+                    }
+                });
+                d.show();
+            });
+        }
+
         
         if (frm.doc.docstatus === 0 ) {
             if (frm.doc.party_type === "Supplier") {
@@ -655,46 +695,25 @@ function fetch_supplier_details(frm) {
 }
 frappe.ui.form.on('Payment Request Reference', {
     payment_percentage: function(frm, cdt, cdn) {
-    let row = locals[cdt][cdn];
-    let perc = 0;
+        let row = locals[cdt][cdn];
+        let perc = flt(row.payment_percentage) / 100;
+        let base = flt(row.outstanding_amount);
+        let rate = flt(row.exchange_rate || 1);
 
-    if (row.payment_percentage) {
-        perc = flt(row.payment_percentage) / 100;
-    }
-
-    if (perc > 0 && row.total_amount) {
-        row.payment_amount = flt(row.total_amount) * perc;
-        row.outstanding_amount = row.payment_amount * flt(row.exchange_rate || 1);
-        row.deduction = flt(row.total_amount) - flt(row.payment_amount);
-        console.log("Outstanding Amount", row.outstanding_amount)
-        console.log("Deduction", row.deduction);
-        frm.refresh_field("payment_references");
-
-        let total_payment = 0;
-        let total_outstanding = 0;
-		let total_amount = 0;
-        (frm.doc.payment_references || []).forEach(r => {
-            total_payment += flt(r.payment_amount);
-            total_outstanding += flt(r.outstanding_amount);
-			total_amount += flt(r.total_amount);
-        });
-		console.log("total_payment",total_payment)
-		console.log("total_outstanding",total_outstanding)
-		console.log("total_amount",total_amount)
-        frm.set_value("total_payment_amount", total_payment);
-        frm.set_value("total_outstanding_amount", total_outstanding);
-		frm.set_value("total_amount", total_amount);
-
-    }
+        if (perc > 0 && base) {
+            row.payment_amount = flt(base * rate * perc);
+            row.deduction = flt(base * rate) - flt(row.payment_amount);
+            frm.refresh_field("payment_references");
+            frm.events.recalculate_totals(frm);
+        }
     },
     deduction: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        let total = flt(row.total_amount);
+        let base = flt(row.outstanding_amount) * flt(row.exchange_rate || 1);
         let deduction = flt(row.deduction);
-        row.payment_amount = total - deduction;
-        row.outstanding_amount = row.payment_amount * flt(row.exchange_rate || 1);
-        console.log("Payment Amount", row.payment_amount);
-        frm.refresh_field("payment_references"); // replace with your child table fieldname
+        row.payment_amount = flt(base - deduction);
+        frm.refresh_field("payment_references");
+        frm.events.recalculate_totals(frm);
     },
     payment_amount: function(frm, cdt, cdn) {
         frm.events.recalculate_totals(frm);
