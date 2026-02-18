@@ -100,6 +100,11 @@ frappe.ui.form.on('Payment Request Form', {
         // Render currency totals table
         frm.events.recalculate_totals(frm);
 
+        // Render payment history for suppliers
+        if (frm.doc.party_type === "Supplier" && frm.doc.party) {
+            frm.events.render_payment_history(frm);
+        }
+
         if (frm.doc.payment_type == "Pay" && !frm.doc.__islocal) {
             frm.add_custom_button(__('Download Combined PDF'), function () {
                 window.open(
@@ -167,6 +172,12 @@ frappe.ui.form.on('Payment Request Form', {
                 }
             }
         });
+
+        // Render payment history when party changes
+        if (frm.doc.party_type === "Supplier") {
+            frm.events.render_payment_history(frm);
+        }
+
 		if (frm.doc.party_type === "Supplier" && frm.doc.party && frm.doc.company) {
 			if(!frm.doc.posting_date) {
 				frappe.msgprint(__("Please select Posting Date before selecting Party"))
@@ -394,6 +405,86 @@ frappe.ui.form.on('Payment Request Form', {
         if (frm.fields_dict.currency_totals_html) {
             $(frm.fields_dict.currency_totals_html.wrapper).html(html);
         }
+    },
+
+    render_payment_history: function(frm) {
+        // Fetch and render supplier payment history
+        if (!frm.doc.party || frm.doc.party_type !== "Supplier") {
+            if (frm.fields_dict.payment_history_html) {
+                $(frm.fields_dict.payment_history_html.wrapper).html('');
+            }
+            return;
+        }
+
+        frappe.call({
+            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_supplier_payment_history",
+            args: {
+                supplier: frm.doc.party,
+                company: frm.doc.company,
+                limit: 50
+            },
+            callback: function(r) {
+                if (r.message && r.message.length > 0) {
+                    let html = frm.events.build_payment_history_table(frm, r.message);
+                    if (frm.fields_dict.payment_history_html) {
+                        $(frm.fields_dict.payment_history_html.wrapper).html(html);
+                    }
+                } else {
+                    if (frm.fields_dict.payment_history_html) {
+                        $(frm.fields_dict.payment_history_html.wrapper).html(
+                            '<p style="color: #888; padding: 10px;">No previous payment history found for this supplier.</p>'
+                        );
+                    }
+                }
+            }
+        });
+    },
+
+    build_payment_history_table: function(frm, payments) {
+        let html = `
+        <div class="payment-history-container" style="margin: 10px 0; overflow-x: auto;">
+            <table class="table table-bordered table-sm" style="font-size: 11px; min-width: 100%;">
+                <thead style="background-color: #f0f0f0;">
+                    <tr>
+                        <th style="padding: 6px 8px; text-align: center; width: 40px;">Sl. No.</th>
+                        <th style="padding: 6px 8px;">Bank</th>
+                        <th style="padding: 6px 8px; text-align: center; width: 40px;">Type</th>
+                        <th style="padding: 6px 8px;">Voucher No.</th>
+                        <th style="padding: 6px 8px; text-align: center; width: 80px;">Date</th>
+                        <th style="padding: 6px 8px;">Beneficiary</th>
+                        <th style="padding: 6px 8px;">Beneficiary IBAN/Account</th>
+                        <th style="padding: 6px 8px;">Debit Account</th>
+                        <th style="padding: 6px 8px; text-align: center; width: 50px;">Curr.</th>
+                        <th style="padding: 6px 8px; text-align: right; width: 100px;">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        payments.forEach(function(row) {
+            let dateFormatted = row.date ? frappe.datetime.str_to_user(row.date) : '';
+            let amountFormatted = format_currency(row.amount, row.currency);
+
+            html += `
+                <tr>
+                    <td style="padding: 5px 8px; text-align: center;">${row.sl_no}</td>
+                    <td style="padding: 5px 8px;">${row.bank || ''}</td>
+                    <td style="padding: 5px 8px; text-align: center;">${row.type || ''}</td>
+                    <td style="padding: 5px 8px;">${row.voucher_no || ''}</td>
+                    <td style="padding: 5px 8px; text-align: center;">${dateFormatted}</td>
+                    <td style="padding: 5px 8px;">${row.beneficiary || ''}</td>
+                    <td style="padding: 5px 8px;">${row.beneficiary_account || ''}</td>
+                    <td style="padding: 5px 8px;">${row.debit_account || ''}</td>
+                    <td style="padding: 5px 8px; text-align: center;">${row.currency || ''}</td>
+                    <td style="padding: 5px 8px; text-align: right;">${amountFormatted}</td>
+                </tr>`;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        </div>`;
+
+        return html;
     },
 
 	check_mandatory_to_fetch: function(frm) {

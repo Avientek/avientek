@@ -10,22 +10,28 @@
   "reference_name",
   "invoice_date",
   "due_date",
+  "column_break_4",
   "currency",
   "grand_total",
   "base_grand_total",
+  "remarks",
+  "section_break_egcz",
+  "base_outstanding_amount",
+  "is_return",
+  "return_against",
+  "column_break_rwww",
+  "outstanding_amount",
+  "section_break_vmxw",
+  "exchange_rate",
+  "column_break_dizn",
+  "exchange_gain_loss",
+  "section_break_gjej",
   "bill_no",
-  "payment_term",
-  "document_reference",
   "reference_attachment",
   "attachment",
-  "column_break_4",
-  "outstanding_amount",
-  "base_outstanding_amount",
-  "exchange_rate",
-  "exchange_gain_loss",
-  "remarks",
-  "is_return",
-  "return_against"
+  "column_break_fxiw",
+  "document_reference",
+  "payment_term"
  ],
  "fields": [
   {
@@ -171,12 +177,36 @@
    "hidden": 1,
    "label": "Return Against",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_break_vmxw",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_dizn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_gjej",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_fxiw",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_egcz",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_rwww",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-02-18 10:19:36.234551",
+ "modified": "2026-02-18 14:22:30.223357",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Reference",

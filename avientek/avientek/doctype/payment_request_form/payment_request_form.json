@@ -49,6 +49,8 @@
   "payment_references",
   "section_break_mnon",
   "currency_totals_html",
+  "payment_history_section",
+  "payment_history_html",
   "more_information_section",
   "remarks",
   "amended_from",
@@ -273,6 +275,19 @@
    "fieldname": "currency_totals_html",
    "fieldtype": "HTML",
    "label": "Currency Summary"
+  },
+  {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval:doc.party",
+   "depends_on": "eval:doc.party_type=='Supplier' && doc.party",
+   "fieldname": "payment_history_section",
+   "fieldtype": "Section Break",
+   "label": "Previous Payment Details"
+  },
+  {
+   "fieldname": "payment_history_html",
+   "fieldtype": "HTML",
+   "label": "Payment History"
   },
   {
    "fieldname": "address_and_contact_tab",

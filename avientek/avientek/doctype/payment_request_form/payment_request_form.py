@@ -202,6 +202,17 @@ def get_outstanding_reference_documents(args):
         voucher_no = row.get("voucher_no")
 
         try:
+            # Get outstanding amount directly from database (bypasses all caching)
+            invoice_outstanding = frappe.db.get_value(
+                voucher_type, voucher_no, "outstanding_amount"
+            )
+            os_company = invoice_outstanding if invoice_outstanding is not None else (row.get("outstanding") or 0)
+
+            # Skip fully paid invoices (outstanding = 0)
+            if os_company == 0:
+                continue
+
+            # Now fetch the full document for other fields
             invoice = frappe.get_doc(voucher_type, voucher_no)
             meta = frappe.get_meta(voucher_type)
 
@@ -220,7 +231,6 @@ def get_outstanding_reference_documents(args):
 
             # outstanding_amount in ERPNext is in company currency;
             # convert back to invoice currency so the grid is consistent
-            os_company = invoice.get("outstanding_amount") or row.get("outstanding") or 0
             row["outstanding"] = os_company / row["exchange_rate"] if row["exchange_rate"] else os_company
             row["total_amount"] = row["invoice_amount"]
 
@@ -239,21 +249,32 @@ def get_outstanding_reference_documents(args):
 
             filtered_rows.append(row)
 
-            # Fetch related Debit Notes / Return Purchase Invoices
+            # Fetch related Debit Notes / Return Purchase Invoices (only with outstanding)
             if voucher_type == "Purchase Invoice":
                 debit_notes = frappe.get_all(
                     "Purchase Invoice",
                     filters={
                         "return_against": voucher_no,
                         "is_return": 1,
-                        "docstatus": 1
+                        "docstatus": 1,
+                        "outstanding_amount": ["!=", 0]  # Only fetch debit notes with outstanding
                     },
                     fields=["name"]
                 )
 
                 for dn in debit_notes:
                     try:
+                        # Get outstanding directly from database (bypasses caching)
+                        dn_os_company = frappe.db.get_value(
+                            "Purchase Invoice", dn.name, "outstanding_amount"
+                        ) or 0
+
+                        # Skip if outstanding is 0 (fully settled)
+                        if dn_os_company == 0:
+                            continue
+
                         dn_doc = frappe.get_doc("Purchase Invoice", dn.name)
+
                         dn_row = {
                             "voucher_type": "Debit Note",
                             "voucher_no": dn.name,
@@ -269,7 +290,6 @@ def get_outstanding_reference_documents(args):
                         }
 
                         # Outstanding for debit notes (usually negative)
-                        dn_os_company = dn_doc.get("outstanding_amount") or 0
                         dn_row["outstanding"] = dn_os_company / dn_row["exchange_rate"] if dn_row["exchange_rate"] else dn_os_company
                         dn_row["total_amount"] = dn_row["invoice_amount"]
                         dn_row["base_grand_total"] = (dn_row["grand_total"] or 0) * dn_row["exchange_rate"]
@@ -310,7 +330,17 @@ def get_outstanding_reference_documents(args):
                 continue  # Skip if already added
 
             try:
+                # Get outstanding directly from database (bypasses caching)
+                dn_os_company = frappe.db.get_value(
+                    "Purchase Invoice", dn.name, "outstanding_amount"
+                ) or 0
+
+                # Skip if outstanding is 0 (fully settled)
+                if dn_os_company == 0:
+                    continue
+
                 dn_doc = frappe.get_doc("Purchase Invoice", dn.name)
+
                 dn_row = {
                     "voucher_type": "Debit Note",
                     "voucher_no": dn.name,
@@ -326,7 +356,6 @@ def get_outstanding_reference_documents(args):
                 }
 
                 # Outstanding for debit notes (usually negative)
-                dn_os_company = dn_doc.get("outstanding_amount") or 0
                 dn_row["outstanding"] = dn_os_company / dn_row["exchange_rate"] if dn_row["exchange_rate"] else dn_os_company
                 dn_row["total_amount"] = dn_row["invoice_amount"]
                 dn_row["base_grand_total"] = (dn_row["grand_total"] or 0) * dn_row["exchange_rate"]
@@ -605,3 +634,166 @@ def download_payment_pdf(docname):
     frappe.local.response.filename = f"{docname}_combined.pdf"
     frappe.local.response.filecontent = output.read()
     frappe.local.response.type = "download"
+
+
+@frappe.whitelist()
+def get_supplier_payment_history(supplier, company=None, limit=50):
+    """
+    Fetch payment history for a supplier from Payment Entry and Journal Entry.
+    Returns a list of payment records with bank details, voucher info, and amounts.
+    """
+    if not supplier:
+        return []
+
+    # Ensure limit is an integer
+    limit = int(limit) if limit else 50
+
+    payment_history = []
+
+    # 1. Fetch from Payment Entry
+    pe_filters = {
+        "party_type": "Supplier",
+        "party": supplier,
+        "payment_type": "Pay",
+        "docstatus": 1
+    }
+    if company:
+        pe_filters["company"] = company
+
+    payment_entries = frappe.get_all(
+        "Payment Entry",
+        filters=pe_filters,
+        fields=[
+            "name", "posting_date", "party", "party_name",
+            "paid_amount", "paid_from", "paid_from_account_currency",
+            "bank_account", "party_bank_account", "reference_no",
+            "mode_of_payment", "company"
+        ],
+        order_by="posting_date desc",
+        limit_page_length=limit
+    )
+
+    for pe in payment_entries:
+        # Get bank account details
+        bank_name = ""
+        beneficiary_account = ""
+        debit_account_no = ""
+
+        if pe.bank_account:
+            bank_data = frappe.db.get_value(
+                "Bank Account", pe.bank_account,
+                ["bank", "bank_account_no"], as_dict=True
+            )
+            if bank_data:
+                bank_name = bank_data.get("bank") or ""
+                debit_account_no = bank_data.get("bank_account_no") or ""
+
+        if pe.party_bank_account:
+            party_bank_data = frappe.db.get_value(
+                "Bank Account", pe.party_bank_account,
+                ["bank_account_no", "iban"], as_dict=True
+            )
+            if party_bank_data:
+                beneficiary_account = party_bank_data.get("iban") or party_bank_data.get("bank_account_no") or ""
+
+        # Determine payment type (TT/TR based on mode_of_payment or reference)
+        payment_type_code = "TR"  # Default to Transfer
+        if pe.mode_of_payment:
+            mop = pe.mode_of_payment.upper()
+            if "TT" in mop or "TELEGRAPHIC" in mop:
+                payment_type_code = "TT"
+            elif "TR" in mop or "TRANSFER" in mop:
+                payment_type_code = "TR"
+
+        payment_history.append({
+            "sl_no": 0,  # Will be set later
+            "bank": bank_name,
+            "type": payment_type_code,
+            "voucher_no": pe.name,
+            "date": pe.posting_date,
+            "beneficiary": pe.party_name or pe.party,
+            "beneficiary_account": beneficiary_account,
+            "debit_account": debit_account_no,
+            "currency": pe.paid_from_account_currency or "AED",
+            "amount": pe.paid_amount or 0,
+            "source": "Payment Entry"
+        })
+
+    # 2. Fetch from Journal Entry (Bank Entry type with supplier)
+    je_query = """
+        SELECT
+            je.name, je.posting_date, je.cheque_no, je.mode_of_payment,
+            jea.party, jea.party_type, jea.debit_in_account_currency,
+            jea.account, jea.account_currency, jea.bank_account
+        FROM `tabJournal Entry` je
+        INNER JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+        WHERE je.docstatus = 1
+            AND jea.party_type = 'Supplier'
+            AND jea.party = %(supplier)s
+            AND jea.debit_in_account_currency > 0
+    """
+    if company:
+        je_query += " AND je.company = %(company)s"
+    je_query += f" ORDER BY je.posting_date DESC LIMIT {limit}"
+
+    journal_entries = frappe.db.sql(
+        je_query,
+        {"supplier": supplier, "company": company},
+        as_dict=True
+    )
+
+    for je in journal_entries:
+        # Get bank and account details
+        bank_name = ""
+        debit_account_no = ""
+        beneficiary_account = ""
+
+        if je.bank_account:
+            bank_data = frappe.db.get_value(
+                "Bank Account", je.bank_account,
+                ["bank", "bank_account_no"], as_dict=True
+            )
+            if bank_data:
+                bank_name = bank_data.get("bank") or ""
+                debit_account_no = bank_data.get("bank_account_no") or ""
+
+        # Get supplier's default bank account
+        supplier_bank = frappe.db.get_value(
+            "Bank Account",
+            {"party_type": "Supplier", "party": supplier, "is_default": 1},
+            ["bank_account_no", "iban"],
+            as_dict=True
+        )
+        if supplier_bank:
+            beneficiary_account = supplier_bank.get("iban") or supplier_bank.get("bank_account_no") or ""
+
+        # Get supplier name
+        supplier_name = frappe.db.get_value("Supplier", supplier, "supplier_name") or supplier
+
+        # Determine payment type
+        payment_type_code = "TR"
+        if je.mode_of_payment:
+            mop = je.mode_of_payment.upper()
+            if "TT" in mop or "TELEGRAPHIC" in mop:
+                payment_type_code = "TT"
+
+        payment_history.append({
+            "sl_no": 0,
+            "bank": bank_name,
+            "type": payment_type_code,
+            "voucher_no": je.cheque_no or je.name,
+            "date": je.posting_date,
+            "beneficiary": supplier_name,
+            "beneficiary_account": beneficiary_account,
+            "debit_account": debit_account_no,
+            "currency": je.account_currency or "AED",
+            "amount": je.debit_in_account_currency or 0,
+            "source": "Journal Entry"
+        })
+
+    # Sort by date descending and assign serial numbers
+    payment_history.sort(key=lambda x: x["date"] or "", reverse=True)
+    for idx, row in enumerate(payment_history, 1):
+        row["sl_no"] = idx
+
+    return payment_history
