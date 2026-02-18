@@ -3,6 +3,8 @@
 
 import frappe
 import io
+import os
+import base64
 import requests
 from pypdf import PdfMerger
 from bs4 import BeautifulSoup
@@ -802,3 +804,226 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
         row["sl_no"] = idx
 
     return payment_history
+
+
+@frappe.whitelist()
+def get_pdf_as_images(doctype, docname, max_pages=10):
+    """
+    Get PDF attachments for a document and convert them to base64 images.
+    Returns a list of image data that can be embedded in print formats.
+
+    Args:
+        doctype: The doctype to fetch attachments from
+        docname: The document name
+        max_pages: Maximum number of pages to convert per PDF (default: 10)
+
+    Returns:
+        List of dicts with 'file_name' and 'images' (list of base64 image strings)
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
+        return []
+
+    if not doctype or not docname:
+        return []
+
+    max_pages = int(max_pages) if max_pages else 10
+
+    # Get all PDF attachments
+    attachments = frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": doctype,
+            "attached_to_name": docname
+        },
+        fields=["name", "file_name", "file_url", "is_private"]
+    )
+
+    result = []
+
+    for attachment in attachments:
+        file_name = attachment.get("file_name") or ""
+        file_ext = file_name.split(".")[-1].lower() if file_name else ""
+
+        # Only process PDF files
+        if file_ext != "pdf":
+            continue
+
+        try:
+            # Get the file path
+            file_url = attachment.get("file_url", "")
+
+            if file_url.startswith("/private/"):
+                file_path = frappe.get_site_path() + file_url
+            elif file_url.startswith("/files/"):
+                file_path = frappe.get_site_path("public") + file_url
+            else:
+                # Try to get from File doc
+                file_doc = frappe.get_doc("File", attachment.get("name"))
+                file_path = file_doc.get_full_path()
+
+            if not os.path.exists(file_path):
+                frappe.log_error(f"File not found: {file_path}", "PDF to Image Conversion")
+                continue
+
+            # Open PDF and convert pages to images
+            pdf_document = fitz.open(file_path)
+            images = []
+
+            num_pages = min(pdf_document.page_count, max_pages)
+
+            for page_num in range(num_pages):
+                page = pdf_document.load_page(page_num)
+
+                # Render page to image (2x resolution for better quality)
+                zoom = 2.0
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+
+                # Convert to PNG bytes
+                img_bytes = pix.tobytes("png")
+
+                # Convert to base64
+                img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+                images.append(f"data:image/png;base64,{img_base64}")
+
+            pdf_document.close()
+
+            if images:
+                result.append({
+                    "file_name": file_name,
+                    "images": images,
+                    "page_count": len(images)
+                })
+
+        except Exception as e:
+            frappe.log_error(
+                f"Error converting PDF to images: {file_name}\n{str(e)}\n{frappe.get_traceback()}",
+                "PDF to Image Conversion"
+            )
+
+    return result
+
+
+@frappe.whitelist()
+def get_invoice_attachment_images(invoice_name, max_pages=5):
+    """
+    Wrapper function to get PDF attachments as images for a Purchase Invoice.
+    This is specifically designed for use in print formats.
+
+    Args:
+        invoice_name: The Purchase Invoice name
+        max_pages: Maximum pages to convert per PDF
+
+    Returns:
+        List of base64 image strings
+    """
+    if not invoice_name:
+        return []
+
+    pdf_data = get_pdf_as_images("Purchase Invoice", invoice_name, max_pages)
+
+    # Flatten all images into a single list
+    all_images = []
+    for pdf in pdf_data:
+        all_images.extend(pdf.get("images", []))
+
+    return all_images
+
+
+@frappe.whitelist()
+def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10):
+    """
+    Render a document's print format to PDF and convert to images.
+    This allows embedding print formats within other print formats.
+
+    Args:
+        doctype: The doctype to print
+        docname: The document name
+        print_format: The print format name (optional, uses default if not specified)
+        max_pages: Maximum pages to convert
+
+    Returns:
+        List of base64 image strings
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
+        return []
+
+    if not doctype or not docname:
+        return []
+
+    max_pages = int(max_pages) if max_pages else 10
+
+    try:
+        # Generate PDF from print format
+        pdf_content = frappe.get_print(
+            doctype,
+            docname,
+            print_format=print_format,
+            as_pdf=True
+        )
+
+        if not pdf_content:
+            return []
+
+        # Open PDF from bytes and convert to images
+        pdf_document = fitz.open(stream=pdf_content, filetype="pdf")
+        images = []
+
+        num_pages = min(pdf_document.page_count, max_pages)
+
+        for page_num in range(num_pages):
+            page = pdf_document.load_page(page_num)
+
+            # Render page to image (2x resolution for better quality)
+            zoom = 2.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+
+            # Convert to PNG bytes
+            img_bytes = pix.tobytes("png")
+
+            # Convert to base64
+            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+            images.append(f"data:image/png;base64,{img_base64}")
+
+        pdf_document.close()
+
+        return images
+
+    except Exception as e:
+        frappe.log_error(
+            f"Error converting print format to images: {doctype} {docname}\n{str(e)}\n{frappe.get_traceback()}",
+            "Print Format to Image Conversion"
+        )
+        return []
+
+
+@frappe.whitelist()
+def get_linked_po_for_invoice(invoice_name):
+    """
+    Get the Purchase Order linked to a Purchase Invoice.
+
+    Args:
+        invoice_name: The Purchase Invoice name
+
+    Returns:
+        Purchase Order name or None
+    """
+    if not invoice_name:
+        return None
+
+    # Get the first Purchase Order linked to this invoice
+    purchase_order = frappe.db.get_value(
+        "Purchase Invoice Item",
+        {"parent": invoice_name},
+        "purchase_order",
+        order_by="idx asc"
+    )
+
+    return purchase_order
