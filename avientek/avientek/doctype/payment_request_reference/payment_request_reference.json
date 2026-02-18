@@ -10,6 +10,7 @@
   "reference_name",
   "invoice_date",
   "due_date",
+  "currency",
   "grand_total",
   "base_grand_total",
   "bill_no",
@@ -20,40 +21,34 @@
   "column_break_4",
   "outstanding_amount",
   "base_outstanding_amount",
-  "deduction",
-  "payment_amount",
-  "payment_percentage",
-  "currency",
   "exchange_rate",
   "exchange_gain_loss",
-  "remarks"
+  "remarks",
+  "is_return",
+  "return_against"
  ],
  "fields": [
   {
    "columns": 2,
    "fieldname": "reference_doctype",
-   "fieldtype": "Link",
+   "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Type",
-   "options": "DocType",
-   "reqd": 1
+   "options": "\nPurchase Invoice\nDebit Note\nPurchase Order\nExpense Claim\nManual"
   },
   {
    "columns": 2,
    "fieldname": "reference_name",
-   "fieldtype": "Dynamic Link",
+   "fieldtype": "Data",
    "in_global_search": 1,
    "in_list_view": 1,
-   "label": "Invoice",
-   "options": "reference_doctype",
-   "reqd": 1
+   "label": "Invoice"
   },
   {
    "fieldname": "bill_no",
    "fieldtype": "Data",
    "label": "Supplier Invoice No",
-   "no_copy": 1,
-   "read_only": 1
+   "no_copy": 1
   },
   {
    "fieldname": "payment_term",
@@ -70,24 +65,21 @@
    "columns": 2,
    "fieldname": "outstanding_amount",
    "fieldtype": "Currency",
-   "in_list_view": 1,
-   "label": "Outstanding Amount",
-   "options": "currency",
-   "read_only": 1
+   "label": "Outstanding",
+   "options": "currency"
   },
   {
+   "columns": 2,
    "fieldname": "base_outstanding_amount",
    "fieldtype": "Currency",
    "label": "Outstanding (Company Currency)",
-   "options": "Company:company:default_currency",
-   "read_only": 1
+   "options": "Company:company:default_currency"
   },
   {
    "fieldname": "exchange_rate",
    "fieldtype": "Float",
    "label": "Exchange Rate",
-   "print_hide": 1,
-   "read_only": 1
+   "print_hide": 1
   },
   {
    "depends_on": "exchange_gain_loss",
@@ -98,14 +90,20 @@
    "read_only": 1
   },
   {
+   "columns": 1,
    "fieldname": "invoice_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Invoice Date",
    "read_only": 1
   },
   {
+   "columns": 1,
    "fieldname": "currency",
    "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Currency",
    "options": "Currency"
   },
@@ -116,8 +114,11 @@
    "read_only": 1
   },
   {
+   "columns": 1,
    "fieldname": "remarks",
-   "fieldtype": "Small Text",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Remarks"
   },
   {
@@ -127,23 +128,13 @@
    "label": "Reference Attachment"
   },
   {
+   "columns": 1,
    "fieldname": "due_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Due Date",
    "read_only": 1
-  },
-  {
-   "columns": 2,
-   "fieldname": "payment_amount",
-   "fieldtype": "Currency",
-   "in_list_view": 1,
-   "label": "Payment Amount",
-   "options": "Company:company:default_currency"
-  },
-  {
-   "fieldname": "payment_percentage",
-   "fieldtype": "Data",
-   "label": "Payment (%)"
   },
   {
    "fieldname": "attachment",
@@ -151,32 +142,41 @@
    "label": "Attachment"
   },
   {
-   "fieldname": "deduction",
-   "fieldtype": "Currency",
-   "label": "Amount Withheld",
-   "options": "currency"
-  },
-  {
-   "columns": 2,
+   "columns": 1,
    "fieldname": "grand_total",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Grand Total",
-   "options": "currency",
+   "label": "Billing Amount",
+   "options": "currency"
+  },
+  {
+   "columns": 1,
+   "fieldname": "base_grand_total",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Base Amount",
+   "options": "Company:company:default_currency"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_return",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Is Return/Debit Note",
    "read_only": 1
   },
   {
-   "fieldname": "base_grand_total",
-   "fieldtype": "Currency",
-   "label": "Grand Total (Company Currency)",
-   "options": "Company:company:default_currency",
+   "fieldname": "return_against",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Return Against",
    "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-02-17 10:18:09.447181",
+ "modified": "2026-02-18 10:19:36.234551",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Reference",

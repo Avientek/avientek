@@ -255,7 +255,7 @@ def get_outstanding_reference_documents(args):
                     try:
                         dn_doc = frappe.get_doc("Purchase Invoice", dn.name)
                         dn_row = {
-                            "voucher_type": "Purchase Invoice",
+                            "voucher_type": "Debit Note",
                             "voucher_no": dn.name,
                             "bill_no": dn_doc.get("bill_no") or dn.name,
                             "posting_date": dn_doc.get("posting_date"),
@@ -282,6 +282,60 @@ def get_outstanding_reference_documents(args):
 
         except Exception:
             frappe.log_error(frappe.get_traceback(), f"Error processing voucher {voucher_type} {voucher_no}")
+
+    # Fetch standalone Debit Notes (returns without linked Purchase Invoice)
+    if args.get("reference_doctype") == "Purchase Invoice":
+        # Get all debit note voucher_nos already added (to avoid duplicates)
+        existing_debit_notes = set()
+        for row in filtered_rows:
+            if row.get("voucher_type") == "Debit Note":
+                existing_debit_notes.add(row.get("voucher_no"))
+
+        # Fetch standalone debit notes for this supplier
+        standalone_debit_notes = frappe.get_all(
+            "Purchase Invoice",
+            filters={
+                "supplier": args.get("party"),
+                "company": args.get("company"),
+                "is_return": 1,
+                "docstatus": 1,
+                "return_against": ["in", ["", None]],  # No linked invoice
+                "outstanding_amount": ["!=", 0]
+            },
+            fields=["name"]
+        )
+
+        for dn in standalone_debit_notes:
+            if dn.name in existing_debit_notes:
+                continue  # Skip if already added
+
+            try:
+                dn_doc = frappe.get_doc("Purchase Invoice", dn.name)
+                dn_row = {
+                    "voucher_type": "Debit Note",
+                    "voucher_no": dn.name,
+                    "bill_no": dn_doc.get("bill_no") or dn.name,
+                    "posting_date": dn_doc.get("posting_date"),
+                    "due_date": dn_doc.get("due_date"),
+                    "grand_total": dn_doc.get("grand_total") or 0,
+                    "invoice_amount": dn_doc.get("total") or dn_doc.get("grand_total") or 0,
+                    "currency": dn_doc.get("currency"),
+                    "exchange_rate": dn_doc.get("conversion_rate") or 1,
+                    "is_return": 1,
+                    "return_against": ""
+                }
+
+                # Outstanding for debit notes (usually negative)
+                dn_os_company = dn_doc.get("outstanding_amount") or 0
+                dn_row["outstanding"] = dn_os_company / dn_row["exchange_rate"] if dn_row["exchange_rate"] else dn_os_company
+                dn_row["total_amount"] = dn_row["invoice_amount"]
+                dn_row["base_grand_total"] = (dn_row["grand_total"] or 0) * dn_row["exchange_rate"]
+                dn_row["base_outstanding"] = dn_os_company
+                dn_row["document_reference"] = "Standalone Return"
+
+                filtered_rows.append(dn_row)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), f"Error processing standalone debit note {dn.name}")
 
     return filtered_rows
 

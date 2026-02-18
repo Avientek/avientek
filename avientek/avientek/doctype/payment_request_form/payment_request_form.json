@@ -27,7 +27,6 @@
   "column_break_10",
   "supplier_balance",
   "get_purchase_invoice",
-  "get_purchase_order",
   "get_expense_claim",
   "payment_details_section",
   "issued_bank",
@@ -49,16 +48,7 @@
   "reference_section",
   "payment_references",
   "section_break_mnon",
-  "total_amount",
-  "column_break_mlnn",
-  "total_payment_amount",
-  "total_received_amount",
-  "column_break_sajy",
-  "total_outstanding_amount",
-  "total_received",
-  "column_break_voiu",
-  "approved_amount",
-  "deduction",
+  "currency_totals_html",
   "more_information_section",
   "remarks",
   "amended_from",
@@ -163,12 +153,6 @@
    "label": "Get Purchase Invoice"
   },
   {
-   "depends_on": "eval:doc.docstatus==0 && doc.party && doc.party_type=='Supplier'",
-   "fieldname": "get_purchase_order",
-   "fieldtype": "Button",
-   "label": "Get Purchase Order"
-  },
-  {
    "depends_on": "eval:doc.docstatus==0 && doc.party && doc.party_type=='Employee'",
    "fieldname": "get_expense_claim",
    "fieldtype": "Button",
@@ -202,13 +186,6 @@
    "fieldtype": "Currency",
    "label": "Total Payment (Company Currency)",
    "options": "Company:company:default_currency",
-   "read_only": 1
-  },
-  {
-   "fieldname": "approved_amount",
-   "fieldtype": "Currency",
-   "hidden": 1,
-   "label": "Approved Amount",
    "read_only": 1
   },
   {
@@ -289,11 +266,13 @@
   },
   {
    "fieldname": "section_break_mnon",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Currency Totals"
   },
   {
-   "fieldname": "column_break_voiu",
-   "fieldtype": "Column Break"
+   "fieldname": "currency_totals_html",
+   "fieldtype": "HTML",
+   "label": "Currency Summary"
   },
   {
    "fieldname": "address_and_contact_tab",
@@ -355,10 +334,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_sajy",
-   "fieldtype": "Column Break"
-  },
-  {
    "fieldname": "party_type",
    "fieldtype": "Link",
    "label": "Party Type",
@@ -383,12 +358,6 @@
    "label": "Department",
    "options": "Department",
    "reqd": 1
-  },
-  {
-   "fieldname": "total_amount",
-   "fieldtype": "Currency",
-   "label": "Total Amount",
-   "read_only": 1
   },
   {
    "fieldname": "column_break_mlnn",
@@ -452,31 +421,9 @@
    "options": "Currency"
   },
   {
-   "depends_on": "eval:doc.payment_type==\"Internal Transfer\"\r\n",
-   "fieldname": "total_received_amount",
-   "fieldtype": "Currency",
-   "label": "Total Received Amount",
-   "options": "currency",
-   "read_only": 1
-  },
-  {
-   "depends_on": "eval:doc.payment_type==\"Internal Transfer\"\r\n",
-   "fieldname": "total_received",
-   "fieldtype": "Currency",
-   "label": "Total Received (Company Currency)",
-   "options": "Company:company:default_currency",
-   "read_only": 1
-  },
-  {
    "fieldname": "connections_tab",
    "fieldtype": "Tab Break",
    "label": "Connections"
-  },
-  {
-   "fieldname": "deduction",
-   "fieldtype": "Currency",
-   "label": "Amount Withheld",
-   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -491,7 +438,7 @@
    "link_fieldname": "custom_payment_request_form"
   }
  ],
- "modified": "2026-02-16 15:09:40.822152",
+ "modified": "2026-02-18 10:51:57.383243",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Form",

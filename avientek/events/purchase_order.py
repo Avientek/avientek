@@ -417,7 +417,6 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "base_grand_total": source.base_grand_total,
             "outstanding_amount": os_invoice,
             "base_outstanding_amount": os_company,
-            "payment_amount": 0,
             "invoice_date": source.transaction_date,
             "due_date": source.schedule_date,
             "exchange_rate": exchange_rate,
@@ -426,9 +425,9 @@ def create_payment_request(source_name, target_doc=None, args=None):
         })
 
         # 4. Calculate totals
-        target.total_outstanding_amount = sum((row.outstanding_amount or 0) for row in target.payment_references)
-        target.total_payment_amount = sum((row.payment_amount or 0) for row in target.payment_references)
-        target.total_amount = sum((row.total_amount or 0) for row in target.payment_references)
+        target.total_outstanding_amount = sum((row.base_outstanding_amount or 0) for row in target.payment_references)
+        target.total_payment_amount = sum((row.outstanding_amount or 0) for row in target.payment_references)
+        target.total_amount = sum((row.grand_total or 0) for row in target.payment_references)
 
     # Create mapped Payment Request Form
     target_doc = get_mapped_doc(
