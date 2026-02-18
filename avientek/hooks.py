@@ -26,6 +26,18 @@ app_license = "mit"
 
 fixtures = [
 	{
+		"dt": "Print Format",
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"Payment Voucher Professional"
+				]
+			]
+		]
+	},
+	{
 		"dt": "Custom Field",
 		"filters": [
 			[

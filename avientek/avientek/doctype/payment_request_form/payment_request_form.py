@@ -548,10 +548,15 @@ def download_payment_pdf(docname):
 
     # Merge Payment Request Form
     try:
+        # Try the new professional print format first, fall back to old one
+        print_format_name = "Payment Voucher Professional"
+        if not frappe.db.exists("Print Format", print_format_name):
+            print_format_name = "PAYMENT VOUCHER"
+
         print_format_pdf = frappe.get_print(
             "Payment Request Form",
             docname,
-            print_format="PAYMENT VOUCHER",
+            print_format=print_format_name,
             as_pdf=True
         )
         merger.append(io.BytesIO(print_format_pdf))
