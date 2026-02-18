@@ -206,10 +206,8 @@ def get_outstanding_reference_documents(args):
             meta = frappe.get_meta(voucher_type)
 
             if voucher_type == "Purchase Invoice":
-                # Skip if no bill number
-                if not invoice.get("bill_no"):
-                    continue
-                row["bill_no"] = invoice.get("bill_no")
+                # Use bill_no if available, otherwise use voucher_no
+                row["bill_no"] = invoice.get("bill_no") or voucher_no
             else:
                 # For other voucher types, use voucher number as bill number
                 row["bill_no"] = voucher_no
@@ -240,6 +238,47 @@ def get_outstanding_reference_documents(args):
                 row["document_reference"] = purchase_order
 
             filtered_rows.append(row)
+
+            # Fetch related Debit Notes / Return Purchase Invoices
+            if voucher_type == "Purchase Invoice":
+                debit_notes = frappe.get_all(
+                    "Purchase Invoice",
+                    filters={
+                        "return_against": voucher_no,
+                        "is_return": 1,
+                        "docstatus": 1
+                    },
+                    fields=["name"]
+                )
+
+                for dn in debit_notes:
+                    try:
+                        dn_doc = frappe.get_doc("Purchase Invoice", dn.name)
+                        dn_row = {
+                            "voucher_type": "Purchase Invoice",
+                            "voucher_no": dn.name,
+                            "bill_no": dn_doc.get("bill_no") or dn.name,
+                            "posting_date": dn_doc.get("posting_date"),
+                            "due_date": dn_doc.get("due_date"),
+                            "grand_total": dn_doc.get("grand_total") or 0,
+                            "invoice_amount": dn_doc.get("total") or dn_doc.get("grand_total") or 0,
+                            "currency": dn_doc.get("currency"),
+                            "exchange_rate": dn_doc.get("conversion_rate") or 1,
+                            "is_return": 1,
+                            "return_against": voucher_no
+                        }
+
+                        # Outstanding for debit notes (usually negative)
+                        dn_os_company = dn_doc.get("outstanding_amount") or 0
+                        dn_row["outstanding"] = dn_os_company / dn_row["exchange_rate"] if dn_row["exchange_rate"] else dn_os_company
+                        dn_row["total_amount"] = dn_row["invoice_amount"]
+                        dn_row["base_grand_total"] = (dn_row["grand_total"] or 0) * dn_row["exchange_rate"]
+                        dn_row["base_outstanding"] = dn_os_company
+                        dn_row["document_reference"] = f"Return: {voucher_no}"
+
+                        filtered_rows.append(dn_row)
+                    except Exception:
+                        frappe.log_error(frappe.get_traceback(), f"Error processing debit note {dn.name}")
 
         except Exception:
             frappe.log_error(frappe.get_traceback(), f"Error processing voucher {voucher_type} {voucher_no}")
