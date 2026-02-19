@@ -347,10 +347,15 @@ frappe.ui.form.on('Payment Request Form', {
         // Build HTML table for currency totals
         frm.events.render_currency_totals(frm, currency_totals, total_base_amount);
 
-        frappe.run_serially([
-            () => frm.set_value("total_outstanding_amount", total_base_amount),
-            () => { is_updating_fields = false; }
-        ]);
+        // Only set value if it actually changed (to avoid "Not Saved" on refresh)
+        if (flt(frm.doc.total_outstanding_amount) !== flt(total_base_amount)) {
+            frappe.run_serially([
+                () => frm.set_value("total_outstanding_amount", total_base_amount),
+                () => { is_updating_fields = false; }
+            ]);
+        } else {
+            is_updating_fields = false;
+        }
     },
 
     render_currency_totals: function(frm, currency_totals, total_base_amount) {
