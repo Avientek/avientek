@@ -35,7 +35,9 @@ if (!document.getElementById('payment-ref-styles')) {
 
 frappe.ui.form.on('Payment Request Form', {
 	onload: function(frm) {
-        if (frm.doc.party && !frm.doc.supplier_address) {
+        // Fetch supplier details only if party exists and details are missing
+        // (fetch_supplier_details has internal checks to avoid overwriting existing data)
+        if (frm.doc.party) {
             fetch_supplier_details(frm);
         }
 		frm.set_query("issued_bank", function() {
@@ -158,7 +160,7 @@ frappe.ui.form.on('Payment Request Form', {
 
     },
 	party: function(frm) {
-		fetch_supplier_details(frm);
+		fetch_supplier_details(frm, true);  // force_update=true when user changes party
 		if (frm.doc.party_type && frm.doc.party) {
         frappe.call({
             method: "avientek.avientek.doctype.payment_request_form.payment_request_form.fetch_party_name",
@@ -543,18 +545,27 @@ frappe.ui.form.on('Payment Request Form', {
     }
 });
 
-function fetch_supplier_details(frm) {
+function fetch_supplier_details(frm, force_update) {
+    // Helper to only set value if it actually changed (avoids "Not Saved" on refresh)
+    function set_if_changed(fieldname, value) {
+        if (frm.doc[fieldname] !== value) {
+            frm.set_value(fieldname, value);
+        }
+    }
+
     if (frm.doc.party_type === "Supplier") {
-        frappe.call({
-            method: "frappe.contacts.doctype.address.address.get_default_address",
-            args: {
-                doctype: frm.doc.party_type,
-                name: frm.doc.party
-            },
-            callback: function(r) {
-                if (r.message) {
-                    frm.set_value("supplier_address", r.message);
-                    frappe.call({
+        // Only fetch address if not already set or force_update
+        if (!frm.doc.supplier_address || force_update) {
+            frappe.call({
+                method: "frappe.contacts.doctype.address.address.get_default_address",
+                args: {
+                    doctype: frm.doc.party_type,
+                    name: frm.doc.party
+                },
+                callback: function(r) {
+                    if (r.message) {
+                        set_if_changed("supplier_address", r.message);
+                        frappe.call({
                             method: "frappe.contacts.doctype.address.address.get_address_display",
                             args: {
                                 "address_dict": r.message
@@ -562,30 +573,32 @@ function fetch_supplier_details(frm) {
                             callback: function(res) {
                                 if (res.message) {
                                     let clean_address = res.message.replace(/<br\s*\/?>/gi, '\n');
-                                    frm.set_value("address_display", clean_address);
+                                    set_if_changed("address_display", clean_address);
                                 }
                             }
                         });
+                    }
                 }
-            }
-        });
+            });
+        }
 
-        frappe.call({
-            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_supplier_bank_details",
-            args: {
-                supplier_name: frm.doc.party
-            },
-            callback: function(r) {
-                if (r.message) {
-                    console.log("r.message", r.message);
-                    frm.set_value("supplier_bank_account", r.message.supplier_bank_account);
-                    frm.set_value("account_number", r.message.bank_account_no);
-                    frm.set_value("bank", r.message.bank);
-                    frm.set_value("swift_code", r.message.swift_code);
-                    
+        // Only fetch bank details if not already set or force_update
+        if (!frm.doc.supplier_bank_account || force_update) {
+            frappe.call({
+                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_supplier_bank_details",
+                args: {
+                    supplier_name: frm.doc.party
+                },
+                callback: function(r) {
+                    if (r.message) {
+                        set_if_changed("supplier_bank_account", r.message.supplier_bank_account);
+                        set_if_changed("account_number", r.message.bank_account_no);
+                        set_if_changed("bank", r.message.bank);
+                        set_if_changed("swift_code", r.message.swift_code);
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     frappe.call({
@@ -598,7 +611,7 @@ function fetch_supplier_details(frm) {
         },
         callback: function(r) {
             if (r.message) {
-                frm.set_value("supplier_balance", r.message.party_balance); // Optionally rename to `party_balance`
+                set_if_changed("supplier_balance", r.message.party_balance);
             }
         }
     });
