@@ -1027,3 +1027,78 @@ def get_linked_po_for_invoice(invoice_name):
     )
 
     return purchase_order
+
+
+@frappe.whitelist()
+def get_attachment_as_images(file_url, max_pages=10):
+    """
+    Convert a PDF attachment URL to base64 images.
+    This is for use with Attach fields in print formats.
+
+    Args:
+        file_url: The file URL from an Attach field (e.g., /files/cost.png.pdf or /private/files/...)
+        max_pages: Maximum pages to convert
+
+    Returns:
+        List of base64 image strings
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
+        return []
+
+    if not file_url:
+        return []
+
+    # Only process PDF files
+    if not file_url.lower().endswith('.pdf'):
+        return []
+
+    max_pages = int(max_pages) if max_pages else 10
+
+    try:
+        # Get the file path from URL
+        if file_url.startswith("/private/"):
+            file_path = frappe.get_site_path() + file_url
+        elif file_url.startswith("/files/"):
+            file_path = frappe.get_site_path("public") + file_url
+        else:
+            # Handle other URL formats
+            return []
+
+        if not os.path.exists(file_path):
+            frappe.log_error(f"Attachment file not found: {file_path}", "Attachment to Image Conversion")
+            return []
+
+        # Open PDF and convert pages to images
+        pdf_document = fitz.open(file_path)
+        images = []
+
+        num_pages = min(pdf_document.page_count, max_pages)
+
+        for page_num in range(num_pages):
+            page = pdf_document.load_page(page_num)
+
+            # Render page to image (2x resolution for better quality)
+            zoom = 2.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+
+            # Convert to PNG bytes
+            img_bytes = pix.tobytes("png")
+
+            # Convert to base64
+            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+            images.append(f"data:image/png;base64,{img_base64}")
+
+        pdf_document.close()
+
+        return images
+
+    except Exception as e:
+        frappe.log_error(
+            f"Error converting attachment to images: {file_url}\n{str(e)}\n{frappe.get_traceback()}",
+            "Attachment to Image Conversion"
+        )
+        return []
