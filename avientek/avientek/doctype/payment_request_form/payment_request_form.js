@@ -545,14 +545,14 @@ frappe.ui.form.on('Payment Request Form', {
     }
 });
 
-function fetch_supplier_details(frm, force_update) {
-    // Helper to only set value if it actually changed (avoids "Not Saved" on refresh)
-    function set_if_changed(fieldname, value) {
-        if (frm.doc[fieldname] !== value) {
-            frm.set_value(fieldname, value);
-        }
+// Helper to only set value if it actually changed (avoids "Not Saved" on refresh)
+function set_if_changed(frm, fieldname, value) {
+    if (frm.doc[fieldname] !== value) {
+        frm.set_value(fieldname, value);
     }
+}
 
+function fetch_supplier_details(frm, force_update) {
     if (frm.doc.party_type === "Supplier") {
         // Only fetch address if not already set or force_update
         if (!frm.doc.supplier_address || force_update) {
@@ -564,7 +564,7 @@ function fetch_supplier_details(frm, force_update) {
                 },
                 callback: function(r) {
                     if (r.message) {
-                        set_if_changed("supplier_address", r.message);
+                        set_if_changed(frm, "supplier_address", r.message);
                         frappe.call({
                             method: "frappe.contacts.doctype.address.address.get_address_display",
                             args: {
@@ -573,7 +573,7 @@ function fetch_supplier_details(frm, force_update) {
                             callback: function(res) {
                                 if (res.message) {
                                     let clean_address = res.message.replace(/<br\s*\/?>/gi, '\n');
-                                    set_if_changed("address_display", clean_address);
+                                    set_if_changed(frm, "address_display", clean_address);
                                 }
                             }
                         });
@@ -591,10 +591,10 @@ function fetch_supplier_details(frm, force_update) {
                 },
                 callback: function(r) {
                     if (r.message) {
-                        set_if_changed("supplier_bank_account", r.message.supplier_bank_account);
-                        set_if_changed("account_number", r.message.bank_account_no);
-                        set_if_changed("bank", r.message.bank);
-                        set_if_changed("swift_code", r.message.swift_code);
+                        set_if_changed(frm, "supplier_bank_account", r.message.supplier_bank_account);
+                        set_if_changed(frm, "account_number", r.message.bank_account_no);
+                        set_if_changed(frm, "bank", r.message.bank);
+                        set_if_changed(frm, "swift_code", r.message.swift_code);
                     }
                 }
             });
@@ -611,7 +611,7 @@ function fetch_supplier_details(frm, force_update) {
         },
         callback: function(r) {
             if (r.message) {
-                set_if_changed("supplier_balance", r.message.party_balance);
+                set_if_changed(frm, "supplier_balance", r.message.party_balance);
             }
         }
     });
