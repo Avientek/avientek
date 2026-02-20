@@ -118,8 +118,9 @@ fixtures = [
 					"Quotation-custom_discount_amount_value","Quotation-custom_discount_",
      				"Quotation-custom_column_break_lqu6l","Quotation-custom_apply_discount",
 					"Quotation Item-custom_discount_amount_value","Quotation Item-custom_discount_amount_qty",
-					"Quotation Item-custom_special_price_note","Quotation Item-Quotation Item-custom_delivery_eta_copy","Quotation Item-custom_shipping_mode",
-					"Quotation-custom_created_by","Quotation-custom_section_break_tlqc2","Quotation-","Quotation-custom_note"
+					"Quotation Item-custom_special_price_note","Quotation Item-custom_delivery_eta_copy","Quotation Item-custom_shipping_mode",
+					"Quotation-custom_discount_type","Quotation-custom_incentive_type","Quotation-custom_item_info_html",
+					"Quotation-custom_created_by","Quotation-custom_section_break_tlqc2","Quotation-custom_note",
 					"Quotation-custom_competition_note","Quotation-custom_section_break_ief6u","Quotation-custom_credit_limit","Quotation-custom_overdue",
 					"Quotation-custom_column_break_ak1um","Quotation-custom_outstanding","Quotation-custom_end_user","Quotation-custom_section_break_qx0xq",
      				"Quotation-custom_history","Quotation-custom_existing_payment_term","Quotation-custom_column_break_jd9pb","Quotation-custom_new_payment_term_",
@@ -140,7 +141,7 @@ fixtures = [
 					"Lead Source-custom_column_break_wjdic","Lead Source-custom_country","Lead Source-custom_year","Lead Source-custom_show",
      				"Item Price-custom_date","Item Price-custom_company","Item Price-custom_part_number","Item Price-custom_link","Item Price-custom_standard_price","Item Price-custom_msrp",
                     "Item Price-custom_section_break_wquw3","Item Price-custom_recommended_products","Item Price-custom_must_quote","Item Price-custom_charges_and_percentage","Item Price-custom_shipping__air_","Item Price-custom_shipping__sea_",
-                    "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_",
+                    "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_","Item Price-custom_markup_",
 					"Workflow-custom_enable_confirmation",
      ),
 			]

@@ -54,19 +54,15 @@ def apply_discount(doc, discount_amount):
         item_discount = discount * share
 
         new_selling = selling - item_discount
-        frappe.errprint(f"Item {name}: Original Selling: {selling}, Discount: {item_discount}, New Selling: {new_selling}")
         if new_selling < 0:
             new_selling = Decimal("0.0")
 
         new_rate = new_selling / qty if qty else Decimal("0.0")
-        frappe.errprint(f"Item {name}: New Rate: {new_rate}")
         # Margin recalculation
         cost_rate = Decimal(str((i.get("custom_cogs") or 0)))
-        frappe.errprint(f"Item {name}: Cost Rate: {cost_rate}")
         selling_rate = new_selling
 
         new_margin_val = (selling_rate - cost_rate)
-        frappe.errprint(f"Item {name}: New Margin Value: {new_margin_val}")
         if new_margin_val < 0:
             new_margin_val = Decimal("0.0")
 
@@ -74,7 +70,6 @@ def apply_discount(doc, discount_amount):
             ((selling_rate - cost_rate) / selling_rate) * 100
             if selling_rate else Decimal("0.0")
         )
-        frappe.errprint(f"Item {name}: New Margin Percent: {new_margin_pct}")
 
         updated_items.append({
             "name": name,
@@ -109,11 +104,11 @@ def apply_discount(doc, discount_amount):
     }
 
 @frappe.whitelist()
-def get_item_all_details(item_code, customer,price_list):
+def get_item_all_details(item_code, customer, price_list, company=None):
     return {
         "history": get_last_5_transactions(item_code, customer),
         "stock": get_company_stock(item_code),
-        "shipment_margin": get_shipment_and_margin(item_code, price_list)
+        "shipment_margin": get_shipment_and_margin(item_code, price_list, company)
     }
 
 def get_last_5_transactions(item_code, customer):
@@ -252,20 +247,25 @@ def get_company_stock(item_code):
     return stock
 
 @frappe.whitelist()
-def get_shipment_and_margin(item_code, price_list):
+def get_shipment_and_margin(item_code, price_list, company=None):
     if not item_code or not price_list:
         return {}
 
+    filters = {
+        "item_code": item_code,
+        "price_list": price_list
+    }
+    if company:
+        filters["custom_company"] = company
+
     data = frappe.db.get_value(
         "Item Price",
-        {
-            "item_code": item_code,
-            "price_list": price_list
-        },
+        filters,
         [
             "custom_shipping__air_",
             "custom_shipping__sea_",
-            "custom_min_margin_"
+            "custom_min_margin_",
+            "custom_markup_",
         ],
         as_dict=True
     )
@@ -276,7 +276,8 @@ def get_shipment_and_margin(item_code, price_list):
     return {
         "ship_air": data.custom_shipping__air_ or 0,
         "ship_sea": data.custom_shipping__sea_ or 0,
-        "std_margin": data.custom_min_margin_ or 0
+        "std_margin": data.custom_min_margin_ or 0,
+        "markup": data.custom_markup_ or 0,
     }
 
 
@@ -349,6 +350,11 @@ def calc_item_totals(it):
         "custom_special_rate":    per_unit_selling,
         "rate":                   per_unit_selling,
         "amount":                 selling,
+        # Reset discount fields so stale values don't trigger
+        # distribute_discount_server on every save.
+        # The pipeline will re-apply discount if parent has one.
+        "custom_discount_amount_value": 0,
+        "custom_discount_amount_qty":   0,
     })
 
 
@@ -591,20 +597,19 @@ def run_calculation_pipeline(doc, method=None):
     for it in doc.items:
         calc_item_totals(it)
 
-    # If parent-level incentive is set (including 0 to clear), redistribute across items
+    # Distribute parent-level incentive only when parent has a positive amount.
+    # calc_item_totals already computes item-level incentive from each item's
+    # custom_incentive_ percentage; the distributor overrides that with the
+    # parent-controlled amount.
     incentive_amount = _to_flt(doc.custom_incentive_amount)
-    has_item_incentives = any(_to_flt(it.custom_incentive_value) > 0 for it in doc.items)
-
-    # Run distribution if: positive incentive to apply, OR 0 to clear existing item incentives
-    if incentive_amount > 0 or (incentive_amount == 0 and has_item_incentives):
+    if incentive_amount > 0:
         distribute_incentive_server(doc)
 
-    # If parent-level discount is set (including 0 to clear), redistribute across items
+    # Distribute parent-level discount only when parent has a positive amount.
+    # calc_item_totals resets item discount fields to 0, so stale values
+    # from a previous "Apply Discount" no longer trigger redistribution.
     discount_amount = _to_flt(doc.custom_discount_amount_value)
-    has_item_discounts = any(_to_flt(it.custom_discount_amount_qty) > 0 for it in doc.items)
-
-    # Run distribution if: positive discount to apply, OR 0 to clear existing item discounts
-    if discount_amount > 0 or (discount_amount == 0 and has_item_discounts):
+    if discount_amount > 0:
         distribute_discount_server(doc)
 
     rebuild_brand_summary(doc)
@@ -615,18 +620,25 @@ def run_calculation_pipeline(doc, method=None):
 # 6)  GET ITEM DEFAULTS  (single server call for item selection)
 # ──────────────────────────────────────────────────────────────
 @frappe.whitelist()
-def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_conversion_rate):
+def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_conversion_rate, company=None):
     """Single whitelisted method called when item_code is selected.
     Returns all default percentages from Item Price + Brand in one response.
     Replaces the nested JS rate_calculation + update_rates calls.
+
+    If `company` is provided, validates that an Item Price exists for that company.
+    Returns `no_price_for_company=True` when no matching Item Price is found.
     """
     plc_rate = flt(plc_conversion_rate) or 1.0
     result = {}
 
-    # 1. Item Price defaults
+    # 1. Item Price defaults — filter by company if provided
+    ip_filters = {"item_code": item_code, "price_list": price_list}
+    if company:
+        ip_filters["custom_company"] = company
+
     ip = frappe.db.get_value(
         "Item Price",
-        {"item_code": item_code, "price_list": price_list},
+        ip_filters,
         [
             "price_list_rate",
             "custom_shipping__air_",
@@ -635,9 +647,18 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
             "custom_min_finance_charge_",
             "custom_min_margin_",
             "custom_customs_",
+            "custom_markup_",
         ],
         as_dict=True,
     )
+
+    if not ip and company:
+        # No Item Price for this company — signal to client
+        result["no_price_for_company"] = True
+        result["item_code"] = item_code
+        result["company"] = company
+        result["price_list"] = price_list
+        return result
 
     if ip:
         std_price = flt(ip.price_list_rate)
@@ -653,6 +674,7 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
         result["custom_finance_"]        = flt(ip.custom_min_finance_charge_)
         result["std_margin_per"]         = flt(ip.custom_min_margin_)
         result["custom_customs_"]        = flt(ip.custom_customs_)
+        result["custom_markup_"]         = flt(ip.custom_markup_)
 
     # 2. Brand defaults (fallback for fields not on Item Price)
     item_brand = frappe.db.get_value("Item", item_code, "brand")
@@ -694,9 +716,14 @@ def calculate_additional_discount_percentage(doc, method=None):
     doc.additional_discount_percentage = round(percentage, 2)
 
 def validate_total_discount(doc, method):
-    """Ensure sum of child discounts matches parent discount amount"""
-    parent_discount = doc.custom_discount_amount_value or 0
-    total_row_discount = sum((row.custom_discount_amount_qty or 0) for row in doc.items)
+    """Ensure sum of child discounts matches parent discount amount.
+    Only validate when a discount is actually set (> 0).
+    """
+    parent_discount = _to_flt(doc.custom_discount_amount_value)
+    if parent_discount <= 0:
+        return
+
+    total_row_discount = sum(_to_flt(row.custom_discount_amount_qty) for row in doc.items)
 
     if round(total_row_discount, 2) != round(parent_discount, 2):
         frappe.throw("Sum of item discount amounts must equal parent discount amount")
@@ -765,7 +792,6 @@ def set_margin_flags(doc, method=None):
         # 2️⃣ Auto approval with warning
         if new >= (0.60 * std):
             overall = get_overall_margin(salesperson, brand)
-            frappe.errprint(f"Overall margin for SP {salesperson} and brand {brand}: {overall}%")
             if overall >= (0.80 * std):
                 frappe.msgprint(
                     f"""

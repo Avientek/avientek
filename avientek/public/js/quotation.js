@@ -326,6 +326,15 @@ frappe.ui.form.on('Quotation', {
         frm.set_query('custom_quote_project', function () {
             return { query: 'avientek.events.sales_person_permission.get_project_quotation_for_user' };
         });
+
+        // Filter customers by the selected company
+        frm.set_query('party_name', function () {
+            if (frm.doc.quotation_to === 'Customer' && frm.doc.company) {
+                return {
+                    filters: { company: frm.doc.company }
+                };
+            }
+        });
     },
 
     selling_price_list(frm) {
@@ -580,21 +589,33 @@ function load_item_defaults(frm, cdt, cdn) {
             currency: frm.doc.currency,
             price_list_currency: frm.doc.price_list_currency,
             plc_conversion_rate: frm.doc.plc_conversion_rate || 1,
+            company: frm.doc.company,
         },
         callback(r) {
             if (!r.message) return;
             let d = r.message;
+
+            // No Item Price for this company — show message
+            if (d.no_price_for_company) {
+                frappe.msgprint({
+                    title: __('No Item Price Found'),
+                    message: __('No Item Price found for <b>{0}</b> in company <b>{1}</b> and price list <b>{2}</b>. Please create an Item Price first.', [d.item_code, d.company, d.price_list]),
+                    indicator: 'orange'
+                });
+                return;
+            }
 
             // Always set prices
             frappe.model.set_value(cdt, cdn, "custom_standard_price_", d.custom_standard_price_ || 0);
             frappe.model.set_value(cdt, cdn, "custom_special_price", d.custom_special_price || 0);
 
             // Set defaults only if field is currently empty (preserve user edits)
-            if (!row.shipping_per)    frappe.model.set_value(cdt, cdn, "shipping_per", d.shipping_per_air || 0);
+            if (!row.shipping_per)      frappe.model.set_value(cdt, cdn, "shipping_per", d.shipping_per_air || 0);
             if (!row.custom_transport_) frappe.model.set_value(cdt, cdn, "custom_transport_", d.custom_transport_ || 0);
-            if (!row.custom_finance_) frappe.model.set_value(cdt, cdn, "custom_finance_", d.custom_finance_ || 0);
-            if (!row.std_margin_per)  frappe.model.set_value(cdt, cdn, "std_margin_per", d.std_margin_per || 0);
-            if (!row.custom_customs_) frappe.model.set_value(cdt, cdn, "custom_customs_", d.custom_customs_ || 0);
+            if (!row.custom_finance_)   frappe.model.set_value(cdt, cdn, "custom_finance_", d.custom_finance_ || 0);
+            if (!row.std_margin_per)    frappe.model.set_value(cdt, cdn, "std_margin_per", d.std_margin_per || 0);
+            if (!row.custom_customs_)   frappe.model.set_value(cdt, cdn, "custom_customs_", d.custom_customs_ || 0);
+            if (!row.custom_markup_)    frappe.model.set_value(cdt, cdn, "custom_markup_", d.custom_markup_ || 0);
 
             // Run preview after defaults are loaded
             calculate_all_preview(frm, cdt, cdn);
@@ -798,24 +819,39 @@ function toggle_apply_incentive_button(frm) {
  * Uses Frappe's row/col classes for proper responsive columns.
  */
 function render_item_info_html(data, item_code) {
-    // Stock section - list format
+    // Stock section - table with header
     let stockHtml = '';
     if (data.stock && data.stock.length > 0) {
         stockHtml = `
             <table class="table table-sm table-borderless" style="margin: 0; font-size: 12px;">
+                <thead>
+                    <tr style="color: #888; font-size: 11px; border-bottom: 1px solid #dee2e6;">
+                        <th style="font-weight: 600;">Company</th>
+                        <th style="text-align: right; font-weight: 600;">Available</th>
+                        <th style="text-align: right; font-weight: 600;">Free</th>
+                        <th style="text-align: right; font-weight: 600;">Projected</th>
+                    </tr>
+                </thead>
                 <tbody>
                     ${data.stock.map(s => {
-                        let statusColor = s.free_stock > 0 ? '#28a745' : '#dc3545';
-                        let statusBg = s.free_stock > 0 ? '#d4edda' : '#f8d7da';
+                        let freeColor = s.free_stock > 0 ? '#28a745' : '#dc3545';
+                        let freeBg = s.free_stock > 0 ? '#d4edda' : '#f8d7da';
+                        let projColor = s.projected_stock > 0 ? '#28a745' : '#dc3545';
+                        let projBg = s.projected_stock > 0 ? '#d4edda' : '#f8d7da';
                         return `
                             <tr>
-                                <td style="width: 55%;">${s.company}</td>
+                                <td>${s.company}</td>
+                                <td style="text-align: right;">${s.actual_stock}</td>
                                 <td style="text-align: right;">
-                                    <span style="background:${statusBg}; color:${statusColor}; padding: 2px 8px; border-radius: 4px; font-weight: bold;">
+                                    <span style="background:${freeBg}; color:${freeColor}; padding: 2px 8px; border-radius: 4px; font-weight: bold;">
                                         ${s.free_stock}
                                     </span>
                                 </td>
-                                <td style="text-align: right; color: #888; font-size: 11px;">of ${s.actual_stock}</td>
+                                <td style="text-align: right;">
+                                    <span style="background:${projBg}; color:${projColor}; padding: 2px 8px; border-radius: 4px; font-weight: bold;">
+                                        ${s.projected_stock}
+                                    </span>
+                                </td>
                             </tr>
                         `;
                     }).join('')}
@@ -858,21 +894,27 @@ function render_item_info_html(data, item_code) {
     let shippingHtml = '';
     if (data.shipment_margin) {
         let sm = data.shipment_margin;
+        let cal_margin = flt(data.cal_margin || 0).toFixed(2);
+        let std_margin = flt(sm.std_margin || 0);
         shippingHtml = `
-            <div class="row" style="text-align: center;">
-                <div class="col-4">
-                    <div style="font-size: 10px; color: #888;">AIR</div>
-                    <div style="font-size: 16px; font-weight: bold;">${sm.ship_air || 0}%</div>
-                </div>
-                <div class="col-4">
-                    <div style="font-size: 10px; color: #888;">SEA</div>
-                    <div style="font-size: 16px; font-weight: bold;">${sm.ship_sea || 0}%</div>
-                </div>
-                <div class="col-4">
-                    <div style="font-size: 10px; color: #888;">MARGIN</div>
-                    <div style="font-size: 16px; font-weight: bold;">${sm.std_margin || 0}%</div>
-                </div>
-            </div>
+            <table class="table table-sm table-borderless" style="margin: 0; font-size: 12px; text-align: center;">
+                <thead>
+                    <tr style="color: #888; font-size: 11px; border-bottom: 1px solid #dee2e6;">
+                        <th style="font-weight: 600;">AIR</th>
+                        <th style="font-weight: 600;">SEA</th>
+                        <th style="font-weight: 600; color: #28a745;">Margin</th>
+                        <th style="font-weight: 600; color: #dc3545;">Margin</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="font-size: 16px; font-weight: bold;">${sm.ship_air || 0}%</td>
+                        <td style="font-size: 16px; font-weight: bold;">${sm.ship_sea || 0}%</td>
+                        <td style="font-size: 16px; font-weight: bold; color: #28a745;">${std_margin}%</td>
+                        <td style="font-size: 16px; font-weight: bold; color: #dc3545;">${cal_margin}%</td>
+                    </tr>
+                </tbody>
+            </table>
         `;
     } else {
         shippingHtml = '<span class="text-muted">No data</span>';
@@ -887,15 +929,15 @@ function render_item_info_html(data, item_code) {
                 </div>
                 ${stockHtml}
             </div>
-            <div class="col-md-6">
+            <div class="col-md-5">
                 <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
                     TRANSACTION HISTORY
                 </div>
                 ${historyHtml}
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
-                    SHIPPING
+                    SHIPPING & MARGIN
                 </div>
                 ${shippingHtml}
             </div>
@@ -920,7 +962,8 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
         args: {
             item_code: item_code,
             customer: frm.doc.party_name,
-            price_list: frm.doc.selling_price_list
+            price_list: frm.doc.selling_price_list,
+            company: frm.doc.company,
         },
         callback(r) {
             if (!r.message) {
@@ -929,6 +972,10 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
                 frm.refresh_field("custom_item_info_html");
                 return;
             }
+
+            // Find the current item row to get calculated margin
+            let item_row = (frm.doc.items || []).find(row => row.item_code === item_code);
+            r.message.cal_margin = item_row ? flt(item_row.custom_margin_) : 0;
 
             // Populate tables for backward compatibility (only on new item selection)
             if (populate_tables) {
