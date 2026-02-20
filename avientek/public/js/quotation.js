@@ -902,8 +902,8 @@ function render_item_info_html(data, item_code) {
                     <tr style="color: #888; font-size: 11px; border-bottom: 1px solid #dee2e6;">
                         <th style="font-weight: 600;">AIR</th>
                         <th style="font-weight: 600;">SEA</th>
-                        <th style="font-weight: 600; color: #28a745;">Margin</th>
-                        <th style="font-weight: 600; color: #dc3545;">Margin</th>
+                        <th style="font-weight: 600; color: #28a745;">St.Margin</th>
+                        <th style="font-weight: 600; color: #dc3545;">Cl.Margin</th>
                     </tr>
                 </thead>
                 <tbody>
