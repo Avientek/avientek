@@ -91,6 +91,195 @@ def create_workflow():
 #         return """(`tabPayment Request Form`.workflow_state = 'Pending Accounts Manager'
 #                     OR `tabPayment Request Form`.modified_by = '{user}')""".format(user=user)
 
+def _get_customer_credit_documents(args):
+    """Fetch Credit Notes (return Sales Invoices) and credit Journal Entries for a customer."""
+    from frappe.utils import flt
+
+    company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
+    rows = []
+
+    # 1. Credit Notes (Sales Invoice with is_return=1)
+    credit_notes = frappe.get_all(
+        "Sales Invoice",
+        filters={
+            "customer": args.get("party"),
+            "company": args.get("company"),
+            "is_return": 1,
+            "docstatus": 1,
+            "outstanding_amount": ["!=", 0],
+        },
+        fields=[
+            "name", "posting_date", "due_date", "grand_total", "base_grand_total",
+            "outstanding_amount", "currency", "conversion_rate", "return_against",
+        ],
+    )
+
+    for cn in credit_notes:
+        exchange_rate = flt(cn.conversion_rate) or 1
+        os_company = abs(flt(cn.outstanding_amount))
+        os_invoice = os_company / exchange_rate if exchange_rate else os_company
+
+        rows.append({
+            "voucher_type": "Credit Note",
+            "voucher_no": cn.name,
+            "bill_no": cn.name,
+            "posting_date": cn.posting_date,
+            "due_date": cn.due_date,
+            "grand_total": abs(flt(cn.grand_total)),
+            "base_grand_total": abs(flt(cn.base_grand_total)),
+            "outstanding": os_invoice,
+            "base_outstanding": os_company,
+            "currency": cn.currency,
+            "exchange_rate": exchange_rate,
+            "is_return": 1,
+            "return_against": cn.return_against or "",
+            "document_reference": cn.return_against or "",
+        })
+
+    # 2. Journal Entries with credit for this customer
+    je_accounts = frappe.get_all(
+        "Journal Entry Account",
+        filters={
+            "party_type": "Customer",
+            "party": args.get("party"),
+            "credit_in_account_currency": [">", 0],
+            "docstatus": 1,
+        },
+        fields=["parent", "credit_in_account_currency", "credit", "account_currency", "exchange_rate"],
+    )
+
+    # Group by parent JE and check if already fully allocated
+    seen_je = set()
+    for jea in je_accounts:
+        if jea.parent in seen_je:
+            continue
+        seen_je.add(jea.parent)
+
+        je = frappe.get_doc("Journal Entry", jea.parent)
+        if je.company != args.get("company") or je.docstatus != 1:
+            continue
+
+        # Calculate total credit for this customer in this JE
+        total_credit = sum(
+            flt(acc.credit_in_account_currency)
+            for acc in je.accounts
+            if acc.party_type == "Customer" and acc.party == args.get("party")
+        )
+        total_base_credit = sum(
+            flt(acc.credit)
+            for acc in je.accounts
+            if acc.party_type == "Customer" and acc.party == args.get("party")
+        )
+
+        if total_credit <= 0:
+            continue
+
+        rows.append({
+            "voucher_type": "Journal Entry",
+            "voucher_no": je.name,
+            "bill_no": je.name,
+            "posting_date": je.posting_date,
+            "due_date": je.posting_date,
+            "grand_total": total_credit,
+            "base_grand_total": total_base_credit,
+            "outstanding": total_credit,
+            "base_outstanding": total_base_credit,
+            "currency": jea.account_currency or company_currency,
+            "exchange_rate": flt(jea.exchange_rate) or 1,
+            "is_return": 0,
+            "return_against": "",
+            "document_reference": je.user_remark or "",
+        })
+
+    # 3. Payment Entries with unallocated amount for this customer
+    payment_entries = frappe.get_all(
+        "Payment Entry",
+        filters={
+            "party_type": "Customer",
+            "party": args.get("party"),
+            "company": args.get("company"),
+            "docstatus": 1,
+            "unallocated_amount": [">", 0],
+        },
+        fields=[
+            "name", "posting_date", "paid_amount", "base_paid_amount",
+            "unallocated_amount", "payment_type",
+            "paid_from_account_currency", "paid_to_account_currency",
+            "source_exchange_rate", "target_exchange_rate",
+        ],
+    )
+
+    for pe in payment_entries:
+        currency = pe.paid_from_account_currency if pe.payment_type == "Pay" else pe.paid_to_account_currency
+        exchange_rate = flt(pe.source_exchange_rate if pe.payment_type == "Pay" else pe.target_exchange_rate) or 1
+        os_invoice = flt(pe.unallocated_amount) / exchange_rate if exchange_rate else flt(pe.unallocated_amount)
+
+        rows.append({
+            "voucher_type": "Payment Entry",
+            "voucher_no": pe.name,
+            "bill_no": pe.name,
+            "posting_date": pe.posting_date,
+            "due_date": pe.posting_date,
+            "grand_total": flt(pe.paid_amount),
+            "base_grand_total": flt(pe.base_paid_amount),
+            "outstanding": os_invoice,
+            "base_outstanding": flt(pe.unallocated_amount),
+            "currency": currency or company_currency,
+            "exchange_rate": exchange_rate,
+            "is_return": 0,
+            "return_against": "",
+            "document_reference": f"{pe.payment_type}: {pe.name}",
+        })
+
+    return rows
+
+
+def _get_outstanding_expense_claims(args):
+    """Fetch outstanding Expense Claims for an employee."""
+    from frappe.utils import flt
+
+    company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
+
+    claims = frappe.get_all(
+        "Expense Claim",
+        filters={
+            "employee": args.get("party"),
+            "company": args.get("company"),
+            "docstatus": 1,
+            "status": ["in", ["Unpaid", "Partly Paid"]],
+        },
+        fields=[
+            "name", "posting_date", "total_sanctioned_amount",
+            "total_amount_reimbursed", "cost_center",
+        ],
+    )
+
+    rows = []
+    for ec in claims:
+        outstanding = flt(ec.total_sanctioned_amount) - flt(ec.total_amount_reimbursed)
+        if outstanding <= 0:
+            continue
+
+        rows.append({
+            "voucher_type": "Expense Claim",
+            "voucher_no": ec.name,
+            "bill_no": ec.name,
+            "posting_date": ec.posting_date,
+            "due_date": ec.posting_date,
+            "grand_total": flt(ec.total_sanctioned_amount),
+            "base_grand_total": flt(ec.total_sanctioned_amount),
+            "outstanding": outstanding,
+            "base_outstanding": outstanding,
+            "currency": company_currency,
+            "exchange_rate": 1,
+            "is_return": 0,
+            "return_against": "",
+            "document_reference": "",
+        })
+
+    return rows
+
+
 @frappe.whitelist()
 def get_outstanding_reference_documents(args):
 
@@ -106,6 +295,13 @@ def get_outstanding_reference_documents(args):
                 if not supplier_status["release_date"] or getdate(nowdate()) <= supplier_status["release_date"]:
                     return []
 
+    # Expense Claims don't use Payment Ledger Entry - handle separately
+    if args.get("reference_doctype") == "Expense Claim":
+        return _get_outstanding_expense_claims(args)
+
+    # Customer: fetch Credit Notes and credit JVs only
+    if args.get("party_type") == "Customer":
+        return _get_customer_credit_documents(args)
 
     ple = DocType("Payment Ledger Entry")
     company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
@@ -399,14 +595,14 @@ def get_supplier_address_display(address_name):
 
 
 @frappe.whitelist()
-def get_supplier_bank_details(supplier_name):
+def get_supplier_bank_details(supplier_name, party_type="Supplier"):
     if not supplier_name:
         return {}
 
-    # Step 1: Get default (or first) bank account linked to the supplier
+    # Get default (or first) bank account linked to the party
     bank_account = frappe.get_all("Bank Account",
         filters={
-            "party_type": "Supplier",
+            "party_type": party_type,
             "party": supplier_name
         },
         fields=["name", "bank", "bank_account_no"],

@@ -40,7 +40,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Type",
-   "options": "\nPurchase Invoice\nDebit Note\nPurchase Order\nExpense Claim\nManual"
+   "options": "\nPurchase Invoice\nDebit Note\nPurchase Order\nExpense Claim\nCredit Note\nSales Invoice\nPayment Entry\nJournal Entry\nManual"
   },
   {
    "columns": 2,

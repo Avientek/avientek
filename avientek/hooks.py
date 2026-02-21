@@ -194,9 +194,11 @@ doctype_js = {
 	"Sales Order" : "public/js/sales_order.js",
 	"Company": "public/js/send_email.js",
 	"Brand": "public/js/brand.js",
-	# "Journal Entry": "public/js/journal_entry.js",
-	# "Purchase Invoice": "public/js/purchase_invoice.js"
-	# "Purchase Receipt" : "public/js/purchase_receipt.js",
+	"Journal Entry": "public/js/journal_entry.js",
+	"Purchase Invoice": "public/js/purchase_invoice.js",
+	"Expense Claim": "public/js/expense_claim.js",
+	"Payment Entry": "public/js/payment_entry.js",
+	"Sales Invoice": "public/js/sales_invoice.js",
 }
 doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
 	"Quotation": "public/js/quotation_list.js"

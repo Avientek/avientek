@@ -28,6 +28,7 @@
   "supplier_balance",
   "get_purchase_invoice",
   "get_expense_claim",
+  "get_sales_invoice",
   "payment_details_section",
   "issued_bank",
   "account",
@@ -159,6 +160,12 @@
    "fieldname": "get_expense_claim",
    "fieldtype": "Button",
    "label": "Get Expense Claim"
+  },
+  {
+   "depends_on": "eval:doc.docstatus==0 && doc.party && doc.party_type=='Customer'",
+   "fieldname": "get_sales_invoice",
+   "fieldtype": "Button",
+   "label": "Get Credit Note"
   },
   {
    "depends_on": "eval:doc.payment_type==\"Pay\"\r\n",

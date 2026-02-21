@@ -83,7 +83,7 @@ frappe.ui.form.on('Payment Request Form', {
 		frm.set_query('party_type', function() {
             return {
                 filters: {
-                    name: ['in', ['Supplier', 'Employee']]
+                    name: ['in', ['Supplier', 'Employee', 'Customer']]
                 }
             };
         });
@@ -180,26 +180,23 @@ frappe.ui.form.on('Payment Request Form', {
             frm.events.render_payment_history(frm);
         }
 
-		if (frm.doc.party_type === "Supplier" && frm.doc.party && frm.doc.company) {
+		if (frm.doc.party_type && frm.doc.party && frm.doc.company) {
 			if(!frm.doc.posting_date) {
 				frappe.msgprint(__("Please select Posting Date before selecting Party"))
 				frm.set_value("party", "");
 				return ;
 			}
 
-			let company_currency = frappe.get_doc(":Company", frm.doc.company).default_currency;
-
+			// get_party_details works for Supplier, Customer, Employee
 			return frappe.call({
 				method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
 				args: {
 					company: frm.doc.company,
-					party_type: 'Supplier',
+					party_type: frm.doc.party_type,
 					party: frm.doc.party,
 					date: frm.doc.posting_date,
-					// cost_center: frm.doc.cost_center
 				},
 				callback: function(r, rt) {
-					// console.log("r.message.r.message.r.message.r.message.",r.message)
 					if(r.message) {
 						frappe.run_serially([
 							() => frm.set_value("supplier_balance", r.message.party_balance),
@@ -225,14 +222,13 @@ frappe.ui.form.on('Payment Request Form', {
         let options = [];
 
         if (frm.doc.party_type === "Supplier") {
-            // Supplier: Purchase Invoice, Debit Note, Purchase Order, Manual
-            options = ["", "Purchase Invoice", "Debit Note", "Purchase Order", "Manual"];
+            options = ["", "Purchase Invoice", "Debit Note", "Purchase Order", "Journal Entry", "Manual"];
         } else if (frm.doc.party_type === "Employee") {
-            // Employee: Expense Claim, Manual
-            options = ["", "Expense Claim", "Manual"];
+            options = ["", "Expense Claim", "Journal Entry", "Manual"];
+        } else if (frm.doc.party_type === "Customer") {
+            options = ["", "Credit Note", "Sales Invoice", "Payment Entry", "Journal Entry", "Manual"];
         } else {
-            // Default: all options (without Journal Entry)
-            options = ["", "Purchase Invoice", "Debit Note", "Purchase Order", "Expense Claim", "Manual"];
+            options = ["", "Purchase Invoice", "Debit Note", "Purchase Order", "Expense Claim", "Credit Note", "Sales Invoice", "Payment Entry", "Journal Entry", "Manual"];
         }
 
         // Update the options for reference_doctype field in child table
@@ -252,6 +248,9 @@ frappe.ui.form.on('Payment Request Form', {
 	},
 	get_expense_claim: function(frm) {
 		frm.events._fetch_outstanding(frm, "Expense Claim");
+	},
+	get_sales_invoice: function(frm) {
+		frm.events._fetch_outstanding(frm, "Sales Invoice");
 	},
 	_fetch_outstanding: function(frm, reference_doctype) {
 		frm.clear_table("payment_references");
@@ -553,41 +552,48 @@ function set_if_changed(frm, fieldname, value) {
 }
 
 function fetch_supplier_details(frm, force_update) {
-    if (frm.doc.party_type === "Supplier") {
-        // Only fetch address if not already set or force_update
-        if (!frm.doc.supplier_address || force_update) {
-            frappe.call({
-                method: "frappe.contacts.doctype.address.address.get_default_address",
-                args: {
-                    doctype: frm.doc.party_type,
-                    name: frm.doc.party
-                },
-                callback: function(r) {
-                    if (r.message) {
-                        set_if_changed(frm, "supplier_address", r.message);
-                        frappe.call({
-                            method: "frappe.contacts.doctype.address.address.get_address_display",
-                            args: {
-                                "address_dict": r.message
-                            },
-                            callback: function(res) {
-                                if (res.message) {
-                                    let clean_address = res.message.replace(/<br\s*\/?>/gi, '\n');
-                                    set_if_changed(frm, "address_display", clean_address);
-                                }
-                            }
-                        });
-                    }
-                }
-            });
-        }
+    if (!frm.doc.party_type || !frm.doc.party) return;
 
-        // Only fetch bank details if not already set or force_update
+    // Fetch address for all party types (Supplier, Employee, Customer)
+    if (!frm.doc.supplier_address || force_update) {
+        frappe.call({
+            method: "frappe.contacts.doctype.address.address.get_default_address",
+            args: {
+                doctype: frm.doc.party_type,
+                name: frm.doc.party
+            },
+            callback: function(r) {
+                if (r.message) {
+                    set_if_changed(frm, "supplier_address", r.message);
+                    frappe.call({
+                        method: "frappe.contacts.doctype.address.address.get_address_display",
+                        args: {
+                            "address_dict": r.message
+                        },
+                        callback: function(res) {
+                            if (res.message) {
+                                let clean_address = res.message.replace(/<br\s*\/?>/gi, '\n');
+                                set_if_changed(frm, "address_display", clean_address);
+                            }
+                        }
+                    });
+                } else if (force_update) {
+                    // Clear address fields if no address found
+                    set_if_changed(frm, "supplier_address", "");
+                    set_if_changed(frm, "address_display", "");
+                }
+            }
+        });
+    }
+
+    // Fetch bank details for Supplier and Customer (not Employee)
+    if (frm.doc.party_type !== "Employee") {
         if (!frm.doc.supplier_bank_account || force_update) {
             frappe.call({
                 method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_supplier_bank_details",
                 args: {
-                    supplier_name: frm.doc.party
+                    supplier_name: frm.doc.party,
+                    party_type: frm.doc.party_type
                 },
                 callback: function(r) {
                     if (r.message) {
@@ -601,6 +607,7 @@ function fetch_supplier_details(frm, force_update) {
         }
     }
 
+    // Fetch party balance
     frappe.call({
         method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
         args: {
