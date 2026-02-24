@@ -1129,6 +1129,87 @@ def get_invoice_attachment_images(invoice_name, max_pages=5):
     return all_images
 
 
+# ──────────────────────────── Reference doctype → actual Frappe doctype mapping
+REFERENCE_DOCTYPE_MAP = {
+    "Purchase Invoice": "Purchase Invoice",
+    "Debit Note": "Purchase Invoice",
+    "Credit Note": "Sales Invoice",
+    "Sales Invoice": "Sales Invoice",
+    "Expense Claim": "Expense Claim",
+    "Payment Entry": "Payment Entry",
+    "Journal Entry": "Journal Entry",
+    "Purchase Order": "Purchase Order",
+}
+
+
+@frappe.whitelist()
+def get_reference_attachment_images(reference_doctype, reference_name, max_pages=5):
+    """
+    Generic function to get ALL attachments (PDFs converted to images + direct images)
+    from any reference document. Handles the mapping from PRF reference_doctype
+    (e.g. "Credit Note") to actual Frappe doctype (e.g. "Sales Invoice").
+
+    If no file attachments are found, falls back to rendering the document's
+    own print format as images — so there is always something to show.
+
+    Returns list of base64 image strings (flattened from all attachments).
+    """
+    if not reference_doctype or not reference_name:
+        return []
+
+    actual_doctype = REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
+    max_pages = int(max_pages) if max_pages else 5
+
+    all_images = []
+
+    # 1) PDF attachments → convert to images
+    pdf_data = get_pdf_as_images(actual_doctype, reference_name, max_pages)
+    for pdf in pdf_data:
+        all_images.extend(pdf.get("images", []))
+
+    # 2) Direct image attachments (jpg, jpeg, png, gif, webp)
+    IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp"}
+    attachments = frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": actual_doctype,
+            "attached_to_name": reference_name,
+        },
+        fields=["file_name", "file_url", "is_private"],
+    )
+    for att in attachments:
+        file_name = att.get("file_name") or ""
+        ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+        if ext not in IMAGE_EXTS:
+            continue
+
+        file_url = att.get("file_url", "")
+        if file_url.startswith("/private/"):
+            file_path = frappe.get_site_path() + file_url
+        elif file_url.startswith("/files/"):
+            file_path = frappe.get_site_path("public") + file_url
+        else:
+            continue
+
+        if not os.path.exists(file_path):
+            continue
+
+        try:
+            with open(file_path, "rb") as f:
+                img_bytes = f.read()
+            mime = f"image/{ext}" if ext != "jpg" else "image/jpeg"
+            img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+            all_images.append(f"data:{mime};base64,{img_b64}")
+        except Exception:
+            pass
+
+    # 3) Fallback: if no file attachments found, render the document's print format
+    if not all_images:
+        all_images = get_print_format_as_images(actual_doctype, reference_name, max_pages=max_pages)
+
+    return all_images
+
+
 @frappe.whitelist()
 def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10):
     """
