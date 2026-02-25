@@ -163,6 +163,7 @@ fixtures = [
 					"Purchase Invoice-represents_company-ignore_user_permissions",
 					"Purchase Order Item-sales_order-read_only",
 					"Purchase Invoice-represents_company-ignore_user_permissions",
+					"Quotation-main-field_order",
 				],
 			]
 		],
