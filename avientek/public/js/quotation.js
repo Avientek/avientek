@@ -273,6 +273,15 @@ frappe.ui.form.on('Quotation', {
             return { filters: { currency: frm.doc.currency } };
         });
 
+        // Filter customers by the selected company
+        frm.set_query('party_name', function () {
+            if (frm.doc.quotation_to === 'Customer' && frm.doc.company) {
+                return {
+                    filters: { company: frm.doc.company }
+                };
+            }
+        });
+
         // Toggle discount fields based on type selection
         toggle_discount_fields(frm);
         toggle_apply_discount_button(frm);
@@ -325,15 +334,6 @@ frappe.ui.form.on('Quotation', {
     onload(frm) {
         frm.set_query('custom_quote_project', function () {
             return { query: 'avientek.events.sales_person_permission.get_project_quotation_for_user' };
-        });
-
-        // Filter customers by the selected company
-        frm.set_query('party_name', function () {
-            if (frm.doc.quotation_to === 'Customer' && frm.doc.company) {
-                return {
-                    filters: { company: frm.doc.company }
-                };
-            }
         });
     },
 
