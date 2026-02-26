@@ -1,0 +1,22 @@
+{
+ "creation": "2026-02-26 15:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Number Card",
+ "document_type": "Quotation",
+ "dynamic_filters_json": "[[\"Quotation\",\"company\",\"=\",\"frappe.defaults.get_user_default(\\\"Company\\\")\"]]",
+ "filters_json": "[[\"Quotation\",\"docstatus\",\"=\",\"1\"],[\"Quotation\",\"status\",\"=\",\"Open\"]]",
+ "function": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "label": "Open Quotations",
+ "modified": "2026-02-26 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Open Quotations",
+ "owner": "Administrator",
+ "show_percentage_stats": 1,
+ "stats_time_interval": "Daily",
+ "type": "Document Type",
+ "color": "#2490EF"
+}

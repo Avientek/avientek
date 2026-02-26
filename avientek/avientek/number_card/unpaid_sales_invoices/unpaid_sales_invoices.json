@@ -1,0 +1,22 @@
+{
+ "creation": "2026-02-26 15:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Number Card",
+ "document_type": "Sales Invoice",
+ "dynamic_filters_json": "[[\"Sales Invoice\",\"company\",\"=\",\"frappe.defaults.get_user_default(\\\"Company\\\")\"]]",
+ "filters_json": "[[\"Sales Invoice\",\"docstatus\",\"=\",\"1\"],[\"Sales Invoice\",\"status\",\"in\",[\"Unpaid\",\"Overdue\",\"Partly Paid\"]]]",
+ "function": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "label": "Unpaid Sales Invoices",
+ "modified": "2026-02-26 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Unpaid Sales Invoices",
+ "owner": "Administrator",
+ "show_percentage_stats": 1,
+ "stats_time_interval": "Daily",
+ "type": "Document Type",
+ "color": "#36B37E"
+}

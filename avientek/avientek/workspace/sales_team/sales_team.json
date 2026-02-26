@@ -1,0 +1,62 @@
+{
+ "charts": [
+  {
+   "chart_name": "Sales Order Trends",
+   "label": "Sales Order Trends"
+  },
+  {
+   "chart_name": "Sales Order Analysis",
+   "label": "Sales Order Analysis"
+  }
+ ],
+ "content": "[{\"id\":\"uaU3HFG-Wx\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Sales Team</span>\",\"col\":12}},{\"id\":\"shortcut_1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Open Dashboard\",\"col\":4}},{\"id\":\"2i4XC_iBXU\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"nc_todos\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Open ToDos\",\"col\":3}},{\"id\":\"nc_quotations\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open Quotations\",\"col\":3}},{\"id\":\"nc_sales_orders\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open Sales Orders\",\"col\":3}},{\"id\":\"nc_invoices\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Unpaid Sales Invoices\",\"col\":3}},{\"id\":\"spacer_1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"chart_trends\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sales Order Trends\",\"col\":12}},{\"id\":\"chart_analysis\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sales Order Analysis\",\"col\":12}},{\"id\":\"spacer_2\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
+ "creation": "2026-02-26 13:16:04.242735",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "share-people",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Sales Team",
+ "links": [],
+ "modified": "2026-02-26 14:34:48.139482",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Sales Team",
+ "number_cards": [
+  {
+   "label": "My Open ToDos",
+   "number_card_name": "My Open ToDos"
+  },
+  {
+   "label": "Open Quotations",
+   "number_card_name": "Open Quotations"
+  },
+  {
+   "label": "Open Sales Orders",
+   "number_card_name": "Open Sales Orders"
+  },
+  {
+   "label": "Unpaid Sales Invoices",
+   "number_card_name": "Unpaid Sales Invoices"
+  }
+ ],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 1.0,
+ "shortcuts": [
+  {
+   "color": "Green",
+   "label": "Open Dashboard",
+   "link_to": "sales-team-dashboard",
+   "type": "Page"
+  }
+ ],
+ "title": "Sales Team"
+}
