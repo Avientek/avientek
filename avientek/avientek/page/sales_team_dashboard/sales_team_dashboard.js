@@ -65,6 +65,14 @@ class SalesTeamDashboard {
             change: () => this.refresh(),
         });
 
+        this.sales_person_field = this.page.add_field({
+            fieldtype: "Link",
+            fieldname: "sales_person",
+            options: "Sales Person",
+            label: __("Sales Person"),
+            change: () => this.refresh(),
+        });
+
         this.page.set_primary_action(__("Refresh"), () => this.refresh(), "refresh");
     }
 
@@ -81,6 +89,7 @@ class SalesTeamDashboard {
             to_date: this.to_date_field ? this.to_date_field.get_value() : "",
             customer: this.customer_field ? this.customer_field.get_value() : "",
             brand: this.brand_field ? this.brand_field.get_value() : "",
+            sales_person: this.sales_person_field ? this.sales_person_field.get_value() : "",
         };
     }
 
@@ -198,12 +207,20 @@ class SalesTeamDashboard {
             [__("Customer"), __("Orders"), __("Value")],
             d.customer_data.map((r) => ({
                 cells: [
-                    `<a href="/app/sales-order?customer=${encodeURIComponent(r.customer)}&status=["in",["To Deliver and Bill","To Deliver","To Bill"]]">${r.customer_name || r.customer}</a>`,
+                    `<a href="#" class="customer-invoice-link" data-customer="${frappe.utils.escape_html(r.customer)}" data-customer-name="${frappe.utils.escape_html(r.customer_name || r.customer)}">${r.customer_name || r.customer}</a>`,
                     r.count,
                     format_currency(r.value, d.currency),
                 ],
             }))
         );
+
+        // Bind click on customer names to show invoice dialog
+        wrapper.find(".customer-invoice-link").on("click", (e) => {
+            e.preventDefault();
+            let customer = $(e.currentTarget).data("customer");
+            let customer_name = $(e.currentTarget).data("customer-name");
+            this.show_customer_invoices(customer, customer_name);
+        });
 
         // Brand table
         this.render_detail_table(
@@ -211,12 +228,328 @@ class SalesTeamDashboard {
             [__("Brand"), __("SO Count"), __("Value")],
             d.brand_data.map((r) => ({
                 cells: [
-                    r.brand,
+                    `<a href="#" class="brand-detail-link" data-brand="${frappe.utils.escape_html(r.brand)}">${r.brand}</a>`,
                     r.so_count,
                     format_currency(r.value, d.currency),
                 ],
             }))
         );
+
+        // Bind click on brand names to show orders dialog
+        wrapper.find(".brand-detail-link").on("click", (e) => {
+            e.preventDefault();
+            let brand = $(e.currentTarget).data("brand");
+            this.show_brand_orders(brand);
+        });
+    }
+
+    show_customer_invoices(customer, customer_name) {
+        let filters = this.get_filters();
+        frappe.call({
+            method: "avientek.avientek.page.sales_team_dashboard.sales_team_dashboard.get_customer_orders",
+            args: {
+                customer: customer,
+                company: filters.company,
+                from_date: filters.from_date,
+                to_date: filters.to_date,
+                brand: filters.brand,
+                sales_person: filters.sales_person,
+            },
+            callback: (r) => {
+                if (r.exc) return;
+                let data = r.message;
+                let currency = data.currency;
+                let orders = data.orders || [];
+                let invoices = data.invoices || [];
+
+                // --- Sales Orders table ---
+                let so_rows = "";
+                if (!orders.length) {
+                    so_rows = `<tr><td colspan="5" class="text-muted text-center">${__("No orders found")}</td></tr>`;
+                } else {
+                    orders.forEach((so) => {
+                        so_rows += `
+                            <tr>
+                                <td><a href="#" class="doc-preview-link" data-doctype="Sales Order" data-name="${so.name}">${so.name}</a></td>
+                                <td>${frappe.datetime.str_to_user(so.transaction_date)}</td>
+                                <td>${so.status}</td>
+                                <td class="text-right">${format_currency(so.base_grand_total, currency)}</td>
+                                <td class="text-right">${flt(so.per_billed, 1)}%</td>
+                            </tr>`;
+                    });
+                }
+                let so_total = orders.reduce((s, so) => s + flt(so.base_grand_total), 0);
+
+                // --- Invoices table ---
+                let si_rows = "";
+                if (!invoices.length) {
+                    si_rows = `<tr><td colspan="5" class="text-muted text-center">${__("No invoices found")}</td></tr>`;
+                } else {
+                    invoices.forEach((inv) => {
+                        si_rows += `
+                            <tr>
+                                <td><a href="#" class="doc-preview-link" data-doctype="Sales Invoice" data-name="${inv.name}">${inv.name}</a></td>
+                                <td>${frappe.datetime.str_to_user(inv.posting_date)}</td>
+                                <td>${inv.status}</td>
+                                <td class="text-right">${format_currency(inv.base_grand_total, currency)}</td>
+                                <td class="text-right">${format_currency(inv.outstanding_amount, currency)}</td>
+                            </tr>`;
+                    });
+                }
+                let si_total = invoices.reduce((s, inv) => s + flt(inv.base_grand_total), 0);
+                let si_outstanding = invoices.reduce((s, inv) => s + flt(inv.outstanding_amount), 0);
+
+                let list_html = `
+                    <h6 style="margin-bottom:10px;">${__("Open Sales Orders")} (${orders.length})</h6>
+                    <table class="table table-bordered table-sm std-detail-table" style="margin-bottom:24px;">
+                        <thead>
+                            <tr>
+                                <th>${__("Sales Order")}</th>
+                                <th>${__("Date")}</th>
+                                <th>${__("Status")}</th>
+                                <th class="text-right">${__("Amount")}</th>
+                                <th class="text-right">${__("% Billed")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>${so_rows}</tbody>
+                        ${orders.length ? `<tfoot>
+                            <tr style="font-weight:700;">
+                                <td colspan="3">${__("Total")}</td>
+                                <td class="text-right">${format_currency(so_total, currency)}</td>
+                                <td></td>
+                            </tr>
+                        </tfoot>` : ""}
+                    </table>
+
+                    <h6 style="margin-bottom:10px;">${__("Invoices")} (${invoices.length})</h6>
+                    <table class="table table-bordered table-sm std-detail-table">
+                        <thead>
+                            <tr>
+                                <th>${__("Invoice")}</th>
+                                <th>${__("Date")}</th>
+                                <th>${__("Status")}</th>
+                                <th class="text-right">${__("Amount")}</th>
+                                <th class="text-right">${__("Outstanding")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>${si_rows}</tbody>
+                        ${invoices.length ? `<tfoot>
+                            <tr style="font-weight:700;">
+                                <td colspan="3">${__("Total")}</td>
+                                <td class="text-right">${format_currency(si_total, currency)}</td>
+                                <td class="text-right">${format_currency(si_outstanding, currency)}</td>
+                            </tr>
+                        </tfoot>` : ""}
+                    </table>`;
+
+                let dialog_title = __("{0}", [customer_name]);
+                let dialog = new frappe.ui.Dialog({
+                    title: dialog_title,
+                    size: "extra-large",
+                    fields: [
+                        { fieldtype: "HTML", fieldname: "content", options: list_html },
+                    ],
+                });
+                dialog.show();
+
+                // Bind doc preview links inside dialog
+                dialog.$wrapper.on("click", ".doc-preview-link", (e) => {
+                    e.preventDefault();
+                    let doctype = $(e.currentTarget).data("doctype");
+                    let name = $(e.currentTarget).data("name");
+                    this.show_doc_in_dialog(dialog, doctype, name, dialog_title, list_html);
+                });
+            },
+        });
+    }
+
+    show_brand_orders(brand) {
+        let filters = this.get_filters();
+        frappe.call({
+            method: "avientek.avientek.page.sales_team_dashboard.sales_team_dashboard.get_brand_orders",
+            args: {
+                brand: brand,
+                company: filters.company,
+                from_date: filters.from_date,
+                to_date: filters.to_date,
+                customer: filters.customer,
+                sales_person: filters.sales_person,
+            },
+            callback: (r) => {
+                if (r.exc) return;
+                let data = r.message;
+                let currency = data.currency;
+                let orders = data.orders || [];
+                let invoices = data.invoices || [];
+
+                // --- Sales Orders table ---
+                let so_rows = "";
+                if (!orders.length) {
+                    so_rows = `<tr><td colspan="6" class="text-muted text-center">${__("No orders found")}</td></tr>`;
+                } else {
+                    orders.forEach((so) => {
+                        so_rows += `
+                            <tr>
+                                <td><a href="#" class="doc-preview-link" data-doctype="Sales Order" data-name="${so.name}">${so.name}</a></td>
+                                <td>${so.customer_name || ""}</td>
+                                <td>${frappe.datetime.str_to_user(so.transaction_date)}</td>
+                                <td>${so.status}</td>
+                                <td class="text-right">${format_currency(so.brand_amount, currency)}</td>
+                                <td class="text-right">${flt(so.per_billed, 1)}%</td>
+                            </tr>`;
+                    });
+                }
+                let so_total = orders.reduce((s, so) => s + flt(so.brand_amount), 0);
+
+                // --- Invoices table ---
+                let si_rows = "";
+                if (!invoices.length) {
+                    si_rows = `<tr><td colspan="4" class="text-muted text-center">${__("No invoices found")}</td></tr>`;
+                } else {
+                    invoices.forEach((inv) => {
+                        si_rows += `
+                            <tr>
+                                <td><a href="#" class="doc-preview-link" data-doctype="Sales Invoice" data-name="${inv.name}">${inv.name}</a></td>
+                                <td>${frappe.datetime.str_to_user(inv.posting_date)}</td>
+                                <td>${inv.status}</td>
+                                <td class="text-right">${format_currency(inv.brand_amount, currency)}</td>
+                            </tr>`;
+                    });
+                }
+                let si_total = invoices.reduce((s, inv) => s + flt(inv.brand_amount), 0);
+
+                let dialog_title = __("Brand: {0}", [brand]);
+                let list_html = `
+                    <h6 style="margin-bottom:10px;">${__("Open Sales Orders")} (${orders.length})</h6>
+                    <table class="table table-bordered table-sm std-detail-table" style="margin-bottom:24px;">
+                        <thead>
+                            <tr>
+                                <th>${__("Sales Order")}</th>
+                                <th>${__("Customer")}</th>
+                                <th>${__("Date")}</th>
+                                <th>${__("Status")}</th>
+                                <th class="text-right">${__("Brand Amount")}</th>
+                                <th class="text-right">${__("% Billed")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>${so_rows}</tbody>
+                        ${orders.length ? `<tfoot>
+                            <tr style="font-weight:700;">
+                                <td colspan="4">${__("Total")}</td>
+                                <td class="text-right">${format_currency(so_total, currency)}</td>
+                                <td></td>
+                            </tr>
+                        </tfoot>` : ""}
+                    </table>
+
+                    <h6 style="margin-bottom:10px;">${__("Invoices")} (${invoices.length})</h6>
+                    <table class="table table-bordered table-sm std-detail-table">
+                        <thead>
+                            <tr>
+                                <th>${__("Invoice")}</th>
+                                <th>${__("Date")}</th>
+                                <th>${__("Status")}</th>
+                                <th class="text-right">${__("Brand Amount")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>${si_rows}</tbody>
+                        ${invoices.length ? `<tfoot>
+                            <tr style="font-weight:700;">
+                                <td colspan="3">${__("Total")}</td>
+                                <td class="text-right">${format_currency(si_total, currency)}</td>
+                            </tr>
+                        </tfoot>` : ""}
+                    </table>`;
+
+                let dialog = new frappe.ui.Dialog({
+                    title: dialog_title,
+                    size: "extra-large",
+                    fields: [
+                        { fieldtype: "HTML", fieldname: "content", options: list_html },
+                    ],
+                });
+                dialog.show();
+
+                // Bind doc preview links inside dialog
+                dialog.$wrapper.on("click", ".doc-preview-link", (e) => {
+                    e.preventDefault();
+                    let doctype = $(e.currentTarget).data("doctype");
+                    let name = $(e.currentTarget).data("name");
+                    this.show_doc_in_dialog(dialog, doctype, name, dialog_title, list_html);
+                });
+            },
+        });
+    }
+
+    show_doc_in_dialog(dialog, doctype, name, dialog_title, list_html) {
+        frappe.call({
+            method: "frappe.client.get",
+            args: { doctype: doctype, name: name },
+            callback: (r) => {
+                if (r.exc) return;
+                let doc = r.message;
+                let currency = this.data?.currency || doc.currency || "";
+                let slug = doctype.toLowerCase().replace(/ /g, "-");
+
+                // Build items table
+                let items_html = "";
+                let items = doc.items || [];
+                if (items.length) {
+                    let item_rows = items.map((item) => `
+                        <tr>
+                            <td>${item.item_code}</td>
+                            <td>${item.item_name || ""}</td>
+                            <td class="text-right">${flt(item.qty, 2)}</td>
+                            <td class="text-right">${format_currency(item.rate, currency)}</td>
+                            <td class="text-right">${format_currency(item.amount, currency)}</td>
+                        </tr>`).join("");
+                    items_html = `
+                        <h6 style="margin:16px 0 8px;">${__("Items")}</h6>
+                        <table class="table table-bordered table-sm std-detail-table">
+                            <thead><tr>
+                                <th>${__("Item Code")}</th>
+                                <th>${__("Item Name")}</th>
+                                <th class="text-right">${__("Qty")}</th>
+                                <th class="text-right">${__("Rate")}</th>
+                                <th class="text-right">${__("Amount")}</th>
+                            </tr></thead>
+                            <tbody>${item_rows}</tbody>
+                        </table>`;
+                }
+
+                // Build header info
+                let date_label = doctype === "Sales Order" ? __("Order Date") : __("Posting Date");
+                let date_val = doc.transaction_date || doc.posting_date || "";
+                let header_html = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <button class="btn btn-sm btn-default back-to-list">
+                            ← ${__("Back")}
+                        </button>
+                        <a href="/app/${slug}/${name}" class="btn btn-sm btn-primary" target="_blank">
+                            ${__("Open Full Form")} ↗
+                        </a>
+                    </div>
+                    <table class="table table-sm" style="margin-bottom:0;">
+                        <tbody>
+                            <tr><td style="width:140px;font-weight:600;">${date_label}</td><td>${date_val ? frappe.datetime.str_to_user(date_val) : ""}</td></tr>
+                            <tr><td style="font-weight:600;">${__("Customer")}</td><td>${doc.customer_name || doc.customer || ""}</td></tr>
+                            <tr><td style="font-weight:600;">${__("Status")}</td><td>${doc.status || ""}</td></tr>
+                            <tr><td style="font-weight:600;">${__("Grand Total")}</td><td>${format_currency(doc.base_grand_total, currency)}</td></tr>
+                            ${doc.outstanding_amount != null ? `<tr><td style="font-weight:600;">${__("Outstanding")}</td><td>${format_currency(doc.outstanding_amount, currency)}</td></tr>` : ""}
+                        </tbody>
+                    </table>`;
+
+                // Replace dialog content
+                dialog.set_title(`${doctype}: ${name}`);
+                dialog.fields_dict.content.$wrapper.html(header_html + items_html);
+
+                // Back button returns to list view
+                dialog.$wrapper.find(".back-to-list").on("click", () => {
+                    dialog.set_title(dialog_title);
+                    dialog.fields_dict.content.$wrapper.html(list_html);
+                });
+            },
+        });
     }
 
     render_detail_table($container, headers, rows) {
