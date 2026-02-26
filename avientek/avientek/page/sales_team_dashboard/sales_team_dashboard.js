@@ -49,6 +49,22 @@ class SalesTeamDashboard {
             change: () => this.refresh(),
         });
 
+        this.customer_field = this.page.add_field({
+            fieldtype: "Link",
+            fieldname: "customer",
+            options: "Customer",
+            label: __("Customer"),
+            change: () => this.refresh(),
+        });
+
+        this.brand_field = this.page.add_field({
+            fieldtype: "Link",
+            fieldname: "brand",
+            options: "Brand",
+            label: __("Brand"),
+            change: () => this.refresh(),
+        });
+
         this.page.set_primary_action(__("Refresh"), () => this.refresh(), "refresh");
     }
 
@@ -63,6 +79,8 @@ class SalesTeamDashboard {
             company: this.company_field ? this.company_field.get_value() : "",
             from_date: this.from_date_field ? this.from_date_field.get_value() : "",
             to_date: this.to_date_field ? this.to_date_field.get_value() : "",
+            customer: this.customer_field ? this.customer_field.get_value() : "",
+            brand: this.brand_field ? this.brand_field.get_value() : "",
         };
     }
 

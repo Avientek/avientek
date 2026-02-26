@@ -28,7 +28,7 @@ def _get_sales_person_condition(user):
     return condition, list(sps)
 
 
-def _build_where(company, from_date, to_date, user):
+def _build_where(company, from_date, to_date, user, customer=None, brand=None):
     """Build WHERE clause and params list."""
     conditions = ["so.docstatus = 1", "so.status NOT IN ('Cancelled', 'Closed')"]
     params = []
@@ -42,6 +42,17 @@ def _build_where(company, from_date, to_date, user):
     if to_date:
         conditions.append("so.transaction_date <= %s")
         params.append(to_date)
+    if customer:
+        conditions.append("so.customer = %s")
+        params.append(customer)
+    if brand:
+        conditions.append(
+            "EXISTS ("
+            "SELECT 1 FROM `tabSales Order Item` _soi "
+            "WHERE _soi.parent = so.name AND _soi.brand = %s"
+            ")"
+        )
+        params.append(brand)
 
     sp_cond, sp_params = _get_sales_person_condition(user)
     if sp_cond:
@@ -52,9 +63,9 @@ def _build_where(company, from_date, to_date, user):
 
 
 @frappe.whitelist()
-def get_dashboard_data(company=None, from_date=None, to_date=None):
+def get_dashboard_data(company=None, from_date=None, to_date=None, customer=None, brand=None):
     user = frappe.session.user
-    where_clause, params = _build_where(company, from_date, to_date, user)
+    where_clause, params = _build_where(company, from_date, to_date, user, customer, brand)
     open_placeholders = ", ".join(["%s"] * len(OPEN_STATUSES))
 
     # --- Query 1: Summary totals ---
