@@ -823,3 +823,29 @@ def set_margin_flags(doc, method=None):
     elif level_1_required:
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 1
+
+
+@frappe.whitelist()
+def update_special_price(quotation_name, items):
+    """Update Special Price and Special Price Note on a submitted Quotation
+    without recalculating Selling Price / Selling Amount."""
+    items = frappe.parse_json(items)
+    doc = frappe.get_doc("Quotation", quotation_name)
+
+    if doc.docstatus != 1:
+        frappe.throw("This action is only allowed on submitted Quotations.")
+
+    for item_update in items:
+        row_name = item_update.get("name")
+        if not row_name:
+            continue
+
+        frappe.db.set_value("Quotation Item", row_name, {
+            "custom_special_price": flt(item_update.get("custom_special_price")),
+            "custom_special_price_note": item_update.get("custom_special_price_note") or "",
+        }, update_modified=True)
+
+    frappe.db.set_value("Quotation", quotation_name, "modified", frappe.utils.now())
+    frappe.db.commit()
+
+    return {"message": "Special Price updated successfully"}

@@ -309,6 +309,10 @@ doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
 
 after_migrate = "avientek.migrate.after_migrate"
 
+override_doctype_class = {
+    "Comment": "avientek.overrides.comment.CustomComment",
+}
+
 # Document Events
 # ---------------
 # Hook on document methods and events
@@ -329,6 +333,7 @@ doc_events = {
         ]
     },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
+    "Comment": {"after_insert": "avientek.events.comment.after_insert"},
 }
 
 
