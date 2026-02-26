@@ -89,7 +89,8 @@ fixtures = [
 					"Quotation Item-custom_special_rate",
 					"Quotation Item-custom_final_valuation_rate",
 					"Delivery Note-custom_customers_purchase_order",
-					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company"
+					"Terms and Conditions-custom_column_break_amx2o","Terms and Conditions-custom_company",
+					"Workflow-custom_enable_confirmation"
 				),
 			]
 		],
@@ -118,7 +119,7 @@ fixtures = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/avientek/css/avientek.css"
-# app_include_js = "/assets/avientek/js/avientek.js"
+app_include_js = "/assets/avientek/js/workflow_confirm.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/avientek/css/avientek.css"
