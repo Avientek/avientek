@@ -234,6 +234,59 @@ def _get_customer_credit_documents(args):
     return rows
 
 
+def _get_outstanding_employee_advances(args):
+    """Fetch outstanding Employee Advances for an employee (advances that need to be paid to the employee)."""
+    from frappe.utils import flt
+
+    company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
+
+    # Get Employee Advances that are unpaid or partially paid
+    advances = frappe.get_all(
+        "Employee Advance",
+        filters={
+            "employee": args.get("party"),
+            "company": args.get("company"),
+            "docstatus": 1,
+            "status": ["in", ["Unpaid", "Partly Paid and Claimed", "Partly Claimed and Returned"]],
+        },
+        fields=[
+            "name", "posting_date", "advance_amount", "paid_amount",
+            "claimed_amount", "return_amount", "currency", "exchange_rate",
+            "purpose",
+        ],
+    )
+
+    rows = []
+    for ea in advances:
+        # Outstanding = advance_amount - paid_amount
+        outstanding = flt(ea.advance_amount) - flt(ea.paid_amount)
+        if outstanding <= 0:
+            continue
+
+        # Get exchange rate, default to 1
+        exchange_rate = flt(ea.exchange_rate) or 1
+        currency = ea.currency or company_currency
+
+        rows.append({
+            "voucher_type": "Employee Advance",
+            "voucher_no": ea.name,
+            "bill_no": ea.name,
+            "posting_date": ea.posting_date,
+            "due_date": ea.posting_date,
+            "grand_total": flt(ea.advance_amount),
+            "base_grand_total": flt(ea.advance_amount) * exchange_rate,
+            "outstanding": outstanding,
+            "base_outstanding": outstanding * exchange_rate,
+            "currency": currency,
+            "exchange_rate": exchange_rate,
+            "is_return": 0,
+            "return_against": "",
+            "document_reference": ea.purpose or "",
+        })
+
+    return rows
+
+
 def _get_outstanding_expense_claims(args):
     """Fetch outstanding Expense Claims for an employee."""
     from frappe.utils import flt
@@ -298,6 +351,16 @@ def get_outstanding_reference_documents(args):
     # Expense Claims don't use Payment Ledger Entry - handle separately
     if args.get("reference_doctype") == "Expense Claim":
         return _get_outstanding_expense_claims(args)
+
+    # Employee Advances don't use Payment Ledger Entry - handle separately
+    if args.get("reference_doctype") == "Employee Advance":
+        return _get_outstanding_employee_advances(args)
+
+    # Combined Employee Documents - fetch both Expense Claims and Employee Advances
+    if args.get("reference_doctype") == "Employee Documents":
+        expense_claims = _get_outstanding_expense_claims(args)
+        employee_advances = _get_outstanding_employee_advances(args)
+        return expense_claims + employee_advances
 
     # Customer: fetch Credit Notes and credit JVs only
     if args.get("party_type") == "Customer":
@@ -1136,6 +1199,7 @@ REFERENCE_DOCTYPE_MAP = {
     "Credit Note": "Sales Invoice",
     "Sales Invoice": "Sales Invoice",
     "Expense Claim": "Expense Claim",
+    "Employee Advance": "Employee Advance",
     "Payment Entry": "Payment Entry",
     "Journal Entry": "Journal Entry",
     "Purchase Order": "Purchase Order",

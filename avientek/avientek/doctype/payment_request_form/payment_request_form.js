@@ -224,7 +224,7 @@ frappe.ui.form.on('Payment Request Form', {
         if (frm.doc.party_type === "Supplier") {
             options = ["", "Purchase Invoice", "Debit Note", "Purchase Order", "Journal Entry", "Manual"];
         } else if (frm.doc.party_type === "Employee") {
-            options = ["", "Expense Claim", "Journal Entry", "Manual"];
+            options = ["", "Expense Claim", "Employee Advance", "Journal Entry", "Manual"];
         } else if (frm.doc.party_type === "Customer") {
             options = ["", "Credit Note", "Sales Invoice", "Payment Entry", "Journal Entry", "Manual"];
         } else {
@@ -247,7 +247,51 @@ frappe.ui.form.on('Payment Request Form', {
 		frm.events._fetch_outstanding(frm, "Purchase Order");
 	},
 	get_expense_claim: function(frm) {
-		frm.events._fetch_outstanding(frm, "Expense Claim");
+		// Fetch both Expense Claims and Employee Advances for employees
+		frm.clear_table("payment_references");
+
+		if(!frm.doc.party) {
+			return;
+		}
+
+		var args = {
+			"posting_date": frm.doc.posting_date,
+			"company": frm.doc.company,
+			"party": frm.doc.party,
+			"party_type": frm.doc.party_type,
+			"reference_doctype": "Employee Documents"  // Special flag to get both
+		};
+
+		return frappe.call({
+			method: 'avientek.avientek.doctype.payment_request_form.payment_request_form.get_outstanding_reference_documents',
+			args: {
+				args: args
+			},
+			callback: function(r) {
+				if(r.message) {
+					$.each(r.message, function(i, d) {
+						let c = frm.add_child("payment_references");
+						c.reference_doctype = d.voucher_type;
+						c.reference_name = d.voucher_no;
+						c.bill_no = d.bill_no;
+						c.due_date = d.due_date;
+						c.invoice_date = d.posting_date;
+						c.grand_total = d.grand_total;
+						c.base_grand_total = d.base_grand_total;
+						c.outstanding_amount = d.outstanding;
+						c.base_outstanding_amount = d.base_outstanding;
+						c.exchange_rate = d.exchange_rate;
+						c.currency = d.currency;
+						c.document_reference = d.document_reference;
+						c.is_return = d.is_return || 0;
+						c.return_against = d.return_against || "";
+					});
+					frm.refresh_fields();
+					frm.events.recalculate_totals(frm);
+					frm.events.apply_debit_note_styling(frm);
+				}
+			}
+		});
 	},
 	get_sales_invoice: function(frm) {
 		frm.events._fetch_outstanding(frm, "Sales Invoice");
@@ -540,6 +584,140 @@ frappe.ui.form.on('Payment Request Form', {
                     }
                 }
             });
+        }
+    },
+
+    // Internal Transfer: Auto-update receiving amount when issued amount changes
+    issued_amount: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.issued_amount) {
+            frm.events.calculate_transfer_amounts(frm, 'issued');
+        }
+    },
+
+    // Internal Transfer: Auto-update issued amount when receiving amount changes
+    receiving_amount: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.receiving_amount) {
+            // Only calculate if user manually changed receiving amount (not from issued calculation)
+            if (!frm._calculating_from_issued) {
+                frm.events.calculate_transfer_amounts(frm, 'receiving');
+            }
+        }
+    },
+
+    // Calculate transfer amounts based on currency exchange rates
+    calculate_transfer_amounts: function(frm, source) {
+        let issued_currency = frm.doc.issued_currency;
+        let receiving_currency = frm.doc.receiving_currency;
+
+        if (!issued_currency || !receiving_currency) return;
+
+        // If same currency, amounts are equal
+        if (issued_currency === receiving_currency) {
+            frm.set_value('transfer_exchange_rate', 1);
+            if (source === 'issued') {
+                frm._calculating_from_issued = true;
+                frm.set_value('receiving_amount', frm.doc.issued_amount);
+                frm._calculating_from_issued = false;
+            } else {
+                frm.set_value('issued_amount', frm.doc.receiving_amount);
+            }
+            return;
+        }
+
+        // Use existing exchange rate if set and valid (not 1 for different currencies)
+        let rate = flt(frm.doc.transfer_exchange_rate);
+
+        if (rate && rate > 0 && rate !== 1) {
+            // Use existing rate for calculation
+            if (source === 'issued' && frm.doc.issued_amount) {
+                frm._calculating_from_issued = true;
+                frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
+                frm._calculating_from_issued = false;
+            } else if (source === 'receiving' && frm.doc.receiving_amount) {
+                frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
+            }
+        } else {
+            // Fetch exchange rate
+            frm.events.fetch_transfer_exchange_rate(frm, source);
+        }
+    },
+
+    // Fetch exchange rate from system
+    fetch_transfer_exchange_rate: function(frm, source) {
+        let issued_currency = frm.doc.issued_currency;
+        let receiving_currency = frm.doc.receiving_currency;
+
+        if (!issued_currency || !receiving_currency || issued_currency === receiving_currency) return;
+
+        frappe.call({
+            method: 'erpnext.setup.utils.get_exchange_rate',
+            args: {
+                from_currency: issued_currency,
+                to_currency: receiving_currency,
+                transaction_date: frm.doc.posting_date || frappe.datetime.now_date()
+            },
+            callback: function(r) {
+                if (r.message) {
+                    let rate = flt(r.message);
+
+                    // If rate is 1 for different currencies, it means no rate found - show message
+                    if (rate === 1 && issued_currency !== receiving_currency) {
+                        frappe.msgprint({
+                            title: __('Exchange Rate'),
+                            message: __('No exchange rate found for {0} to {1}. Please enter the rate manually.', [issued_currency, receiving_currency]),
+                            indicator: 'orange'
+                        });
+                        frm.set_value('transfer_exchange_rate', 0);
+                        return;
+                    }
+
+                    frm.set_value('transfer_exchange_rate', rate);
+
+                    // Calculate amounts
+                    if (source === 'issued' && frm.doc.issued_amount) {
+                        frm._calculating_from_issued = true;
+                        frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
+                        frm._calculating_from_issued = false;
+                    } else if (source === 'receiving' && frm.doc.receiving_amount) {
+                        frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
+                    }
+                }
+            }
+        });
+    },
+
+    // Recalculate when exchange rate is manually changed
+    transfer_exchange_rate: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.transfer_exchange_rate) {
+            let rate = flt(frm.doc.transfer_exchange_rate);
+            if (rate > 0 && frm.doc.issued_amount) {
+                frm._calculating_from_issued = true;
+                frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
+                frm._calculating_from_issued = false;
+            }
+        }
+    },
+
+    // Recalculate when currencies change
+    issued_currency: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer") {
+            // Reset exchange rate when currency changes
+            frm.set_value('transfer_exchange_rate', 0);
+            frm.set_value('receiving_amount', 0);
+            if (frm.doc.issued_amount && frm.doc.receiving_currency) {
+                frm.events.fetch_transfer_exchange_rate(frm, 'issued');
+            }
+        }
+    },
+
+    receiving_currency: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer") {
+            // Reset exchange rate when currency changes
+            frm.set_value('transfer_exchange_rate', 0);
+            frm.set_value('receiving_amount', 0);
+            if (frm.doc.issued_amount && frm.doc.issued_currency) {
+                frm.events.fetch_transfer_exchange_rate(frm, 'issued');
+            }
         }
     }
 });

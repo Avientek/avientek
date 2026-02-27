@@ -34,6 +34,8 @@
   "account",
   "account_no",
   "issued_currency",
+  "issued_amount",
+  "transfer_exchange_rate",
   "column_break_dike",
   "payment_mode",
   "cheque_date",
@@ -42,6 +44,7 @@
   "receiving_account",
   "receving_account_no",
   "receiving_currency",
+  "receiving_amount",
   "currency_section",
   "currency",
   "column_break_wnxv",
@@ -159,7 +162,7 @@
    "depends_on": "eval:doc.docstatus==0 && doc.party && doc.party_type=='Employee'",
    "fieldname": "get_expense_claim",
    "fieldtype": "Button",
-   "label": "Get Expense Claim"
+   "label": "Get Employee Documents"
   },
   {
    "depends_on": "eval:doc.docstatus==0 && doc.party && doc.party_type=='Customer'",
@@ -274,6 +277,7 @@
    "label": "Exchange Rate\t"
   },
   {
+   "depends_on": "eval:doc.payment_type!=\"Internal Transfer\"",
    "fieldname": "section_break_mnon",
    "fieldtype": "Section Break",
    "label": "Currency Totals"
@@ -436,11 +440,33 @@
    "options": "Currency"
   },
   {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\" && doc.issued_currency",
+   "fieldname": "issued_amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "issued_currency"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\" && doc.issued_currency && doc.receiving_currency && doc.issued_currency != doc.receiving_currency",
+   "fieldname": "transfer_exchange_rate",
+   "fieldtype": "Float",
+   "label": "Exchange Rate",
+   "precision": "6",
+   "description": "Rate: 1 Issued Currency = X Receiving Currency"
+  },
+  {
    "depends_on": "eval:doc.payment_type==\"Internal Transfer\"&& doc.receiving_account\r\n",
    "fieldname": "receiving_currency",
    "fieldtype": "Link",
    "label": "Currency",
    "options": "Currency"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\" && doc.receiving_currency",
+   "fieldname": "receiving_amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "receiving_currency"
   },
   {
    "fieldname": "connections_tab",
