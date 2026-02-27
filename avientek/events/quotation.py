@@ -653,12 +653,13 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
     )
 
     if not ip and company:
-        # No Item Price for this company — signal to client
-        result["no_price_for_company"] = True
-        result["item_code"] = item_code
-        result["company"] = company
-        result["price_list"] = price_list
-        return result
+        # Only warn when "Item Price Variation in Quotation" is enabled in Avientek Settings
+        if frappe.db.get_single_value("Avientek Settings", "item_price_variation_in_quotation"):
+            result["no_price_for_company"] = True
+            result["item_code"] = item_code
+            result["company"] = company
+            result["price_list"] = price_list
+            return result
 
     if ip:
         std_price = flt(ip.price_list_rate)
