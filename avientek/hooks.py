@@ -332,6 +332,9 @@ doc_events = {
             "avientek.events.quotation.calculate_additional_discount_percentage",
         ]
     },
+    "Purchase Receipt": {
+        "before_submit": "avientek.events.purchase_receipt.validate_po_workflow_state",
+    },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
     "Comment": {"after_insert": "avientek.events.comment.after_insert"},
 }

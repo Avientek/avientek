@@ -1077,6 +1077,7 @@ function show_update_special_price_dialog(frm) {
         custom_special_price_note: row.custom_special_price_note || "",
         custom_special_rate: row.custom_special_rate,
         custom_selling_price: row.custom_selling_price,
+        custom_margin_: row.custom_margin_,
     }));
 
     let fields = [
@@ -1093,8 +1094,9 @@ function show_update_special_price_dialog(frm) {
                 { fieldname: "item_code", fieldtype: "Data", label: __("Item Code"), in_list_view: 1, read_only: 1, columns: 2 },
                 { fieldname: "qty", fieldtype: "Float", label: __("Qty"), in_list_view: 1, read_only: 1, columns: 1 },
                 { fieldname: "custom_special_price", fieldtype: "Currency", label: __("Special Price"), in_list_view: 1, columns: 2 },
-                { fieldname: "custom_special_price_note", fieldtype: "Data", label: __("Special Price Note"), in_list_view: 1, columns: 3 },
+                { fieldname: "custom_special_price_note", fieldtype: "Data", label: __("Special Price Note"), in_list_view: 1, columns: 2 },
                 { fieldname: "custom_special_rate", fieldtype: "Currency", label: __("Selling Price"), in_list_view: 1, read_only: 1, columns: 2 },
+                { fieldname: "custom_margin_", fieldtype: "Percent", label: __("Margin %"), in_list_view: 1, read_only: 1, columns: 1 },
             ]
         }
     ];
@@ -1131,4 +1133,6 @@ function show_update_special_price_dialog(frm) {
     });
 
     d.show();
+    // Widen dialog beyond extra-large default for better table readability
+    d.$wrapper.find(".modal-dialog").css("max-width", "1100px");
 }
