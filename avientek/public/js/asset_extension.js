@@ -1,5 +1,7 @@
 frappe.ui.form.on("Asset", {
 	refresh(frm) {
+		_set_dam_indicator(frm);
+
 		if (!frm.doc.custom_is_demo_asset || frm.is_new()) return;
 
 		const status = frm.doc.custom_dam_status || "Free";
@@ -28,4 +30,20 @@ frappe.ui.form.on("Asset", {
 			frappe.set_route("List", "Demo Movement", { asset: frm.doc.name });
 		}, __("Demo"));
 	},
+
+	custom_is_demo_asset(frm) {
+		_set_dam_indicator(frm);
+	},
 });
+
+function _set_dam_indicator(frm) {
+	if (!frm.doc.custom_is_demo_asset) return;
+
+	const color_map = {
+		"Free": "green",
+		"On Demo": "orange",
+		"Issued as Standby": "blue",
+	};
+	const status = frm.doc.custom_dam_status || "Free";
+	frm.page.set_indicator(__(status), color_map[status] || "gray");
+}
