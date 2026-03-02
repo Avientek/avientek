@@ -95,6 +95,9 @@ def _get_customer_credit_documents(args):
     """Fetch Credit Notes (return Sales Invoices) and credit Journal Entries for a customer."""
     from frappe.utils import flt
 
+    if not args.get("party") or not args.get("company"):
+        return []
+
     company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
     rows = []
 
@@ -238,6 +241,9 @@ def _get_outstanding_employee_advances(args):
     """Fetch outstanding Employee Advances for an employee (advances that need to be paid to the employee)."""
     from frappe.utils import flt
 
+    if not args.get("party") or not args.get("company"):
+        return []
+
     company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
 
     # Get Employee Advances that are unpaid or partially paid
@@ -291,6 +297,9 @@ def _get_outstanding_expense_claims(args):
     """Fetch outstanding Expense Claims for an employee."""
     from frappe.utils import flt
 
+    if not args.get("party") or not args.get("company"):
+        return []
+
     company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
 
     claims = frappe.get_all(
@@ -339,13 +348,17 @@ def get_outstanding_reference_documents(args):
     if isinstance(args, str):
         args = json.loads(args)
 
+    # Early return if required fields are missing
+    if not args.get("party") or not args.get("company"):
+        return []
+
     if args.get("party_type") == "Supplier":
         supplier_status = get_supplier_block_status(args["party"])
-        if supplier_status["on_hold"]:
-            if supplier_status["hold_type"] == "All":
+        if supplier_status and supplier_status.get("on_hold"):
+            if supplier_status.get("hold_type") == "All":
                 return []
-            elif supplier_status["hold_type"] == "Payments":
-                if not supplier_status["release_date"] or getdate(nowdate()) <= supplier_status["release_date"]:
+            elif supplier_status.get("hold_type") == "Payments":
+                if not supplier_status.get("release_date") or getdate(nowdate()) <= supplier_status.get("release_date"):
                     return []
 
     # Expense Claims don't use Payment Ledger Entry - handle separately
