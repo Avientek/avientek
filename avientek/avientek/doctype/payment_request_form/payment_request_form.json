@@ -86,7 +86,10 @@
   "account_number",
   "bank",
   "swift_code",
-  "connections_tab"
+  "connections_tab",
+  "total_outstanding_amount",
+  "total_payment_amount",
+  "column_break_mlnn"
  ],
  "fields": [
   {
@@ -465,11 +468,11 @@
   },
   {
    "depends_on": "eval:doc.payment_type==\"Internal Transfer\" && doc.issued_currency && doc.receiving_currency && doc.issued_currency != doc.receiving_currency",
+   "description": "Rate: 1 Issued Currency = X Receiving Currency",
    "fieldname": "transfer_exchange_rate",
    "fieldtype": "Float",
    "label": "Exchange Rate",
-   "precision": "6",
-   "description": "Rate: 1 Issued Currency = X Receiving Currency"
+   "precision": "6"
   },
   {
    "depends_on": "eval:doc.payment_type==\"Internal Transfer\"&& doc.receiving_account\r\n",
@@ -491,108 +494,115 @@
    "label": "Connections"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "tr_lc_details_section",
    "fieldtype": "Section Break",
-   "label": "TR/LC Details",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "TR/LC Details"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "tr_type",
    "fieldtype": "Select",
    "label": "Type of TR",
-   "options": "\nADV\nSight\nUsance",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "options": "\nADV\nSight\nDirect"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "port_of_loading",
    "fieldtype": "Data",
-   "label": "Port of Loading / Airport of Departure",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Port of Loading / Airport of Departure"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "port_of_discharge",
    "fieldtype": "Data",
-   "label": "Port of Discharge / Airport of Destination",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Port of Discharge / Airport of Destination"
   },
   {
    "fieldname": "column_break_trlc1",
    "fieldtype": "Column Break"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "coo_of_goods",
    "fieldtype": "Link",
    "label": "COO of Goods",
-   "options": "Country",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "options": "Country"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "mode_of_shipment",
    "fieldtype": "Select",
    "label": "Mode of Shipment",
-   "options": "\nAir\nSea\nAir/Sea",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "options": "\nAir\nSea\nAir/Sea"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "goods_description",
    "fieldtype": "Small Text",
-   "label": "Brief Description of Goods",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Brief Description of Goods"
   },
   {
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "tr_lc_documents_section",
    "fieldtype": "Section Break",
-   "label": "Documents",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Documents"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "has_proforma_invoice",
    "fieldtype": "Check",
-   "label": "Proforma Invoice",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Proforma Invoice"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "has_purchase_order",
    "fieldtype": "Check",
-   "label": "Purchase Order",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Purchase Order"
   },
   {
    "fieldname": "column_break_trlc2",
    "fieldtype": "Column Break"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
    "fieldname": "has_commercial_invoice",
    "fieldtype": "Check",
-   "label": "Commercial Invoice / Sales Invoice",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Commercial Invoice / Sales Invoice"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "description": "Not required for Local TR",
    "fieldname": "has_bl_awb",
    "fieldtype": "Check",
-   "label": "BL / AWB",
-   "description": "Not required for Local TR",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "BL / AWB"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "description": "For Local TR",
    "fieldname": "has_delivery_note",
    "fieldtype": "Check",
-   "label": "Delivery Note",
-   "description": "For Local TR",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Delivery Note"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "description": "Not required for Local TR",
    "fieldname": "has_bill_of_entry",
    "fieldtype": "Check",
-   "label": "Bill of Entry",
-   "description": "Not required for Local TR",
-   "depends_on": "eval:doc.is_tr_lc_payment"
+   "label": "Bill of Entry"
   },
   {
+   "default": "0",
    "fieldname": "is_tr_lc_payment",
    "fieldtype": "Check",
-   "label": "Is TR/LC Payment",
    "hidden": 1,
+   "label": "Is TR/LC Payment",
    "read_only": 1
   }
  ],
@@ -608,8 +618,8 @@
    "link_fieldname": "custom_payment_request_form"
   }
  ],
- "modified": "2026-02-18 10:51:57.383243",
- "modified_by": "Administrator",
+ "modified": "2026-03-02 11:51:39.600392",
+ "modified_by": "support@quarkcs.com",
  "module": "Avientek",
  "name": "Payment Request Form",
  "naming_rule": "By \"Naming Series\" field",

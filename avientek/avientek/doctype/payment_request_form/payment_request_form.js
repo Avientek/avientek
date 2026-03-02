@@ -99,6 +99,11 @@ frappe.ui.form.on('Payment Request Form', {
         // Update Type options based on party_type
         frm.events.update_reference_type_options(frm);
 
+        // Set TR/LC document checkboxes based on TR Type (and make them read-only)
+        if (frm.doc.is_tr_lc_payment) {
+            frm.events.set_tr_document_checkboxes(frm);
+        }
+
         // Render currency totals table
         frm.events.recalculate_totals(frm);
 
@@ -568,6 +573,44 @@ frappe.ui.form.on('Payment Request Form', {
         } else {
             frm.set_value("is_tr_lc_payment", 0);
         }
+    },
+
+    // Auto-enable document checkboxes based on TR Type selection
+    tr_type: function(frm) {
+        frm.events.set_tr_document_checkboxes(frm);
+    },
+
+    // Set TR/LC document checkboxes based on TR Type
+    set_tr_document_checkboxes: function(frm) {
+        let tr_type = frm.doc.tr_type;
+
+        // Reset all checkboxes first
+        frm.set_value("has_proforma_invoice", 0);
+        frm.set_value("has_purchase_order", 0);
+        frm.set_value("has_commercial_invoice", 0);
+        frm.set_value("has_bl_awb", 0);
+        frm.set_value("has_delivery_note", 0);
+        frm.set_value("has_bill_of_entry", 0);
+
+        if (tr_type === "ADV") {
+            // ADV: Enable Proforma Invoice and Purchase Order
+            frm.set_value("has_proforma_invoice", 1);
+            frm.set_value("has_purchase_order", 1);
+        } else if (tr_type === "Direct") {
+            // Direct: Enable Commercial Invoice, BL/AWB, Delivery Note, Bill of Entry
+            frm.set_value("has_commercial_invoice", 1);
+            frm.set_value("has_bl_awb", 1);
+            frm.set_value("has_delivery_note", 1);
+            frm.set_value("has_bill_of_entry", 1);
+        }
+
+        // Make all document checkboxes read-only (user never change)
+        frm.set_df_property("has_proforma_invoice", "read_only", 1);
+        frm.set_df_property("has_purchase_order", "read_only", 1);
+        frm.set_df_property("has_commercial_invoice", "read_only", 1);
+        frm.set_df_property("has_bl_awb", "read_only", 1);
+        frm.set_df_property("has_delivery_note", "read_only", 1);
+        frm.set_df_property("has_bill_of_entry", "read_only", 1);
     },
 
     issued_bank : function(frm) {
