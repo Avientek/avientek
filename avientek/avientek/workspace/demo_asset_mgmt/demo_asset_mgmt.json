@@ -1,6 +1,6 @@
 {
  "charts": [],
- "content": "[{\"id\":\"dam_header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Demo Asset Management</b></span>\",\"col\":12}},{\"id\":\"dam_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"DAM Dashboard\",\"col\":4}},{\"id\":\"dam_sc2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Demo Assets\",\"col\":4}},{\"id\":\"dam_sc3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Demo Movements\",\"col\":4}},{\"id\":\"dam_spacer1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"dam_nc1\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Demo Assets\",\"col\":4}},{\"id\":\"dam_nc2\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Out for Demo\",\"col\":4}},{\"id\":\"dam_nc3\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Free Demo Assets\",\"col\":4}}]",
+ "content": "[{\"id\":\"dam_header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Demo Asset Management</b></span>\",\"col\":12}},{\"id\":\"dam_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"DAM Dashboard\",\"col\":3}},{\"id\":\"dam_sc2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Demo Assets\",\"col\":3}},{\"id\":\"dam_sc3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Demo Movements\",\"col\":3}},{\"id\":\"dam_sc4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Items Out for Demo\",\"col\":3}},{\"id\":\"dam_spacer1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"dam_nc1\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Demo Assets\",\"col\":4}},{\"id\":\"dam_nc2\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Out for Demo\",\"col\":4}},{\"id\":\"dam_nc3\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Free Demo Assets\",\"col\":4}}]",
  "creation": "2026-03-02 00:00:00",
  "custom_blocks": [],
  "docstatus": 0,
@@ -13,7 +13,7 @@
  "is_hidden": 0,
  "label": "Demo Asset Mgmt",
  "links": [],
- "modified": "2026-03-02 15:53:53.546332",
+ "modified": "2026-03-02 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Demo Asset Mgmt",
@@ -58,10 +58,10 @@
    "type": "DocType"
   },
   {
-   "color": "Blue",
+   "color": "Purple",
    "label": "Items Out for Demo",
-   "link_to": "Demo Asset",
-   "type": "DocType"
+   "link_to": "Items Out for Demo",
+   "type": "Report"
   }
  ],
  "title": "Demo Asset Mgmt"
