@@ -20,31 +20,29 @@ class DemoMovement(Document):
 		elif self.movement_type == "Return":
 			self._record_return()
 		elif self.movement_type == "Internal Transfer":
-			self._set_asset_status("Free", self.current_location or "")
+			self._set_asset_status("Free", "")
 
 	def on_cancel(self):
-		# Revert asset status to Free on cancellation
 		self._set_asset_status("Free", "")
 		if self.movement_type == "Return":
-			# Re-open the previous move-out movement
 			self._reopen_previous_movement()
 
-	def _set_asset_status(self, status, location):
-		frappe.db.set_value("Demo Asset", self.demo_asset, {
-			"status": status,
-			"current_location": location,
+	def _set_asset_status(self, status, customer):
+		frappe.db.set_value("Asset", self.asset, {
+			"custom_dam_status": status,
+			"custom_dam_customer": customer,
 		})
 		frappe.db.commit()
 
 	def _record_return(self):
-		frappe.db.set_value("Demo Asset", self.demo_asset, {
-			"status": "Free",
-			"current_location": "Main Warehouse",
+		frappe.db.set_value("Asset", self.asset, {
+			"custom_dam_status": "Free",
+			"custom_dam_customer": "",
 		})
 
 		# Close the matching open Move Out movement
 		open_move = frappe.db.get_value("Demo Movement", {
-			"demo_asset": self.demo_asset,
+			"asset": self.asset,
 			"movement_type": "Move Out",
 			"status": ["in", ["Open", "Overdue"]],
 			"docstatus": 1,
@@ -59,7 +57,7 @@ class DemoMovement(Document):
 	def _reopen_previous_movement(self):
 		"""On cancel of Return, revert the matched move-out back to Open/Overdue."""
 		prev = frappe.db.get_value("Demo Movement", {
-			"demo_asset": self.demo_asset,
+			"asset": self.asset,
 			"movement_type": "Move Out",
 			"status": "Returned",
 			"docstatus": 1,

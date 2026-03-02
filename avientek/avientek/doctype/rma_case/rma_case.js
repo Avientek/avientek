@@ -3,22 +3,28 @@ frappe.ui.form.on("RMA Case", {
 	refresh(frm) {
 		frm.trigger("set_status_indicator");
 		frm.trigger("add_action_buttons");
+
+		// Filter asset field to demo assets only
+		frm.set_query("demo_asset", () => ({
+			filters: { custom_is_demo_asset: 1 },
+		}));
+		frm.set_query("standby_unit", () => ({
+			filters: { custom_is_demo_asset: 1, custom_dam_status: "Free" },
+		}));
 	},
 
 	demo_asset(frm) {
 		if (!frm.doc.demo_asset) return;
-		frappe.db.get_value("Demo Asset", frm.doc.demo_asset, [
-			"serial_number", "gross_asset_value", "accumulated_depreciation",
-			"net_asset_value", "asset_currency", "company",
+		frappe.db.get_value("Asset", frm.doc.demo_asset, [
+			"asset_serial_no", "gross_purchase_amount", "asset_value", "company",
 		], (r) => {
 			if (!r) return;
-			if (r.serial_number && !frm.doc.asset_serial_number) {
-				frm.set_value("asset_serial_number", r.serial_number);
+			if (r.asset_serial_no && !frm.doc.asset_serial_number) {
+				frm.set_value("asset_serial_number", r.asset_serial_no);
 			}
-			frm.set_value("gross_asset_value", r.gross_asset_value || 0);
-			frm.set_value("accumulated_depreciation", r.accumulated_depreciation || 0);
-			frm.set_value("net_asset_value", r.net_asset_value || 0);
-			frm.set_value("asset_currency", r.asset_currency);
+			frm.set_value("gross_asset_value", r.gross_purchase_amount || 0);
+			frm.set_value("net_asset_value", r.asset_value || 0);
+			frm.set_value("accumulated_depreciation", (r.gross_purchase_amount || 0) - (r.asset_value || 0));
 			if (r.company && !frm.doc.company) {
 				frm.set_value("company", r.company);
 			}
@@ -57,14 +63,14 @@ frappe.ui.form.on("RMA Case", {
 		if (frm.doc.status === "In Progress" && !frm.doc.standby_unit) {
 			frm.add_custom_button(__("Issue Standby Unit"), () => {
 				frappe.prompt({
-					fieldname: "demo_asset",
+					fieldname: "standby_asset",
 					fieldtype: "Link",
-					options: "Demo Asset",
-					label: __("Demo Asset (Free unit to issue as standby)"),
-					get_query: () => ({ filters: { status: "Free" } }),
+					options: "Asset",
+					label: __("Asset (Free demo unit to issue as standby)"),
+					get_query: () => ({ filters: { custom_is_demo_asset: 1, custom_dam_status: "Free" } }),
 					reqd: 1,
 				}, (values) => {
-					frm.set_value("standby_unit", values.demo_asset);
+					frm.set_value("standby_unit", values.standby_asset);
 					frm.save();
 					frappe.show_alert({ message: __("Standby unit assigned"), indicator: "green" });
 				}, __("Issue Standby Unit"), __("Assign"));
@@ -133,7 +139,7 @@ frappe.ui.form.on("RMA Case", {
 		// View related Demo Movements
 		if (frm.doc.demo_asset) {
 			frm.add_custom_button(__("Demo Movements"), () => {
-				frappe.set_route("List", "Demo Movement", { demo_asset: frm.doc.demo_asset });
+				frappe.set_route("List", "Demo Movement", { asset: frm.doc.demo_asset });
 			}, __("View"));
 		}
 	},

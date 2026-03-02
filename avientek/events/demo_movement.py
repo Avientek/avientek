@@ -4,37 +4,37 @@ from frappe.utils import today, add_days, date_diff, getdate
 
 
 def on_submit(doc, method=None):
-	"""Update Demo Asset status when a Demo Movement is submitted."""
+	"""Update Asset custom DAM status when a Demo Movement is submitted."""
 	if doc.movement_type == "Move Out":
-		_set_asset_status(doc.demo_asset, "On Demo", doc.customer)
+		_set_asset_status(doc.asset, "On Demo", doc.customer)
 	elif doc.movement_type == "Return":
 		_record_return(doc)
 	elif doc.movement_type == "Internal Transfer":
-		_set_asset_status(doc.demo_asset, "Free", doc.current_location or "")
+		_set_asset_status(doc.asset, "Free", "")
 
 
 def on_cancel(doc, method=None):
-	"""Revert Demo Asset status when a Demo Movement is cancelled."""
+	"""Revert Asset custom DAM status when a Demo Movement is cancelled."""
 	if doc.movement_type == "Move Out":
-		_set_asset_status(doc.demo_asset, "Free", "")
+		_set_asset_status(doc.asset, "Free", "")
 	elif doc.movement_type == "Return":
-		_set_asset_status(doc.demo_asset, "On Demo", doc.customer or "")
+		_set_asset_status(doc.asset, "On Demo", doc.customer or "")
 		_reopen_previous_movement(doc)
 
 
-def _set_asset_status(demo_asset, status, location):
-	frappe.db.set_value("Demo Asset", demo_asset, {
-		"status": status,
-		"current_location": location,
+def _set_asset_status(asset, status, customer):
+	frappe.db.set_value("Asset", asset, {
+		"custom_dam_status": status,
+		"custom_dam_customer": customer,
 	})
 
 
 def _record_return(doc):
-	_set_asset_status(doc.demo_asset, "Free", "")
+	_set_asset_status(doc.asset, "Free", "")
 
 	# Close the matching open Move Out movement
 	open_move = frappe.db.get_value("Demo Movement", {
-		"demo_asset": doc.demo_asset,
+		"asset": doc.asset,
 		"movement_type": "Move Out",
 		"status": ["in", ["Open", "Overdue"]],
 		"docstatus": 1,
@@ -50,7 +50,7 @@ def _record_return(doc):
 
 def _reopen_previous_movement(doc):
 	prev = frappe.db.get_value("Demo Movement", {
-		"demo_asset": doc.demo_asset,
+		"asset": doc.asset,
 		"movement_type": "Move Out",
 		"status": "Returned",
 		"docstatus": 1,
@@ -77,12 +77,12 @@ def send_return_reminders():
 
 	open_movements = frappe.db.sql("""
 		SELECT
-			dm.name, dm.demo_asset, dm.customer, dm.expected_return_date,
+			dm.name, dm.asset, dm.customer, dm.expected_return_date,
 			dm.requested_salesperson, dm.movement_date,
-			da.brand, da.model, da.serial_number,
+			a.asset_name, a.asset_serial_no,
 			DATEDIFF(%(today)s, dm.expected_return_date) AS days_overdue
 		FROM `tabDemo Movement` dm
-		JOIN `tabDemo Asset` da ON da.name = dm.demo_asset
+		JOIN `tabAsset` a ON a.name = dm.asset
 		WHERE dm.movement_type = 'Move Out'
 		  AND dm.status IN ('Open', 'Overdue')
 		  AND dm.docstatus = 1
@@ -97,36 +97,36 @@ def send_return_reminders():
 		message = None
 
 		if days_overdue >= 7:
-			subject = _("ESCALATION: Demo Unit Overdue — {0} {1}").format(mv.brand, mv.model)
+			subject = _("ESCALATION: Demo Unit Overdue — {0}").format(mv.asset_name)
 			message = _(
-				"Demo unit <b>{brand} {model}</b> (S/N: {serial}) at <b>{customer}</b> "
+				"Demo unit <b>{asset_name}</b> (S/N: {serial}) at <b>{customer}</b> "
 				"is <b>{days} days overdue</b> for return.<br>"
 				"Movement: {name} | Expected Return: {exp}"
 			).format(
-				brand=mv.brand, model=mv.model, serial=mv.serial_number,
+				asset_name=mv.asset_name, serial=mv.asset_serial_no or "—",
 				customer=mv.customer, days=days_overdue,
 				name=mv.name, exp=mv.expected_return_date,
 			)
 			_send_reminder(mv, subject, message, escalate=True)
 
 		elif days_overdue == 0:
-			subject = _("Demo Unit Return Due Today — {0} {1}").format(mv.brand, mv.model)
+			subject = _("Demo Unit Return Due Today — {0}").format(mv.asset_name)
 			message = _(
-				"Demo unit <b>{brand} {model}</b> (S/N: {serial}) at <b>{customer}</b> "
+				"Demo unit <b>{asset_name}</b> (S/N: {serial}) at <b>{customer}</b> "
 				"is due for return <b>today</b>.<br>Movement: {name}"
 			).format(
-				brand=mv.brand, model=mv.model, serial=mv.serial_number,
+				asset_name=mv.asset_name, serial=mv.asset_serial_no or "—",
 				customer=mv.customer, name=mv.name,
 			)
 			_send_reminder(mv, subject, message)
 
 		elif mv.expected_return_date == remind_at:
-			subject = _("Demo Unit Return Due in 3 Days — {0} {1}").format(mv.brand, mv.model)
+			subject = _("Demo Unit Return Due in 3 Days — {0}").format(mv.asset_name)
 			message = _(
-				"Demo unit <b>{brand} {model}</b> (S/N: {serial}) at <b>{customer}</b> "
+				"Demo unit <b>{asset_name}</b> (S/N: {serial}) at <b>{customer}</b> "
 				"is due for return in <b>3 days</b> ({exp}).<br>Movement: {name}"
 			).format(
-				brand=mv.brand, model=mv.model, serial=mv.serial_number,
+				asset_name=mv.asset_name, serial=mv.asset_serial_no or "—",
 				customer=mv.customer, exp=mv.expected_return_date, name=mv.name,
 			)
 			_send_reminder(mv, subject, message)

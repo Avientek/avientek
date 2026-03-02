@@ -8,22 +8,26 @@ frappe.ui.form.on("Demo Movement", {
 				});
 			}, __("Print"));
 		}
+
+		// Restrict asset field to demo assets only
+		frm.set_query("asset", () => ({
+			filters: { custom_is_demo_asset: 1 },
+		}));
 	},
 
-	demo_asset(frm) {
-		if (!frm.doc.demo_asset) return;
-		frappe.db.get_value("Demo Asset", frm.doc.demo_asset, [
-			"serial_number", "company", "brand", "model", "part_number", "status"
+	asset(frm) {
+		if (!frm.doc.asset) return;
+		frappe.db.get_value("Asset", frm.doc.asset, [
+			"company", "custom_dam_status"
 		], (r) => {
 			if (!r) return;
-			frm.set_value("serial_number", r.serial_number);
 			frm.set_value("company", r.company);
 
 			// Warn if asset is not Free when moving out
-			if (frm.doc.movement_type === "Move Out" && r.status !== "Free") {
+			if (frm.doc.movement_type === "Move Out" && r.custom_dam_status && r.custom_dam_status !== "Free") {
 				frappe.msgprint({
 					title: __("Asset Not Available"),
-					message: __("This demo asset is currently <b>{0}</b>. Only Free assets can be moved out.", [r.status]),
+					message: __("This asset is currently <b>{0}</b>. Only Free assets can be moved out.", [r.custom_dam_status]),
 					indicator: "orange",
 				});
 			}

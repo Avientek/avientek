@@ -21,26 +21,20 @@ def get_columns():
 			"width": 160,
 		},
 		{
-			"fieldname": "demo_asset",
-			"label": _("Demo Asset"),
+			"fieldname": "asset",
+			"label": _("Asset"),
 			"fieldtype": "Link",
-			"options": "Demo Asset",
+			"options": "Asset",
 			"width": 150,
 		},
 		{
-			"fieldname": "brand",
-			"label": _("Brand"),
+			"fieldname": "asset_name",
+			"label": _("Asset Name"),
 			"fieldtype": "Data",
-			"width": 100,
+			"width": 180,
 		},
 		{
-			"fieldname": "model",
-			"label": _("Model"),
-			"fieldtype": "Data",
-			"width": 160,
-		},
-		{
-			"fieldname": "serial_number",
+			"fieldname": "serial_no",
 			"label": _("Serial No."),
 			"fieldtype": "Data",
 			"width": 140,
@@ -102,38 +96,27 @@ def get_columns():
 			"width": 160,
 		},
 		{
-			"fieldname": "gross_asset_value",
-			"label": _("Gross Value"),
+			"fieldname": "purchase_value",
+			"label": _("Purchase Value"),
 			"fieldtype": "Currency",
-			"options": "asset_currency",
-			"width": 120,
+			"width": 130,
 		},
 		{
-			"fieldname": "accumulated_depreciation",
-			"label": _("Depreciation"),
+			"fieldname": "current_value",
+			"label": _("Current Value (NAV)"),
 			"fieldtype": "Currency",
-			"options": "asset_currency",
-			"width": 120,
-		},
-		{
-			"fieldname": "net_asset_value",
-			"label": _("NAV"),
-			"fieldtype": "Currency",
-			"options": "asset_currency",
-			"width": 120,
-		},
-		{
-			"fieldname": "asset_currency",
-			"label": _("Currency"),
-			"fieldtype": "Link",
-			"options": "Currency",
-			"width": 80,
+			"width": 140,
 		},
 	]
 
 
 def get_data(filters):
-	conditions = ["dm.docstatus = 1", "dm.movement_type = 'Move Out'", "dm.status IN ('Open', 'Overdue')"]
+	conditions = [
+		"dm.docstatus = 1",
+		"dm.movement_type = 'Move Out'",
+		"dm.status IN ('Open', 'Overdue')",
+		"a.custom_is_demo_asset = 1",
+	]
 	values = {"today": today()}
 
 	if filters.get("company"):
@@ -160,11 +143,10 @@ def get_data(filters):
 
 	rows = frappe.db.sql(f"""
 		SELECT
-			dm.name              AS movement_name,
-			dm.demo_asset,
-			da.brand,
-			da.model,
-			da.serial_number,
+			dm.name                  AS movement_name,
+			dm.asset,
+			a.asset_name,
+			a.asset_serial_no        AS serial_no,
 			dm.customer,
 			dm.country,
 			dm.requested_salesperson,
@@ -172,10 +154,8 @@ def get_data(filters):
 			dm.expected_return_date,
 			dm.purpose,
 			dm.status,
-			da.gross_asset_value,
-			da.accumulated_depreciation,
-			da.net_asset_value,
-			da.asset_currency,
+			a.gross_purchase_amount  AS purchase_value,
+			a.asset_value            AS current_value,
 			DATEDIFF(%(today)s, dm.movement_date) AS days_out,
 			CASE
 				WHEN dm.expected_return_date IS NOT NULL AND dm.expected_return_date < %(today)s
@@ -183,7 +163,7 @@ def get_data(filters):
 				ELSE 0
 			END AS days_overdue
 		FROM `tabDemo Movement` dm
-		LEFT JOIN `tabDemo Asset` da ON da.name = dm.demo_asset
+		LEFT JOIN `tabAsset` a ON a.name = dm.asset
 		WHERE {where}
 		ORDER BY days_overdue DESC, dm.movement_date ASC
 	""", values, as_dict=True)
@@ -199,9 +179,7 @@ def get_data(filters):
 def get_summary(data):
 	total = len(data)
 	overdue = sum(1 for r in data if r.get("days_overdue") and r["days_overdue"] > 0)
-	total_nav = sum(flt(r.get("net_asset_value")) for r in data)
-
-	currency = data[0].get("asset_currency", "AED") if data else "AED"
+	total_nav = sum(flt(r.get("current_value")) for r in data)
 
 	return [
 		{
@@ -218,9 +196,8 @@ def get_summary(data):
 		},
 		{
 			"value": total_nav,
-			"label": _("Total NAV at Risk"),
+			"label": _("Total Current Value at Risk"),
 			"datatype": "Currency",
-			"currency": currency,
 			"indicator": "orange",
 		},
 	]

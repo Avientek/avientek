@@ -8,7 +8,7 @@
  "field_order": [
   "naming_series",
   "movement_type",
-  "demo_asset",
+  "asset",
   "serial_number",
   "company",
   "column_break_1",
@@ -52,10 +52,10 @@
    "bold": 1
   },
   {
-   "fieldname": "demo_asset",
+   "fieldname": "asset",
    "fieldtype": "Link",
-   "label": "Demo Asset",
-   "options": "Demo Asset",
+   "label": "Asset",
+   "options": "Asset",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "reqd": 1,
@@ -66,7 +66,7 @@
    "fieldtype": "Data",
    "label": "Serial Number",
    "read_only": 1,
-   "fetch_from": "demo_asset.serial_number",
+   "fetch_from": "asset.asset_serial_no",
    "in_list_view": 1
   },
   {
@@ -74,7 +74,7 @@
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company",
-   "fetch_from": "demo_asset.company",
+   "fetch_from": "asset.company",
    "reqd": 1,
    "remember_last_selected_value": 1
   },
@@ -267,7 +267,7 @@
   }
  ],
  "row_format": "Dynamic",
- "search_fields": "demo_asset,customer,movement_type,status",
+ "search_fields": "asset,customer,movement_type,status",
  "sort_field": "movement_date",
  "sort_order": "DESC",
  "states": [
@@ -275,6 +275,6 @@
   {"color": "Green", "title": "Returned"},
   {"color": "Red", "title": "Overdue"}
  ],
- "title_field": "demo_asset",
+ "title_field": "asset",
  "track_changes": 1
 }

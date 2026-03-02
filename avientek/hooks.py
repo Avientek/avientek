@@ -200,6 +200,7 @@ doctype_js = {
 	"Expense Claim": "public/js/expense_claim.js",
 	"Payment Entry": "public/js/payment_entry.js",
 	"Sales Invoice": "public/js/sales_invoice.js",
+	"Asset": "public/js/asset_extension.js",
 }
 doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
 	"Quotation": "public/js/quotation_list.js"

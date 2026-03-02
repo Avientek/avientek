@@ -164,9 +164,9 @@
   {
    "fieldname": "demo_asset",
    "fieldtype": "Link",
-   "label": "Demo Asset",
-   "options": "Demo Asset",
-   "description": "Link if the faulty unit is a registered Demo Asset",
+   "label": "Asset (Faulty Unit)",
+   "options": "Asset",
+   "description": "Link the faulty Asset record",
    "in_standard_filter": 1
   },
   {
@@ -204,8 +204,8 @@
    "fieldname": "standby_unit",
    "fieldtype": "Link",
    "label": "Standby Unit Issued",
-   "options": "Demo Asset",
-   "description": "Demo Asset issued as standby replacement while RMA in progress"
+   "options": "Asset",
+   "description": "Asset issued as standby replacement while RMA in progress"
   },
   {
    "fieldname": "section_fault",

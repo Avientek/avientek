@@ -31,7 +31,7 @@
  "sequence_id": 13.0,
  "shortcuts": [
   {"color": "Blue", "label": "DAM Dashboard", "link_to": "demo-asset-dashboard", "type": "Page"},
-  {"color": "Green", "label": "Demo Assets", "link_to": "Demo Asset", "type": "DocType"},
+  {"color": "Green", "label": "Demo Assets", "link_to": "Asset", "type": "DocType"},
   {"color": "Orange", "label": "Demo Movements", "link_to": "Demo Movement", "type": "DocType"},
   {"color": "Red", "label": "RMA Cases", "link_to": "RMA Case", "type": "DocType"},
   {"color": "Purple", "label": "Items Out for Demo", "link_to": "Items Out for Demo", "type": "Report"}

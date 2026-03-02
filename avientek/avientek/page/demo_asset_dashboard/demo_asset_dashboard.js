@@ -71,10 +71,10 @@ class DamDashboard {
 
 	render_stats(data) {
 		const cards = [
-			{ label: "Total Demo Assets", value: data.total || 0, color: "#2563EB", icon: "assets", route: ["List", "Demo Asset", {}] },
-			{ label: "Out for Demo", value: data.out_for_demo || 0, color: "#EA580C", icon: "arrow-up-right", route: ["List", "Demo Asset", { status: "On Demo" }] },
+			{ label: "Total Demo Assets", value: data.total || 0, color: "#2563EB", icon: "assets", route: ["List", "Asset", { custom_is_demo_asset: 1 }] },
+			{ label: "Out for Demo", value: data.out_for_demo || 0, color: "#EA580C", icon: "arrow-up-right", route: ["List", "Asset", { custom_dam_status: "On Demo" }] },
 			{ label: "Overdue", value: data.overdue || 0, color: "#DC2626", icon: "alert", route: ["demo-asset-dashboard"] },
-			{ label: "Free / Available", value: data.free || 0, color: "#059669", icon: "circle", route: ["List", "Demo Asset", { status: "Free" }] },
+			{ label: "Free / Available", value: data.free || 0, color: "#059669", icon: "circle", route: ["List", "Asset", { custom_dam_status: "Free", custom_is_demo_asset: 1 }] },
 			{ label: "Open RMA Cases", value: data.open_rma || 0, color: "#D97706", icon: "refresh", route: ["List", "RMA Case", {}] },
 		];
 
@@ -101,8 +101,8 @@ class DamDashboard {
 			return;
 		}
 		const names = overdue.slice(0, 3).map(o =>
-			`<a href="/app/demo-movement?demo_asset=${o.demo_asset}">
-				${o.brand} ${o.model} @ ${o.customer} (${o.days_overdue}d overdue)
+			`<a href="/app/demo-movement?asset=${o.asset}">
+				${o.asset_name} @ ${o.customer} (${o.days_overdue}d overdue)
 			</a>`
 		).join(" &middot; ");
 
@@ -134,13 +134,12 @@ class DamDashboard {
 
 		const rows = movements.map(m => {
 			const status_color = { Open: "orange", Returned: "green", Overdue: "red" }[m.status] || "gray";
-			const type_icon = m.movement_type === "Move Out" ? "↑" : m.movement_type === "Return" ? "↓" : "⇄";
 			return `
 			<tr class="dam-movement-row" onclick="frappe.set_route('Form','Demo Movement','${m.name}')"
 				style="cursor:pointer">
 				<td>
-					<div class="dam-asset-name">${m.brand || ""} ${m.model || ""}</div>
-					<div class="dam-asset-sub">${m.demo_asset}</div>
+					<div class="dam-asset-name">${m.asset_name || m.asset}</div>
+					<div class="dam-asset-sub">${m.asset}</div>
 				</td>
 				<td>${m.customer || "—"}</td>
 				<td>${frappe.datetime.str_to_user(m.movement_date) || "—"}</td>
@@ -172,8 +171,8 @@ class DamDashboard {
 		const actions = [
 			{ label: "New Demo Movement", icon: "↕", color: "#2563EB", action: () => frappe.new_doc("Demo Movement") },
 			{ label: "Open RMA Case", icon: "⟳", color: "#D97706", action: () => frappe.new_doc("RMA Case") },
-			{ label: "All Demo Assets", icon: "◆", color: "#059669", action: () => frappe.set_route("List", "Demo Asset", {}) },
-			{ label: "Items Out for Demo", icon: "↗", color: "#EA580C", action: () => frappe.set_route("List", "Demo Asset", { status: "On Demo" }) },
+			{ label: "All Demo Assets", icon: "◆", color: "#059669", action: () => frappe.set_route("List", "Asset", { custom_is_demo_asset: 1 }) },
+			{ label: "Items Out for Demo", icon: "↗", color: "#EA580C", action: () => frappe.set_route("List", "Asset", { custom_dam_status: "On Demo" }) },
 			{ label: "View Overdue", icon: "⚠", color: "#DC2626", action: () => frappe.set_route("List", "Demo Movement", { status: "Overdue" }) },
 		];
 

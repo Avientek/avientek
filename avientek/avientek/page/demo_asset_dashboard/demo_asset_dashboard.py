@@ -6,37 +6,46 @@ from frappe.utils import today, add_days, date_diff
 @frappe.whitelist()
 def get_dashboard_stats(company=None):
 	"""Return all stat card values for the DAM dashboard."""
-	filters = {}
-	if company:
-		filters["company"] = company
+	company_clause = "AND a.company = %(company)s" if company else ""
+	params = {"today": today(), "company": company}
 
-	total = frappe.db.count("Demo Asset", filters)
-	out_for_demo = frappe.db.count("Demo Asset", {**filters, "status": "On Demo"})
-	free = frappe.db.count("Demo Asset", {**filters, "status": "Free"})
-	standby = frappe.db.count("Demo Asset", {**filters, "status": "Issued as Standby"})
+	total = frappe.db.sql(f"""
+		SELECT COUNT(*) FROM `tabAsset` a
+		WHERE a.custom_is_demo_asset = 1 {company_clause}
+	""", params)[0][0]
 
-	# Overdue: On Demo AND expected_return_date < today
-	overdue_filters = {**filters, "status": "On Demo"}
-	company_clause = "AND da.company = %(company)s" if company else ""
-	overdue = frappe.db.sql("""
+	out_for_demo = frappe.db.sql(f"""
+		SELECT COUNT(*) FROM `tabAsset` a
+		WHERE a.custom_is_demo_asset = 1 AND a.custom_dam_status = 'On Demo' {company_clause}
+	""", params)[0][0]
+
+	free = frappe.db.sql(f"""
+		SELECT COUNT(*) FROM `tabAsset` a
+		WHERE a.custom_is_demo_asset = 1 AND a.custom_dam_status = 'Free' {company_clause}
+	""", params)[0][0]
+
+	standby = frappe.db.sql(f"""
+		SELECT COUNT(*) FROM `tabAsset` a
+		WHERE a.custom_is_demo_asset = 1 AND a.custom_dam_status = 'Issued as Standby' {company_clause}
+	""", params)[0][0]
+
+	overdue = frappe.db.sql(f"""
 		SELECT COUNT(*)
-		FROM `tabDemo Asset` da
-		INNER JOIN `tabDemo Movement` dm ON dm.demo_asset = da.name
-		WHERE da.status = 'On Demo'
+		FROM `tabAsset` a
+		INNER JOIN `tabDemo Movement` dm ON dm.asset = a.name
+		WHERE a.custom_is_demo_asset = 1
+		  AND a.custom_dam_status = 'On Demo'
 		  AND dm.movement_type = 'Move Out'
 		  AND dm.status = 'Open'
 		  AND dm.docstatus = 1
 		  AND dm.expected_return_date < %(today)s
 		  {company_clause}
-	""".format(company_clause=company_clause), {
-		"today": today(),
-		"company": company,
-	})[0][0]
+	""", params)[0][0]
 
 	open_rma = 0
 	if frappe.db.table_exists("RMA Case"):
 		rma_filters = {} if not company else {"company": company}
-		open_rma = frappe.db.count("RMA Case", {**rma_filters, "status": ["not in", ["Closed"]]})
+		open_rma = frappe.db.count("RMA Case", {**rma_filters, "status": ["not in", ["Closed", "Cancelled"]]})
 
 	return {
 		"total": total,
@@ -51,29 +60,29 @@ def get_dashboard_stats(company=None):
 @frappe.whitelist()
 def get_overdue_assets(company=None):
 	"""Return list of overdue demo assets (expected return date passed)."""
-	company_clause = "AND da.company = %(company)s" if company else ""
-	return frappe.db.sql("""
+	company_clause = "AND a.company = %(company)s" if company else ""
+	return frappe.db.sql(f"""
 		SELECT
-			da.name AS demo_asset,
-			da.brand,
-			da.model,
-			da.serial_number,
-			da.company,
+			a.name AS asset,
+			a.asset_name,
+			a.asset_serial_no,
+			a.company,
 			dm.customer,
 			dm.movement_date,
 			dm.expected_return_date,
 			dm.requested_salesperson,
 			DATEDIFF(%(today)s, dm.expected_return_date) AS days_overdue
-		FROM `tabDemo Asset` da
-		INNER JOIN `tabDemo Movement` dm ON dm.demo_asset = da.name
-		WHERE da.status = 'On Demo'
+		FROM `tabAsset` a
+		INNER JOIN `tabDemo Movement` dm ON dm.asset = a.name
+		WHERE a.custom_is_demo_asset = 1
+		  AND a.custom_dam_status = 'On Demo'
 		  AND dm.movement_type = 'Move Out'
 		  AND dm.status = 'Open'
 		  AND dm.docstatus = 1
 		  AND dm.expected_return_date < %(today)s
 		  {company_clause}
 		ORDER BY days_overdue DESC
-	""".format(company_clause=company_clause), {
+	""", {
 		"today": today(),
 		"company": company,
 	}, as_dict=True)
@@ -83,12 +92,12 @@ def get_overdue_assets(company=None):
 def get_recent_movements(company=None, limit=10):
 	"""Return recent demo movements for the dashboard table."""
 	company_clause = "AND dm.company = %(company)s" if company else ""
-	return frappe.db.sql("""
+	return frappe.db.sql(f"""
 		SELECT
 			dm.name,
-			dm.demo_asset,
-			da.brand,
-			da.model,
+			dm.asset,
+			a.asset_name,
+			a.asset_serial_no,
 			dm.customer,
 			dm.movement_date,
 			dm.expected_return_date,
@@ -96,12 +105,12 @@ def get_recent_movements(company=None, limit=10):
 			dm.status,
 			dm.requested_salesperson
 		FROM `tabDemo Movement` dm
-		LEFT JOIN `tabDemo Asset` da ON da.name = dm.demo_asset
+		LEFT JOIN `tabAsset` a ON a.name = dm.asset
 		WHERE dm.docstatus = 1
 		  {company_clause}
 		ORDER BY dm.movement_date DESC
 		LIMIT %(limit)s
-	""".format(company_clause=company_clause), {
+	""", {
 		"company": company,
 		"limit": int(limit),
 	}, as_dict=True)
@@ -110,16 +119,15 @@ def get_recent_movements(company=None, limit=10):
 @frappe.whitelist()
 def get_items_out_for_demo(company=None):
 	"""Return all assets currently out for demo with days outstanding."""
-	company_clause = "AND da.company = %(company)s" if company else ""
-	return frappe.db.sql("""
+	company_clause = "AND a.company = %(company)s" if company else ""
+	return frappe.db.sql(f"""
 		SELECT
-			da.name AS demo_asset,
-			da.brand,
-			da.model,
-			da.serial_number,
-			da.company,
-			da.net_asset_value,
-			da.asset_currency,
+			a.name AS asset,
+			a.asset_name,
+			a.asset_serial_no,
+			a.company,
+			a.gross_purchase_amount,
+			a.asset_value AS net_asset_value,
 			dm.name AS movement_name,
 			dm.customer,
 			dm.movement_date,
@@ -131,15 +139,16 @@ def get_items_out_for_demo(company=None):
 				WHEN dm.expected_return_date < %(today)s THEN 1
 				ELSE 0
 			END AS is_overdue
-		FROM `tabDemo Asset` da
-		INNER JOIN `tabDemo Movement` dm ON dm.demo_asset = da.name
-		WHERE da.status = 'On Demo'
+		FROM `tabAsset` a
+		INNER JOIN `tabDemo Movement` dm ON dm.asset = a.name
+		WHERE a.custom_is_demo_asset = 1
+		  AND a.custom_dam_status = 'On Demo'
 		  AND dm.movement_type = 'Move Out'
 		  AND dm.status IN ('Open', 'Overdue')
 		  AND dm.docstatus = 1
 		  {company_clause}
 		ORDER BY is_overdue DESC, days_outstanding DESC
-	""".format(company_clause=company_clause), {
+	""", {
 		"today": today(),
 		"company": company,
 	}, as_dict=True)
