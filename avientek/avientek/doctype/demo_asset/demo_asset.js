@@ -6,11 +6,10 @@ frappe.ui.form.on("Demo Asset", {
 
 	asset(frm) {
 		if (frm.doc.asset) {
-			// Auto-fill company and serial number from asset
-			frappe.db.get_value("Asset", frm.doc.asset, ["company", "serial_no", "asset_name"], (r) => {
+			// Auto-fill company from asset (serial number entered manually — not a direct Asset field)
+			frappe.db.get_value("Asset", frm.doc.asset, ["company", "asset_name"], (r) => {
 				if (r) {
 					frm.set_value("company", r.company);
-					if (r.serial_no) frm.set_value("serial_number", r.serial_no);
 				}
 			});
 		}
