@@ -231,7 +231,7 @@ class DamDashboard {
 					fieldname: "location",
 					fieldtype: "Link",
 					label: __("Location"),
-					options: "Asset Location",
+					options: "Location",
 					reqd: 1,
 				},
 				{ fieldname: "sec_break_1", fieldtype: "Section Break", label: __("Purchase Details") },
