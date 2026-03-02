@@ -34,12 +34,6 @@ def get_columns():
 			"width": 180,
 		},
 		{
-			"fieldname": "serial_no",
-			"label": _("Serial No."),
-			"fieldtype": "Data",
-			"width": 140,
-		},
-		{
 			"fieldname": "customer",
 			"label": _("Customer"),
 			"fieldtype": "Link",
@@ -146,7 +140,6 @@ def get_data(filters):
 			dm.name                  AS movement_name,
 			dm.asset,
 			a.asset_name,
-			a.asset_serial_no        AS serial_no,
 			dm.customer,
 			dm.country,
 			dm.requested_salesperson,

@@ -65,8 +65,7 @@
    "fieldname": "serial_number",
    "fieldtype": "Data",
    "label": "Serial Number",
-   "read_only": 1,
-   "fetch_from": "asset.asset_serial_no",
+   "read_only": 0,
    "in_list_view": 1
   },
   {

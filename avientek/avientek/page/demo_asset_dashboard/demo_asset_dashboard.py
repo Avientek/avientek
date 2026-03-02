@@ -65,7 +65,6 @@ def get_overdue_assets(company=None):
 		SELECT
 			a.name AS asset,
 			a.asset_name,
-			a.asset_serial_no,
 			a.company,
 			dm.customer,
 			dm.movement_date,
@@ -97,7 +96,6 @@ def get_recent_movements(company=None, limit=10):
 			dm.name,
 			dm.asset,
 			a.asset_name,
-			a.asset_serial_no,
 			dm.customer,
 			dm.movement_date,
 			dm.expected_return_date,
@@ -124,7 +122,6 @@ def get_items_out_for_demo(company=None):
 		SELECT
 			a.name AS asset,
 			a.asset_name,
-			a.asset_serial_no,
 			a.company,
 			a.gross_purchase_amount,
 			a.asset_value AS net_asset_value,

@@ -14,7 +14,7 @@ class RMACase(Document):
 		if not self.demo_asset:
 			return
 		a = frappe.db.get_value("Asset", self.demo_asset, [
-			"gross_purchase_amount", "asset_value", "asset_serial_no", "company",
+			"gross_purchase_amount", "asset_value", "company",
 		], as_dict=True)
 		if a:
 			self.gross_asset_value = flt(a.gross_purchase_amount)
@@ -24,8 +24,6 @@ class RMACase(Document):
 			if a.company:
 				currency = frappe.db.get_value("Company", a.company, "default_currency")
 				self.asset_currency = currency or "AED"
-			if not self.asset_serial_number and a.asset_serial_no:
-				self.asset_serial_number = a.asset_serial_no
 
 	def auto_close_date(self):
 		"""Set closed_date when status moves to Closed/Cancelled."""

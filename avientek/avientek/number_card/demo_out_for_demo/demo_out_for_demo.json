@@ -1,8 +1,8 @@
 {
  "creation": "2026-03-02 00:00:00.000000",
  "doctype": "Number Card",
- "document_type": "Demo Asset",
- "filters_json": "[{\"fieldname\":\"status\",\"filter_type\":\"==\",\"value\":\"On Demo\",\"label\":\"Status\"}]",
+ "document_type": "Asset",
+ "filters_json": "[{\"fieldname\":\"custom_is_demo_asset\",\"filter_type\":\"==\",\"value\":\"1\",\"label\":\"Is Demo Asset\"},{\"fieldname\":\"custom_dam_status\",\"filter_type\":\"==\",\"value\":\"On Demo\",\"label\":\"Demo Status\"}]",
  "function": "Count",
  "is_public": 1,
  "label": "Out for Demo",

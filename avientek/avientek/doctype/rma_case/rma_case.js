@@ -16,12 +16,9 @@ frappe.ui.form.on("RMA Case", {
 	demo_asset(frm) {
 		if (!frm.doc.demo_asset) return;
 		frappe.db.get_value("Asset", frm.doc.demo_asset, [
-			"asset_serial_no", "gross_purchase_amount", "asset_value", "company",
+			"gross_purchase_amount", "asset_value", "company",
 		], (r) => {
 			if (!r) return;
-			if (r.asset_serial_no && !frm.doc.asset_serial_number) {
-				frm.set_value("asset_serial_number", r.asset_serial_no);
-			}
 			frm.set_value("gross_asset_value", r.gross_purchase_amount || 0);
 			frm.set_value("net_asset_value", r.asset_value || 0);
 			frm.set_value("accumulated_depreciation", (r.gross_purchase_amount || 0) - (r.asset_value || 0));

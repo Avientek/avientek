@@ -79,7 +79,7 @@ def send_return_reminders():
 		SELECT
 			dm.name, dm.asset, dm.customer, dm.expected_return_date,
 			dm.requested_salesperson, dm.movement_date,
-			a.asset_name, a.asset_serial_no,
+			a.asset_name,
 			DATEDIFF(%(today)s, dm.expected_return_date) AS days_overdue
 		FROM `tabDemo Movement` dm
 		JOIN `tabAsset` a ON a.name = dm.asset
@@ -99,11 +99,11 @@ def send_return_reminders():
 		if days_overdue >= 7:
 			subject = _("ESCALATION: Demo Unit Overdue — {0}").format(mv.asset_name)
 			message = _(
-				"Demo unit <b>{asset_name}</b> (S/N: {serial}) at <b>{customer}</b> "
+				"Demo unit <b>{asset_name}</b> at <b>{customer}</b> "
 				"is <b>{days} days overdue</b> for return.<br>"
 				"Movement: {name} | Expected Return: {exp}"
 			).format(
-				asset_name=mv.asset_name, serial=mv.asset_serial_no or "—",
+				asset_name=mv.asset_name,
 				customer=mv.customer, days=days_overdue,
 				name=mv.name, exp=mv.expected_return_date,
 			)
@@ -112,10 +112,10 @@ def send_return_reminders():
 		elif days_overdue == 0:
 			subject = _("Demo Unit Return Due Today — {0}").format(mv.asset_name)
 			message = _(
-				"Demo unit <b>{asset_name}</b> (S/N: {serial}) at <b>{customer}</b> "
+				"Demo unit <b>{asset_name}</b> at <b>{customer}</b> "
 				"is due for return <b>today</b>.<br>Movement: {name}"
 			).format(
-				asset_name=mv.asset_name, serial=mv.asset_serial_no or "—",
+				asset_name=mv.asset_name,
 				customer=mv.customer, name=mv.name,
 			)
 			_send_reminder(mv, subject, message)
@@ -123,10 +123,10 @@ def send_return_reminders():
 		elif mv.expected_return_date == remind_at:
 			subject = _("Demo Unit Return Due in 3 Days — {0}").format(mv.asset_name)
 			message = _(
-				"Demo unit <b>{asset_name}</b> (S/N: {serial}) at <b>{customer}</b> "
+				"Demo unit <b>{asset_name}</b> at <b>{customer}</b> "
 				"is due for return in <b>3 days</b> ({exp}).<br>Movement: {name}"
 			).format(
-				asset_name=mv.asset_name, serial=mv.asset_serial_no or "—",
+				asset_name=mv.asset_name,
 				customer=mv.customer, exp=mv.expected_return_date, name=mv.name,
 			)
 			_send_reminder(mv, subject, message)

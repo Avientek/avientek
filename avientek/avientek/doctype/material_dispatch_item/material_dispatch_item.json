@@ -72,8 +72,8 @@
   {
    "fieldname": "demo_asset",
    "fieldtype": "Link",
-   "label": "Demo Asset",
-   "options": "Demo Asset",
+   "label": "Asset",
+   "options": "Asset",
    "description": "Link if dispatching a Demo Asset"
   },
   {
