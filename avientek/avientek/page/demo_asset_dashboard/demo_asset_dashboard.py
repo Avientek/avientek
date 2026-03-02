@@ -153,7 +153,8 @@ def get_items_out_for_demo(company=None):
 
 @frappe.whitelist()
 def create_demo_asset(item_code, asset_name, company, location, purchase_date,
-		warehouse, stock_item_code=None, qty=1, asset_category=None):
+		warehouse, stock_item_code=None, qty=1, asset_category=None,
+		serial_no=None, batch_no=None):
 	"""Create a Demo Asset via Asset Capitalization (consumes stock, creates Asset).
 	item_code       = target fixed-asset item (is_fixed_asset=1)
 	stock_item_code = inventory item to consume from warehouse (is_stock_item=1)
@@ -185,11 +186,18 @@ def create_demo_asset(item_code, asset_name, company, location, purchase_date,
 	cap.posting_date = purchase_date
 	cap.target_item_code = item_code
 	cap.target_asset_location = location
-	cap.append("stock_items", {
+	stock_row = {
 		"item_code": consumed_item,
 		"warehouse": warehouse,
 		"stock_qty": flt(qty),
-	})
+	}
+	if serial_no:
+		stock_row["use_serial_batch_fields"] = 1
+		stock_row["serial_no"] = serial_no
+	if batch_no:
+		stock_row["use_serial_batch_fields"] = 1
+		stock_row["batch_no"] = batch_no
+	cap.append("stock_items", stock_row)
 	cap.insert(ignore_permissions=True)
 	cap.submit()
 

@@ -264,6 +264,22 @@ class DamDashboard {
 						return company ? { filters: { company } } : {};
 					},
 				},
+				{
+					fieldname: "serial_no",
+					fieldtype: "Small Text",
+					label: __("Serial No"),
+					description: __("Required if item is serial-tracked (one per line)"),
+				},
+				{
+					fieldname: "batch_no",
+					fieldtype: "Link",
+					label: __("Batch No"),
+					options: "Batch",
+					get_query: () => {
+						const item = d.get_value("stock_item_code");
+						return item ? { filters: { item } } : {};
+					},
+				},
 				{ fieldname: "col_break_2", fieldtype: "Column Break" },
 				{
 					fieldname: "qty",
@@ -294,6 +310,8 @@ class DamDashboard {
 						purchase_date: values.posting_date,
 						warehouse: values.warehouse,
 						qty: values.qty || 1,
+						serial_no: values.serial_no || "",
+						batch_no: values.batch_no || "",
 					},
 					callback(r) {
 						if (r.message) {
