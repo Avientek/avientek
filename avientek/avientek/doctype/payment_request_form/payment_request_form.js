@@ -546,6 +546,30 @@ frappe.ui.form.on('Payment Request Form', {
 		});
 	},
 
+    // Check if selected Mode of Payment is TR or LC and show/hide TR/LC section
+    payment_mode: function(frm) {
+        if (frm.doc.payment_mode) {
+            frappe.call({
+                method: "frappe.client.get_value",
+                args: {
+                    doctype: "Mode of Payment",
+                    filters: { name: frm.doc.payment_mode },
+                    fieldname: ["custom_is_tr", "custom_is_lc"]
+                },
+                callback: function(r) {
+                    if (r.message) {
+                        let is_tr_lc = r.message.custom_is_tr || r.message.custom_is_lc;
+                        frm.set_value("is_tr_lc_payment", is_tr_lc ? 1 : 0);
+                    } else {
+                        frm.set_value("is_tr_lc_payment", 0);
+                    }
+                }
+            });
+        } else {
+            frm.set_value("is_tr_lc_payment", 0);
+        }
+    },
+
     issued_bank : function(frm) {
         if (frm.doc.issued_bank) {
             frappe.call({

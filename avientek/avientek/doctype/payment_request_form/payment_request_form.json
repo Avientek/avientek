@@ -38,6 +38,7 @@
   "transfer_exchange_rate",
   "column_break_dike",
   "payment_mode",
+  "is_tr_lc_payment",
   "cheque_date",
   "cheque_no",
   "receiving_bank",
@@ -49,6 +50,22 @@
   "currency",
   "column_break_wnxv",
   "conversion_rate",
+  "tr_lc_details_section",
+  "tr_type",
+  "port_of_loading",
+  "port_of_discharge",
+  "column_break_trlc1",
+  "coo_of_goods",
+  "mode_of_shipment",
+  "goods_description",
+  "tr_lc_documents_section",
+  "has_proforma_invoice",
+  "has_purchase_order",
+  "column_break_trlc2",
+  "has_commercial_invoice",
+  "has_bl_awb",
+  "has_delivery_note",
+  "has_bill_of_entry",
   "reference_section",
   "payment_references",
   "section_break_mnon",
@@ -472,6 +489,111 @@
    "fieldname": "connections_tab",
    "fieldtype": "Tab Break",
    "label": "Connections"
+  },
+  {
+   "fieldname": "tr_lc_details_section",
+   "fieldtype": "Section Break",
+   "label": "TR/LC Details",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "tr_type",
+   "fieldtype": "Select",
+   "label": "Type of TR",
+   "options": "\nADV\nSight\nUsance",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "port_of_loading",
+   "fieldtype": "Data",
+   "label": "Port of Loading / Airport of Departure",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "port_of_discharge",
+   "fieldtype": "Data",
+   "label": "Port of Discharge / Airport of Destination",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "column_break_trlc1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "coo_of_goods",
+   "fieldtype": "Link",
+   "label": "COO of Goods",
+   "options": "Country",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "mode_of_shipment",
+   "fieldtype": "Select",
+   "label": "Mode of Shipment",
+   "options": "\nAir\nSea\nAir/Sea",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "goods_description",
+   "fieldtype": "Small Text",
+   "label": "Brief Description of Goods",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "tr_lc_documents_section",
+   "fieldtype": "Section Break",
+   "label": "Documents",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "has_proforma_invoice",
+   "fieldtype": "Check",
+   "label": "Proforma Invoice",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "has_purchase_order",
+   "fieldtype": "Check",
+   "label": "Purchase Order",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "column_break_trlc2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "has_commercial_invoice",
+   "fieldtype": "Check",
+   "label": "Commercial Invoice / Sales Invoice",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "has_bl_awb",
+   "fieldtype": "Check",
+   "label": "BL / AWB",
+   "description": "Not required for Local TR",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "has_delivery_note",
+   "fieldtype": "Check",
+   "label": "Delivery Note",
+   "description": "For Local TR",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "has_bill_of_entry",
+   "fieldtype": "Check",
+   "label": "Bill of Entry",
+   "description": "Not required for Local TR",
+   "depends_on": "eval:doc.is_tr_lc_payment"
+  },
+  {
+   "fieldname": "is_tr_lc_payment",
+   "fieldtype": "Check",
+   "label": "Is TR/LC Payment",
+   "hidden": 1,
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,

@@ -1136,17 +1136,17 @@ def get_pdf_as_images(doctype, docname, max_pages=10):
             for page_num in range(num_pages):
                 page = pdf_document.load_page(page_num)
 
-                # Render page to image (2x resolution for better quality)
-                zoom = 2.0
+                # Render page to image (1.5x resolution - balanced quality/speed)
+                zoom = 1.5
                 mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat)
 
-                # Convert to PNG bytes
-                img_bytes = pix.tobytes("png")
+                # Convert to JPEG for faster loading (smaller size)
+                img_bytes = pix.tobytes("jpeg")
 
                 # Convert to base64
                 img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-                images.append(f"data:image/png;base64,{img_base64}")
+                images.append(f"data:image/jpeg;base64,{img_base64}")
 
             pdf_document.close()
 
@@ -1321,17 +1321,17 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10
         for page_num in range(num_pages):
             page = pdf_document.load_page(page_num)
 
-            # Render page to image (2x resolution for better quality)
-            zoom = 2.0
+            # Render page to image (1.5x resolution - balanced quality/speed)
+            zoom = 1.5
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat)
 
-            # Convert to PNG bytes
-            img_bytes = pix.tobytes("png")
+            # Convert to JPEG for faster loading (smaller size)
+            img_bytes = pix.tobytes("jpeg")
 
             # Convert to base64
             img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-            images.append(f"data:image/png;base64,{img_base64}")
+            images.append(f"data:image/jpeg;base64,{img_base64}")
 
         pdf_document.close()
 
@@ -1421,17 +1421,17 @@ def get_attachment_as_images(file_url, max_pages=10):
         for page_num in range(num_pages):
             page = pdf_document.load_page(page_num)
 
-            # Render page to image (2x resolution for better quality)
-            zoom = 2.0
+            # Render page to image (1.5x resolution - balanced quality/speed)
+            zoom = 1.5
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat)
 
-            # Convert to PNG bytes
-            img_bytes = pix.tobytes("png")
+            # Convert to JPEG for faster loading (smaller size)
+            img_bytes = pix.tobytes("jpeg")
 
             # Convert to base64
             img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-            images.append(f"data:image/png;base64,{img_base64}")
+            images.append(f"data:image/jpeg;base64,{img_base64}")
 
         pdf_document.close()
 
