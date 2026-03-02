@@ -197,19 +197,19 @@ class DamDashboard {
 			title: __("Quick Create Demo Asset"),
 			fields: [
 				{
-					fieldname: "item_code",
+					fieldname: "target_item_code",
 					fieldtype: "Link",
-					label: __("Item"),
+					label: __("Asset Item (Fixed Asset)"),
 					options: "Item",
 					reqd: 1,
+					description: __("The fixed asset item type (is_fixed_asset = 1)"),
+					get_query: () => ({ filters: { is_fixed_asset: 1 } }),
 					onchange: () => {
-						const item = d.get_value("item_code");
+						const item = d.get_value("target_item_code");
 						if (!item) return;
 						frappe.db.get_value("Item", item, ["item_name", "asset_category"], r => {
 							if (!r) return;
-							if (!d.get_value("asset_name") && r.item_name) {
-								d.set_value("asset_name", r.item_name);
-							}
+							if (!d.get_value("asset_name") && r.item_name) d.set_value("asset_name", r.item_name);
 							if (r.asset_category) d.set_value("asset_category", r.asset_category);
 						});
 					},
@@ -245,6 +245,15 @@ class DamDashboard {
 				},
 				{ fieldname: "sec_break_stock", fieldtype: "Section Break", label: __("Consumed Stock") },
 				{
+					fieldname: "stock_item_code",
+					fieldtype: "Link",
+					label: __("Stock Item (Inventory)"),
+					options: "Item",
+					reqd: 1,
+					description: __("The inventory item to consume from stock"),
+					get_query: () => ({ filters: { is_stock_item: 1 } }),
+				},
+				{
 					fieldname: "warehouse",
 					fieldtype: "Link",
 					label: __("Warehouse"),
@@ -255,6 +264,7 @@ class DamDashboard {
 						return company ? { filters: { company } } : {};
 					},
 				},
+				{ fieldname: "col_break_2", fieldtype: "Column Break" },
 				{
 					fieldname: "qty",
 					fieldtype: "Float",
@@ -275,7 +285,8 @@ class DamDashboard {
 				frappe.call({
 					method: "avientek.avientek.page.demo_asset_dashboard.demo_asset_dashboard.create_demo_asset",
 					args: {
-						item_code: values.item_code,
+						item_code: values.target_item_code,
+						stock_item_code: values.stock_item_code,
 						asset_name: values.asset_name,
 						asset_category: values.asset_category,
 						company: values.company,

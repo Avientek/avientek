@@ -153,17 +153,20 @@ def get_items_out_for_demo(company=None):
 
 @frappe.whitelist()
 def create_demo_asset(item_code, asset_name, company, location, purchase_date,
-		warehouse, qty=1, asset_category=None):
-	"""Create a Demo Asset via Asset Capitalization (consumes stock, creates Asset)."""
+		warehouse, stock_item_code=None, qty=1, asset_category=None):
+	"""Create a Demo Asset via Asset Capitalization (consumes stock, creates Asset).
+	item_code       = target fixed-asset item (is_fixed_asset=1)
+	stock_item_code = inventory item to consume from warehouse (is_stock_item=1)
+	"""
+	# Validate target (fixed asset) item
 	item = frappe.db.get_value("Item", item_code, ["asset_category", "item_name", "is_fixed_asset"], as_dict=True)
 	if not item:
-		frappe.throw(_("Item {0} not found").format(item_code))
+		frappe.throw(_("Target item {0} not found").format(item_code))
 
 	resolved_category = asset_category or item.asset_category
 	if not resolved_category:
 		frappe.throw(_("Asset Category is required. Please select one in the dialog."))
 
-	# Ensure item is marked as a fixed asset (required by Asset Capitalization)
 	if not item.is_fixed_asset:
 		frappe.db.set_value("Item", item_code, {
 			"is_fixed_asset": 1,
@@ -172,7 +175,10 @@ def create_demo_asset(item_code, asset_name, company, location, purchase_date,
 	elif not item.asset_category:
 		frappe.db.set_value("Item", item_code, "asset_category", resolved_category)
 
-	# Create and submit Asset Capitalization — this deducts stock and creates the Asset
+	# The consumed stock item — defaults to target item if not provided separately
+	consumed_item = stock_item_code or item_code
+
+	# Create and submit Asset Capitalization — deducts stock and creates the Asset
 	cap = frappe.new_doc("Asset Capitalization")
 	cap.capitalization_method = "Create a new composite asset"
 	cap.company = company
@@ -180,7 +186,7 @@ def create_demo_asset(item_code, asset_name, company, location, purchase_date,
 	cap.target_item_code = item_code
 	cap.target_asset_location = location
 	cap.append("stock_items", {
-		"item_code": item_code,
+		"item_code": consumed_item,
 		"warehouse": warehouse,
 		"stock_qty": flt(qty),
 	})
