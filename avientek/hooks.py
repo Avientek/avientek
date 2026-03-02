@@ -337,29 +337,21 @@ doc_events = {
     },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
     "Comment": {"after_insert": "avientek.events.comment.after_insert"},
+    "Demo Movement": {
+        "on_submit": "avientek.events.demo_movement.on_submit",
+        "on_cancel": "avientek.events.demo_movement.on_cancel",
+    },
 }
 
 
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# "all": [
-# "avientek.tasks.all"
-# ],
-# "daily": [
-# "avientek.tasks.daily"
-# ],
-# "hourly": [
-# "avientek.tasks.hourly"
-# ],
-# "weekly": [
-# "avientek.tasks.weekly"
-# ],
-# "monthly": [
-# "avientek.tasks.monthly"
-# ],
-# }
+scheduler_events = {
+    "daily": [
+        "avientek.events.demo_movement.send_return_reminders",
+    ],
+}
 
 # Testing
 # -------

@@ -22,7 +22,7 @@
  "is_hidden": 0,
  "label": "Sales Team",
  "links": [],
- "modified": "2026-02-26 14:34:48.139482",
+ "modified": "2026-03-02 15:51:37.482563",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Sales Team",
@@ -49,7 +49,7 @@
  "public": 1,
  "quick_lists": [],
  "roles": [],
- "sequence_id": 1.0,
+ "sequence_id": 2.0,
  "shortcuts": [
   {
    "color": "Green",
