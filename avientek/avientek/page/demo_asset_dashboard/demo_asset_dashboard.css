@@ -1,12 +1,12 @@
-/* ── DAM Dashboard ──────────────────────────────────── */
+/* ── DAM Dashboard — theme-aware using Frappe CSS variables ── */
 .dam-dashboard {
 	padding: 20px;
-	background: #F1F5F9;
+	background: var(--bg-color);
 	min-height: 100vh;
 	font-family: var(--font-stack);
 }
 
-/* Stat Cards Row */
+/* ── Stat Cards ── */
 .dam-stat-row {
 	display: flex;
 	gap: 16px;
@@ -17,16 +17,16 @@
 .dam-stat-card {
 	flex: 1;
 	min-width: 160px;
-	background: #fff;
-	border-radius: 10px;
+	background: var(--card-bg);
+	border-radius: var(--border-radius-lg);
 	padding: 20px 24px;
-	box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+	box-shadow: var(--card-shadow);
 	transition: transform 0.15s, box-shadow 0.15s;
 }
 
 .dam-stat-card:hover {
 	transform: translateY(-2px);
-	box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+	box-shadow: var(--shadow-lg);
 }
 
 .dam-stat-value {
@@ -38,19 +38,24 @@
 
 .dam-stat-label {
 	font-size: 0.78rem;
-	color: #64748B;
+	color: var(--text-muted);
 	font-weight: 500;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
 }
 
-/* Overdue Banner */
+/* ── Overdue Banner ── */
 .dam-overdue-banner {
-	background: #FEF2F2;
-	border: 1px solid #FECACA;
-	border-radius: 8px;
+	background: var(--alert-bg, #FEF2F2);
+	border: 1px solid var(--red-100, #FECACA);
+	border-radius: var(--border-radius-lg);
 	padding: 12px 18px;
 	margin-bottom: 20px;
+}
+
+[data-theme="dark"] .dam-overdue-banner {
+	background: rgba(220, 38, 38, 0.12);
+	border-color: rgba(220, 38, 38, 0.3);
 }
 
 .dam-overdue-content {
@@ -62,38 +67,42 @@
 
 .dam-overdue-icon {
 	font-size: 1.2rem;
-	color: #DC2626;
+	color: var(--red-500, #DC2626);
 }
 
 .dam-overdue-content strong {
-	color: #991B1B;
+	color: var(--red-600, #991B1B);
 	font-weight: 600;
+}
+
+[data-theme="dark"] .dam-overdue-content strong {
+	color: var(--red-400, #F87171);
 }
 
 .dam-overdue-names {
 	margin-left: 8px;
-	color: #7F1D1D;
+	color: var(--text-muted);
 	font-size: 0.85rem;
 }
 
 .dam-overdue-names a {
-	color: #B91C1C;
+	color: var(--red-500, #DC2626);
 	text-decoration: underline;
 }
 
 .dam-view-all {
 	margin-left: auto;
-	background: #DC2626;
+	background: var(--red-500, #DC2626);
 	color: #fff;
 	border: none;
 	padding: 5px 14px;
-	border-radius: 6px;
+	border-radius: var(--border-radius-md);
 	font-size: 0.8rem;
 	font-weight: 600;
 	cursor: pointer;
 }
 
-/* Content Row */
+/* ── Content Row ── */
 .dam-content-row {
 	display: flex;
 	gap: 20px;
@@ -110,12 +119,12 @@
 	flex-shrink: 0;
 }
 
-/* Panels */
+/* ── Panels ── */
 .dam-panel {
-	background: #fff;
-	border-radius: 10px;
+	background: var(--card-bg);
+	border-radius: var(--border-radius-lg);
 	padding: 0;
-	box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+	box-shadow: var(--card-shadow);
 	overflow: hidden;
 }
 
@@ -123,8 +132,8 @@
 	padding: 14px 20px;
 	font-weight: 600;
 	font-size: 0.92rem;
-	color: #0F172A;
-	border-bottom: 1px solid #E2E8F0;
+	color: var(--heading-color);
+	border-bottom: 1px solid var(--border-color);
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
@@ -132,12 +141,12 @@
 
 .dam-see-all {
 	font-size: 0.78rem;
-	color: #2563EB;
+	color: var(--primary);
 	cursor: pointer;
 	font-weight: 500;
 }
 
-/* Movements Table */
+/* ── Movements Table ── */
 .dam-table {
 	width: 100%;
 	border-collapse: collapse;
@@ -145,7 +154,7 @@
 }
 
 .dam-table thead tr {
-	background: #F8FAFC;
+	background: var(--subtle-fg);
 }
 
 .dam-table th {
@@ -153,48 +162,48 @@
 	text-align: left;
 	font-size: 0.72rem;
 	font-weight: 600;
-	color: #64748B;
+	color: var(--text-muted);
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
-	border-bottom: 1px solid #E2E8F0;
+	border-bottom: 1px solid var(--border-color);
 }
 
 .dam-table td {
 	padding: 12px 16px;
-	border-bottom: 1px solid #F1F5F9;
-	color: #334155;
+	border-bottom: 1px solid var(--border-color);
+	color: var(--text-color);
 	vertical-align: middle;
 }
 
 .dam-movement-row:hover td {
-	background: #F8FAFC;
+	background: var(--hover-bg);
 }
 
 .dam-asset-name {
 	font-weight: 600;
-	color: #0F172A;
+	color: var(--heading-color);
 }
 
 .dam-asset-sub {
 	font-size: 0.75rem;
-	color: #94A3B8;
+	color: var(--text-muted);
 	margin-top: 1px;
 }
 
 .dam-empty {
 	padding: 40px;
 	text-align: center;
-	color: #94A3B8;
+	color: var(--text-muted);
 	font-size: 0.9rem;
 }
 
-/* Quick Actions */
+/* ── Quick Actions ── */
 .dam-quick-action {
 	padding: 14px 18px;
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	border-bottom: 1px solid #F1F5F9;
+	border-bottom: 1px solid var(--border-color);
 	transition: background 0.12s;
 }
 
@@ -203,7 +212,7 @@
 }
 
 .dam-quick-action:hover {
-	background: #F8FAFC;
+	background: var(--hover-bg);
 }
 
 .dam-qa-icon {
@@ -215,10 +224,10 @@
 .dam-qa-label {
 	font-size: 0.88rem;
 	font-weight: 500;
-	color: #334155;
+	color: var(--text-color);
 }
 
-/* Responsive */
+/* ── Responsive ── */
 @media (max-width: 900px) {
 	.dam-content-row {
 		flex-direction: column;
