@@ -205,17 +205,29 @@ class DamDashboard {
 					get_query: () => ({ filters: { is_fixed_asset: 1 } }),
 					onchange: () => {
 						const item = d.get_value("item_code");
-						if (item && !d.get_value("asset_name")) {
-							frappe.db.get_value("Item", item, "item_name", r => {
-								if (r && r.item_name) d.set_value("asset_name", r.item_name);
-							});
-						}
+						if (!item) return;
+						frappe.db.get_value("Item", item, ["item_name", "standard_rate", "last_purchase_rate", "asset_category"], r => {
+							if (!r) return;
+							if (!d.get_value("asset_name") && r.item_name) {
+								d.set_value("asset_name", r.item_name);
+							}
+							const price = r.last_purchase_rate || r.standard_rate;
+							if (price) d.set_value("gross_purchase_amount", price);
+							if (r.asset_category) d.set_value("asset_category", r.asset_category);
+						});
 					},
 				},
 				{
 					fieldname: "asset_name",
 					fieldtype: "Data",
 					label: __("Asset Name"),
+					reqd: 1,
+				},
+				{
+					fieldname: "asset_category",
+					fieldtype: "Link",
+					label: __("Asset Category"),
+					options: "Asset Category",
 					reqd: 1,
 				},
 				{ fieldname: "col_break_1", fieldtype: "Column Break" },
@@ -285,6 +297,7 @@ class DamDashboard {
 					args: {
 						item_code: values.item_code,
 						asset_name: values.asset_name,
+						asset_category: values.asset_category,
 						company: values.company,
 						location: values.location,
 						purchase_date: values.purchase_date,

@@ -153,20 +153,22 @@ def get_items_out_for_demo(company=None):
 
 @frappe.whitelist()
 def create_demo_asset(item_code, asset_name, company, location, purchase_date,
-		gross_purchase_amount, calculate_depreciation=0,
+		gross_purchase_amount, asset_category=None, calculate_depreciation=0,
 		depreciation_method="Straight Line", total_depreciations=5,
 		frequency_of_depreciation=12, expected_residual=0):
 	"""Create a draft Asset from a stock item, pre-marked as a demo asset."""
 	item = frappe.db.get_value("Item", item_code, ["asset_category", "item_name"], as_dict=True)
 	if not item:
 		frappe.throw(_("Item {0} not found").format(item_code))
-	if not item.asset_category:
+
+	resolved_category = asset_category or item.asset_category
+	if not resolved_category:
 		frappe.throw(_("Item {0} has no Asset Category. Please set it on the Item master first.").format(item_code))
 
 	asset = frappe.new_doc("Asset")
 	asset.item_code = item_code
 	asset.asset_name = asset_name or item.item_name
-	asset.asset_category = item.asset_category
+	asset.asset_category = resolved_category
 	asset.company = company
 	asset.location = location
 	asset.purchase_date = purchase_date
