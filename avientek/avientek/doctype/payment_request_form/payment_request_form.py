@@ -1065,30 +1065,126 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
     return payment_history
 
 
-@frappe.whitelist()
-def get_pdf_as_images(doctype, docname, max_pages=10):
+# ──────────────────────────── OPTIMIZED PDF CONVERSION HELPERS ────────────────────────────
+import hashlib
+
+def _get_cache_key(prefix, *args):
+    """Generate a unique cache key from arguments."""
+    key_data = "|".join(str(a) for a in args)
+    return f"pdf_img_{prefix}_{hashlib.md5(key_data.encode()).hexdigest()[:16]}"
+
+
+def _convert_pdf_to_images_optimized(pdf_source, max_pages=2, zoom=1.0, jpeg_quality=60, is_bytes=False):
     """
-    Get PDF attachments for a document and convert them to base64 images.
-    Returns a list of image data that can be embedded in print formats.
+    Optimized PDF to image conversion with lower resolution and quality for faster loading.
 
     Args:
-        doctype: The doctype to fetch attachments from
-        docname: The document name
-        max_pages: Maximum number of pages to convert per PDF (default: 10)
+        pdf_source: File path (string) or PDF bytes (if is_bytes=True)
+        max_pages: Maximum pages to convert (default 2 for speed)
+        zoom: Zoom factor (1.0 = 72 DPI, lower = faster)
+        jpeg_quality: JPEG quality 0-100 (lower = smaller file, faster)
+        is_bytes: Whether pdf_source is bytes (True) or file path (False)
 
     Returns:
-        List of dicts with 'file_name' and 'images' (list of base64 image strings)
+        List of base64 image data URIs
     """
     try:
         import fitz  # PyMuPDF
     except ImportError:
-        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
         return []
 
+    try:
+        if is_bytes:
+            pdf_document = fitz.open(stream=pdf_source, filetype="pdf")
+        else:
+            if not os.path.exists(pdf_source):
+                return []
+            pdf_document = fitz.open(pdf_source)
+
+        images = []
+        num_pages = min(pdf_document.page_count, max_pages)
+
+        for page_num in range(num_pages):
+            page = pdf_document.load_page(page_num)
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+
+            # Use JPEG with specified quality for smaller file size
+            img_bytes = pix.tobytes(output="jpeg", jpg_quality=jpeg_quality)
+            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+            images.append(f"data:image/jpeg;base64,{img_base64}")
+
+        pdf_document.close()
+        return images
+    except Exception as e:
+        frappe.log_error(f"PDF conversion error: {str(e)}", "PDF to Image")
+        return []
+
+
+def _get_file_path_from_url(file_url):
+    """Convert a file URL to absolute file path."""
+    if not file_url:
+        return None
+    if file_url.startswith("/private/"):
+        return frappe.get_site_path() + file_url
+    elif file_url.startswith("/files/"):
+        return frappe.get_site_path("public") + file_url
+    return None
+
+
+@frappe.whitelist()
+def clear_pdf_cache(doctype=None, docname=None):
+    """
+    Clear PDF image cache for a specific document or all caches.
+    Call this when attachments are updated.
+
+    Args:
+        doctype: Optional - clear cache for specific doctype
+        docname: Optional - clear cache for specific document
+
+    Returns:
+        dict with status message
+    """
+    try:
+        if doctype and docname:
+            # Clear specific document caches
+            for max_pages in [2, 5, 10]:
+                cache_key = _get_cache_key("pdf_attach", doctype, docname, max_pages)
+                frappe.cache().delete_value(cache_key)
+                cache_key = _get_cache_key("ref_attach", doctype, docname, max_pages)
+                frappe.cache().delete_value(cache_key)
+            return {"status": "success", "message": f"Cleared cache for {doctype} {docname}"}
+        else:
+            # Clear all PDF caches (pattern-based clearing not available, so just return info)
+            return {"status": "info", "message": "Caches will expire automatically in 5 minutes"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@frappe.whitelist()
+def get_pdf_as_images(doctype, docname, max_pages=2):
+    """
+    Get PDF attachments for a document and convert them to base64 images.
+    OPTIMIZED: Uses caching, lower resolution (1.0x), JPEG quality 60.
+
+    Args:
+        doctype: The doctype to fetch attachments from
+        docname: The document name
+        max_pages: Maximum number of pages to convert per PDF (default: 2)
+
+    Returns:
+        List of dicts with 'file_name' and 'images' (list of base64 image strings)
+    """
     if not doctype or not docname:
         return []
 
-    max_pages = int(max_pages) if max_pages else 10
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("pdf_attach", doctype, docname, max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     # Get all PDF attachments
     attachments = frappe.get_all(
@@ -1113,42 +1209,21 @@ def get_pdf_as_images(doctype, docname, max_pages=10):
         try:
             # Get the file path
             file_url = attachment.get("file_url", "")
+            file_path = _get_file_path_from_url(file_url)
 
-            if file_url.startswith("/private/"):
-                file_path = frappe.get_site_path() + file_url
-            elif file_url.startswith("/files/"):
-                file_path = frappe.get_site_path("public") + file_url
-            else:
+            if not file_path:
                 # Try to get from File doc
                 file_doc = frappe.get_doc("File", attachment.get("name"))
                 file_path = file_doc.get_full_path()
 
-            if not os.path.exists(file_path):
-                frappe.log_error(f"File not found: {file_path}", "PDF to Image Conversion")
-                continue
-
-            # Open PDF and convert pages to images
-            pdf_document = fitz.open(file_path)
-            images = []
-
-            num_pages = min(pdf_document.page_count, max_pages)
-
-            for page_num in range(num_pages):
-                page = pdf_document.load_page(page_num)
-
-                # Render page to image (1.5x resolution - balanced quality/speed)
-                zoom = 1.5
-                mat = fitz.Matrix(zoom, zoom)
-                pix = page.get_pixmap(matrix=mat)
-
-                # Convert to JPEG for faster loading (smaller size)
-                img_bytes = pix.tobytes("jpeg")
-
-                # Convert to base64
-                img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-                images.append(f"data:image/jpeg;base64,{img_base64}")
-
-            pdf_document.close()
+            # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+            images = _convert_pdf_to_images_optimized(
+                file_path,
+                max_pages=max_pages,
+                zoom=1.0,
+                jpeg_quality=60,
+                is_bytes=False
+            )
 
             if images:
                 result.append({
@@ -1163,18 +1238,22 @@ def get_pdf_as_images(doctype, docname, max_pages=10):
                 "PDF to Image Conversion"
             )
 
+    # Cache result for 5 minutes
+    if result:
+        frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+
     return result
 
 
 @frappe.whitelist()
-def get_invoice_attachment_images(invoice_name, max_pages=5):
+def get_invoice_attachment_images(invoice_name, max_pages=2):
     """
     Wrapper function to get PDF attachments as images for a Purchase Invoice.
-    This is specifically designed for use in print formats.
+    OPTIMIZED: Uses max_pages=2 default for faster loading.
 
     Args:
         invoice_name: The Purchase Invoice name
-        max_pages: Maximum pages to convert per PDF
+        max_pages: Maximum pages to convert per PDF (default: 2)
 
     Returns:
         List of base64 image strings
@@ -1207,11 +1286,13 @@ REFERENCE_DOCTYPE_MAP = {
 
 
 @frappe.whitelist()
-def get_reference_attachment_images(reference_doctype, reference_name, max_pages=5):
+def get_reference_attachment_images(reference_doctype, reference_name, max_pages=2):
     """
     Generic function to get ALL attachments (PDFs converted to images + direct images)
-    from any reference document. Handles the mapping from PRF reference_doctype
-    (e.g. "Credit Note") to actual Frappe doctype (e.g. "Sales Invoice").
+    from any reference document. OPTIMIZED with caching.
+
+    Handles the mapping from PRF reference_doctype (e.g. "Credit Note") to actual
+    Frappe doctype (e.g. "Sales Invoice").
 
     If no file attachments are found, falls back to rendering the document's
     own print format as images — so there is always something to show.
@@ -1222,11 +1303,17 @@ def get_reference_attachment_images(reference_doctype, reference_name, max_pages
         return []
 
     actual_doctype = REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
-    max_pages = int(max_pages) if max_pages else 5
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("ref_attach", reference_doctype, reference_name, max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     all_images = []
 
-    # 1) PDF attachments → convert to images
+    # 1) PDF attachments → convert to images (uses optimized helper with caching)
     pdf_data = get_pdf_as_images(actual_doctype, reference_name, max_pages)
     for pdf in pdf_data:
         all_images.extend(pdf.get("images", []))
@@ -1247,15 +1334,8 @@ def get_reference_attachment_images(reference_doctype, reference_name, max_pages
         if ext not in IMAGE_EXTS:
             continue
 
-        file_url = att.get("file_url", "")
-        if file_url.startswith("/private/"):
-            file_path = frappe.get_site_path() + file_url
-        elif file_url.startswith("/files/"):
-            file_path = frappe.get_site_path("public") + file_url
-        else:
-            continue
-
-        if not os.path.exists(file_path):
+        file_path = _get_file_path_from_url(att.get("file_url", ""))
+        if not file_path or not os.path.exists(file_path):
             continue
 
         try:
@@ -1271,34 +1351,38 @@ def get_reference_attachment_images(reference_doctype, reference_name, max_pages
     if not all_images:
         all_images = get_print_format_as_images(actual_doctype, reference_name, max_pages=max_pages)
 
+    # Cache result for 5 minutes
+    if all_images:
+        frappe.cache().set_value(cache_key, all_images, expires_in_sec=300)
+
     return all_images
 
 
 @frappe.whitelist()
-def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10):
+def get_print_format_as_images(doctype, docname, print_format=None, max_pages=2):
     """
     Render a document's print format to PDF and convert to images.
-    This allows embedding print formats within other print formats.
+    OPTIMIZED: Uses caching, lower resolution (1.0x), JPEG quality 60.
 
     Args:
         doctype: The doctype to print
         docname: The document name
         print_format: The print format name (optional, uses default if not specified)
-        max_pages: Maximum pages to convert
+        max_pages: Maximum pages to convert (default: 2)
 
     Returns:
         List of base64 image strings
     """
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
-        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
-        return []
-
     if not doctype or not docname:
         return []
 
-    max_pages = int(max_pages) if max_pages else 10
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("print_fmt", doctype, docname, print_format or "default", max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     try:
         # Generate PDF from print format
@@ -1312,28 +1396,18 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10
         if not pdf_content:
             return []
 
-        # Open PDF from bytes and convert to images
-        pdf_document = fitz.open(stream=pdf_content, filetype="pdf")
-        images = []
+        # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+        images = _convert_pdf_to_images_optimized(
+            pdf_content,
+            max_pages=max_pages,
+            zoom=1.0,
+            jpeg_quality=60,
+            is_bytes=True
+        )
 
-        num_pages = min(pdf_document.page_count, max_pages)
-
-        for page_num in range(num_pages):
-            page = pdf_document.load_page(page_num)
-
-            # Render page to image (1.5x resolution - balanced quality/speed)
-            zoom = 1.5
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat)
-
-            # Convert to JPEG for faster loading (smaller size)
-            img_bytes = pix.tobytes("jpeg")
-
-            # Convert to base64
-            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-            images.append(f"data:image/jpeg;base64,{img_base64}")
-
-        pdf_document.close()
+        # Cache result for 5 minutes
+        if images:
+            frappe.cache().set_value(cache_key, images, expires_in_sec=300)
 
         return images
 
@@ -1371,24 +1445,18 @@ def get_linked_po_for_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_attachment_as_images(file_url, max_pages=10):
+def get_attachment_as_images(file_url, max_pages=2):
     """
     Convert a PDF attachment URL to base64 images.
-    This is for use with Attach fields in print formats.
+    OPTIMIZED: Uses caching, lower resolution (1.0x), JPEG quality 60.
 
     Args:
         file_url: The file URL from an Attach field (e.g., /files/cost.png.pdf or /private/files/...)
-        max_pages: Maximum pages to convert
+        max_pages: Maximum pages to convert (default: 2)
 
     Returns:
         List of base64 image strings
     """
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
-        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
-        return []
-
     if not file_url:
         return []
 
@@ -1396,44 +1464,34 @@ def get_attachment_as_images(file_url, max_pages=10):
     if not file_url.lower().endswith('.pdf'):
         return []
 
-    max_pages = int(max_pages) if max_pages else 10
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("attach", file_url, max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     try:
         # Get the file path from URL
-        if file_url.startswith("/private/"):
-            file_path = frappe.get_site_path() + file_url
-        elif file_url.startswith("/files/"):
-            file_path = frappe.get_site_path("public") + file_url
-        else:
-            # Handle other URL formats
+        file_path = _get_file_path_from_url(file_url)
+
+        if not file_path or not os.path.exists(file_path):
+            frappe.log_error(f"Attachment file not found: {file_url}", "Attachment to Image Conversion")
             return []
 
-        if not os.path.exists(file_path):
-            frappe.log_error(f"Attachment file not found: {file_path}", "Attachment to Image Conversion")
-            return []
+        # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+        images = _convert_pdf_to_images_optimized(
+            file_path,
+            max_pages=max_pages,
+            zoom=1.0,
+            jpeg_quality=60,
+            is_bytes=False
+        )
 
-        # Open PDF and convert pages to images
-        pdf_document = fitz.open(file_path)
-        images = []
-
-        num_pages = min(pdf_document.page_count, max_pages)
-
-        for page_num in range(num_pages):
-            page = pdf_document.load_page(page_num)
-
-            # Render page to image (1.5x resolution - balanced quality/speed)
-            zoom = 1.5
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat)
-
-            # Convert to JPEG for faster loading (smaller size)
-            img_bytes = pix.tobytes("jpeg")
-
-            # Convert to base64
-            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-            images.append(f"data:image/jpeg;base64,{img_base64}")
-
-        pdf_document.close()
+        # Cache result for 5 minutes
+        if images:
+            frappe.cache().set_value(cache_key, images, expires_in_sec=300)
 
         return images
 
