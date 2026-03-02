@@ -202,11 +202,17 @@ doctype_js = {
 	"Sales Invoice": "public/js/sales_invoice.js",
 	"Asset": "public/js/asset_extension.js",
 }
-doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
-	"Quotation": "public/js/quotation_list.js"
+doctype_list_js = {
+	"Sales Order": "public/js/sales_order_list.js",
+	"Quotation": "public/js/quotation_list.js",
+	"Asset": "public/js/asset_list.js",
 }
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
+
+override_doctype_dashboards = {
+	"Asset": "avientek.overrides.asset_dashboard.get_data",
+}
 
 # Svg Icons
 # ------------------
