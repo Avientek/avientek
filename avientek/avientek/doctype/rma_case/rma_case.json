@@ -1,0 +1,382 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-03-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "is_submittable": 0,
+ "field_order": [
+  "naming_series",
+  "status",
+  "priority",
+  "column_break_top",
+  "company",
+  "rma_date",
+  "closed_date",
+  "section_customer",
+  "customer",
+  "contact_person",
+  "mobile",
+  "email",
+  "column_break_customer",
+  "country",
+  "sales_invoice",
+  "requested_salesperson",
+  "section_asset",
+  "demo_asset",
+  "asset_serial_number",
+  "item_description",
+  "column_break_asset",
+  "warranty_status",
+  "warranty_expiry_date",
+  "standby_unit",
+  "section_fault",
+  "fault_description",
+  "column_break_fault",
+  "resolution_notes",
+  "section_financial",
+  "gross_asset_value",
+  "accumulated_depreciation",
+  "net_asset_value",
+  "column_break_financial",
+  "asset_currency",
+  "repair_cost",
+  "repair_cost_currency",
+  "section_log",
+  "case_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "RMA-FZCO-.YY.-.#####\nRMA-LLC-.YY.-.#####\nRMA-WLL-.YY.-.#####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Open\nIn Progress\nPending Parts\nSent for Repair\nRepaired\nReplaced\nClosed\nCancelled",
+   "default": "Open",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "reqd": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "label": "Priority",
+   "options": "Low\nMedium\nHigh\nCritical",
+   "default": "Medium",
+   "in_list_view": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "remember_last_selected_value": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "rma_date",
+   "fieldtype": "Date",
+   "label": "RMA Date",
+   "default": "Today",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "closed_date",
+   "fieldtype": "Date",
+   "label": "Closed Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_customer",
+   "fieldtype": "Section Break",
+   "label": "Customer Information"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "contact_person",
+   "fieldtype": "Data",
+   "label": "Contact Person",
+   "reqd": 1
+  },
+  {
+   "fieldname": "mobile",
+   "fieldtype": "Data",
+   "label": "Mobile"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "column_break_customer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Select",
+   "label": "Country",
+   "options": "UAE\nKSA\nQatar\nKuwait\nBahrain\nOman\nOther"
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Sales Invoice",
+   "options": "Sales Invoice",
+   "description": "Original invoice (if purchased from Avientek)"
+  },
+  {
+   "fieldname": "requested_salesperson",
+   "fieldtype": "Link",
+   "label": "Salesperson",
+   "options": "Sales Person",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "section_asset",
+   "fieldtype": "Section Break",
+   "label": "Faulty Unit"
+  },
+  {
+   "fieldname": "demo_asset",
+   "fieldtype": "Link",
+   "label": "Demo Asset",
+   "options": "Demo Asset",
+   "description": "Link if the faulty unit is a registered Demo Asset",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "asset_serial_number",
+   "fieldtype": "Data",
+   "label": "Serial Number",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "item_description",
+   "fieldtype": "Data",
+   "label": "Item Description",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_asset",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "warranty_status",
+   "fieldtype": "Select",
+   "label": "Warranty Status",
+   "options": "Under Warranty\nOut of Warranty\nExpired\nUnknown",
+   "default": "Unknown",
+   "in_list_view": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "warranty_expiry_date",
+   "fieldtype": "Date",
+   "label": "Warranty Expiry Date"
+  },
+  {
+   "fieldname": "standby_unit",
+   "fieldtype": "Link",
+   "label": "Standby Unit Issued",
+   "options": "Demo Asset",
+   "description": "Demo Asset issued as standby replacement while RMA in progress"
+  },
+  {
+   "fieldname": "section_fault",
+   "fieldtype": "Section Break",
+   "label": "Fault & Resolution"
+  },
+  {
+   "fieldname": "fault_description",
+   "fieldtype": "Text",
+   "label": "Fault Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_fault",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "resolution_notes",
+   "fieldtype": "Text",
+   "label": "Resolution Notes"
+  },
+  {
+   "fieldname": "section_financial",
+   "fieldtype": "Section Break",
+   "label": "Asset Financial Values",
+   "description": "Internal reference only — not disclosed to customer"
+  },
+  {
+   "fieldname": "gross_asset_value",
+   "fieldtype": "Currency",
+   "label": "Gross Asset Value",
+   "options": "asset_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "accumulated_depreciation",
+   "fieldtype": "Currency",
+   "label": "Accumulated Depreciation",
+   "options": "asset_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "net_asset_value",
+   "fieldtype": "Currency",
+   "label": "Net Asset Value (NAV)",
+   "options": "asset_currency",
+   "read_only": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "column_break_financial",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "asset_currency",
+   "fieldtype": "Link",
+   "label": "Asset Currency",
+   "options": "Currency",
+   "read_only": 1,
+   "print_hide": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "repair_cost",
+   "fieldtype": "Currency",
+   "label": "Estimated Repair Cost",
+   "options": "repair_cost_currency"
+  },
+  {
+   "fieldname": "repair_cost_currency",
+   "fieldtype": "Link",
+   "label": "Repair Cost Currency",
+   "options": "Currency",
+   "default": "AED"
+  },
+  {
+   "fieldname": "section_log",
+   "fieldtype": "Section Break",
+   "label": "Case Activity Log"
+  },
+  {
+   "fieldname": "case_log",
+   "fieldtype": "Table",
+   "label": "Case Log",
+   "options": "RMA Case Log"
+  }
+ ],
+ "grid_page_length": 20,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-03-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "RMA Case",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAM Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAM User",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 0,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "row_format": "Dynamic",
+ "search_fields": "customer,asset_serial_number,item_description,status",
+ "sort_field": "rma_date",
+ "sort_order": "DESC",
+ "states": [
+  {"color": "Orange", "title": "Open"},
+  {"color": "Blue", "title": "In Progress"},
+  {"color": "Yellow", "title": "Pending Parts"},
+  {"color": "Purple", "title": "Sent for Repair"},
+  {"color": "Cyan", "title": "Repaired"},
+  {"color": "Green", "title": "Replaced"},
+  {"color": "Green", "title": "Closed"},
+  {"color": "Red", "title": "Cancelled"}
+ ],
+ "title_field": "item_description",
+ "track_changes": 1
+}

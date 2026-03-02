@@ -94,8 +94,10 @@
   },
   {
    "fieldname": "rma_case",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "label": "RMA Case",
+   "options": "RMA Case",
+   "in_standard_filter": 1,
    "description": "Link to RMA Case if this movement is for a standby replacement"
   },
   {
