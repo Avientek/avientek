@@ -157,13 +157,20 @@ def create_demo_asset(item_code, asset_name, company, location, purchase_date,
 		depreciation_method="Straight Line", total_depreciations=5,
 		frequency_of_depreciation=12, expected_residual=0):
 	"""Create a draft Asset from a stock item, pre-marked as a demo asset."""
-	item = frappe.db.get_value("Item", item_code, ["asset_category", "item_name"], as_dict=True)
+	item = frappe.db.get_value("Item", item_code, ["asset_category", "item_name", "is_fixed_asset"], as_dict=True)
 	if not item:
 		frappe.throw(_("Item {0} not found").format(item_code))
 
 	resolved_category = asset_category or item.asset_category
 	if not resolved_category:
-		frappe.throw(_("Item {0} has no Asset Category. Please set it on the Item master first.").format(item_code))
+		frappe.throw(_("Asset Category is required. Please select one in the dialog."))
+
+	# Ensure item is marked as a fixed asset (ERPNext Asset validation requires this)
+	if not item.is_fixed_asset:
+		frappe.db.set_value("Item", item_code, {
+			"is_fixed_asset": 1,
+			"asset_category": resolved_category,
+		})
 
 	asset = frappe.new_doc("Asset")
 	asset.item_code = item_code

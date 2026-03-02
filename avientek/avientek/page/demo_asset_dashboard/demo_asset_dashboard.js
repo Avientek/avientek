@@ -202,7 +202,6 @@ class DamDashboard {
 					label: __("Item"),
 					options: "Item",
 					reqd: 1,
-					get_query: () => ({ filters: { is_fixed_asset: 1 } }),
 					onchange: () => {
 						const item = d.get_value("item_code");
 						if (!item) return;
