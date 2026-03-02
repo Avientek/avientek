@@ -6,7 +6,26 @@ from frappe.utils import flt
 class DemoAsset(Document):
 
 	def before_save(self):
+		self.validate_asset_status()
 		self.sync_values_from_asset()
+
+	def validate_asset_status(self):
+		"""Warn if the linked ERPNext Asset is not yet Submitted (capitalized)."""
+		if not self.asset:
+			return
+		status, docstatus = frappe.db.get_value("Asset", self.asset, ["status", "docstatus"]) or (None, None)
+		if docstatus != 1:
+			frappe.throw(
+				frappe._("Asset <b>{0}</b> is not yet submitted/capitalized. "
+				"Please complete Asset Capitalization before registering it as a Demo Asset.").format(self.asset)
+			)
+		if status in ("Draft", "In Maintenance", "Scrapped", "Sold"):
+			frappe.msgprint(
+				frappe._("Warning: Asset <b>{0}</b> has status <b>{1}</b>. "
+				"Verify this asset is suitable for demo use.").format(self.asset, status),
+				indicator="orange",
+				alert=True,
+			)
 
 	def sync_values_from_asset(self):
 		"""Pull Gross Value, Accumulated Depreciation and Net Asset Value from linked Asset."""
