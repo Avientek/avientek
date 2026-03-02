@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import today, add_days, date_diff
+from frappe.utils import today, add_days, date_diff, flt, cint
 
 
 @frappe.whitelist()
@@ -149,3 +149,42 @@ def get_items_out_for_demo(company=None):
 		"today": today(),
 		"company": company,
 	}, as_dict=True)
+
+
+@frappe.whitelist()
+def create_demo_asset(item_code, asset_name, company, location, purchase_date,
+		gross_purchase_amount, calculate_depreciation=0,
+		depreciation_method="Straight Line", total_depreciations=5,
+		frequency_of_depreciation=12, expected_residual=0):
+	"""Create a draft Asset from a stock item, pre-marked as a demo asset."""
+	item = frappe.db.get_value("Item", item_code, ["asset_category", "item_name"], as_dict=True)
+	if not item:
+		frappe.throw(_("Item {0} not found").format(item_code))
+	if not item.asset_category:
+		frappe.throw(_("Item {0} has no Asset Category. Please set it on the Item master first.").format(item_code))
+
+	asset = frappe.new_doc("Asset")
+	asset.item_code = item_code
+	asset.asset_name = asset_name or item.item_name
+	asset.asset_category = item.asset_category
+	asset.company = company
+	asset.location = location
+	asset.purchase_date = purchase_date
+	asset.available_for_use_date = purchase_date
+	asset.gross_purchase_amount = flt(gross_purchase_amount)
+	asset.is_existing_asset = 1
+	asset.custom_is_demo_asset = 1
+	asset.custom_dam_status = "Free"
+
+	if cint(calculate_depreciation):
+		asset.calculate_depreciation = 1
+		asset.append("finance_books", {
+			"depreciation_method": depreciation_method,
+			"total_number_of_depreciations": cint(total_depreciations),
+			"frequency_of_depreciation": cint(frequency_of_depreciation),
+			"depreciation_start_date": purchase_date,
+			"expected_value_after_useful_life": flt(expected_residual),
+		})
+
+	asset.insert(ignore_permissions=True)
+	return asset.name

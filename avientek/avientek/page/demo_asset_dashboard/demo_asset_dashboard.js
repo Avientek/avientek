@@ -169,6 +169,7 @@ class DamDashboard {
 
 	render_quick_actions() {
 		const actions = [
+			{ label: "Quick Create Demo Asset", icon: "+", color: "#7C3AED", action: () => this.quick_create_demo_asset() },
 			{ label: "New Demo Movement", icon: "↕", color: "#2563EB", action: () => frappe.new_doc("Demo Movement") },
 			{ label: "Open RMA Case", icon: "⟳", color: "#D97706", action: () => frappe.new_doc("RMA Case") },
 			{ label: "All Demo Assets", icon: "◆", color: "#059669", action: () => frappe.set_route("List", "Asset", { custom_is_demo_asset: 1 }) },
@@ -189,5 +190,120 @@ class DamDashboard {
 		actions.forEach((a, i) => {
 			this.$main.find(".dam-quick-action").eq(i).on("click", a.action);
 		});
+	}
+
+	quick_create_demo_asset() {
+		const d = new frappe.ui.Dialog({
+			title: __("Quick Create Demo Asset"),
+			fields: [
+				{
+					fieldname: "item_code",
+					fieldtype: "Link",
+					label: __("Item"),
+					options: "Item",
+					reqd: 1,
+					get_query: () => ({ filters: { is_fixed_asset: 1 } }),
+					onchange: () => {
+						const item = d.get_value("item_code");
+						if (item && !d.get_value("asset_name")) {
+							frappe.db.get_value("Item", item, "item_name", r => {
+								if (r && r.item_name) d.set_value("asset_name", r.item_name);
+							});
+						}
+					},
+				},
+				{
+					fieldname: "asset_name",
+					fieldtype: "Data",
+					label: __("Asset Name"),
+					reqd: 1,
+				},
+				{ fieldname: "col_break_1", fieldtype: "Column Break" },
+				{
+					fieldname: "company",
+					fieldtype: "Link",
+					label: __("Company"),
+					options: "Company",
+					reqd: 1,
+					default: frappe.defaults.get_default("company"),
+				},
+				{
+					fieldname: "location",
+					fieldtype: "Link",
+					label: __("Location"),
+					options: "Asset Location",
+					reqd: 1,
+				},
+				{ fieldname: "sec_break_1", fieldtype: "Section Break", label: __("Purchase Details") },
+				{
+					fieldname: "purchase_date",
+					fieldtype: "Date",
+					label: __("Purchase Date"),
+					reqd: 1,
+					default: frappe.datetime.get_today(),
+				},
+				{
+					fieldname: "gross_purchase_amount",
+					fieldtype: "Currency",
+					label: __("Gross Purchase Amount"),
+					reqd: 1,
+				},
+				{ fieldname: "col_break_2", fieldtype: "Column Break" },
+				{
+					fieldname: "calculate_depreciation",
+					fieldtype: "Check",
+					label: __("Calculate Depreciation"),
+					default: 0,
+				},
+				{
+					fieldname: "depreciation_method",
+					fieldtype: "Select",
+					label: __("Depreciation Method"),
+					options: "Straight Line\nDouble Declining Balance\nWritten Down Value",
+					default: "Straight Line",
+					depends_on: "eval:doc.calculate_depreciation",
+				},
+				{
+					fieldname: "total_depreciations",
+					fieldtype: "Int",
+					label: __("Total Depreciations"),
+					default: 5,
+					depends_on: "eval:doc.calculate_depreciation",
+				},
+				{
+					fieldname: "expected_residual",
+					fieldtype: "Currency",
+					label: __("Expected Residual Value"),
+					default: 0,
+					depends_on: "eval:doc.calculate_depreciation",
+				},
+			],
+			primary_action_label: __("Create Asset"),
+			primary_action(values) {
+				frappe.call({
+					method: "avientek.avientek.page.demo_asset_dashboard.demo_asset_dashboard.create_demo_asset",
+					args: {
+						item_code: values.item_code,
+						asset_name: values.asset_name,
+						company: values.company,
+						location: values.location,
+						purchase_date: values.purchase_date,
+						gross_purchase_amount: values.gross_purchase_amount,
+						calculate_depreciation: values.calculate_depreciation ? 1 : 0,
+						depreciation_method: values.depreciation_method || "Straight Line",
+						total_depreciations: values.total_depreciations || 5,
+						expected_residual: values.expected_residual || 0,
+					},
+					callback(r) {
+						if (r.message) {
+							d.hide();
+							frappe.show_alert({ message: __("Demo Asset {0} created", [r.message]), indicator: "green" });
+							frappe.set_route("Form", "Asset", r.message);
+						}
+					},
+				});
+			},
+		});
+		d.show();
 	}
 }
