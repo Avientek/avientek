@@ -32,6 +32,7 @@ def _create_asset_dam_fields():
 			"description": "Mark if this asset is designated for demo purposes",
 			"insert_after": "custom_dam_section",
 			"in_standard_filter": 1,
+			"allow_on_submit": 1,
 		},
 		{
 			"dt": "Asset",
@@ -60,5 +61,10 @@ def _create_asset_dam_fields():
 	for f in fields:
 		fieldname = f["fieldname"]
 		dt = f["dt"]
-		if not frappe.db.exists("Custom Field", f"{dt}-{fieldname}"):
+		cf_name = f"{dt}-{fieldname}"
+		if not frappe.db.exists("Custom Field", cf_name):
 			create_custom_field(dt, f)
+		else:
+			# Patch specific properties that may have been added after initial creation
+			if f.get("allow_on_submit"):
+				frappe.db.set_value("Custom Field", cf_name, "allow_on_submit", f["allow_on_submit"])
