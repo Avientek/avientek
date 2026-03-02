@@ -205,13 +205,11 @@ class DamDashboard {
 					onchange: () => {
 						const item = d.get_value("item_code");
 						if (!item) return;
-						frappe.db.get_value("Item", item, ["item_name", "standard_rate", "last_purchase_rate", "asset_category"], r => {
+						frappe.db.get_value("Item", item, ["item_name", "asset_category"], r => {
 							if (!r) return;
 							if (!d.get_value("asset_name") && r.item_name) {
 								d.set_value("asset_name", r.item_name);
 							}
-							const price = r.last_purchase_rate || r.standard_rate;
-							if (price) d.set_value("gross_purchase_amount", price);
 							if (r.asset_category) d.set_value("asset_category", r.asset_category);
 						});
 					},
@@ -241,52 +239,35 @@ class DamDashboard {
 				{
 					fieldname: "location",
 					fieldtype: "Link",
-					label: __("Location"),
+					label: __("Target Asset Location"),
 					options: "Location",
 					reqd: 1,
 				},
-				{ fieldname: "sec_break_1", fieldtype: "Section Break", label: __("Purchase Details") },
+				{ fieldname: "sec_break_stock", fieldtype: "Section Break", label: __("Consumed Stock") },
 				{
-					fieldname: "purchase_date",
+					fieldname: "warehouse",
+					fieldtype: "Link",
+					label: __("Warehouse"),
+					options: "Warehouse",
+					reqd: 1,
+					get_query: () => {
+						const company = d.get_value("company");
+						return company ? { filters: { company } } : {};
+					},
+				},
+				{
+					fieldname: "qty",
+					fieldtype: "Float",
+					label: __("Quantity"),
+					default: 1,
+					reqd: 1,
+				},
+				{
+					fieldname: "posting_date",
 					fieldtype: "Date",
-					label: __("Purchase Date"),
+					label: __("Posting Date"),
 					reqd: 1,
 					default: frappe.datetime.get_today(),
-				},
-				{
-					fieldname: "gross_purchase_amount",
-					fieldtype: "Currency",
-					label: __("Gross Purchase Amount"),
-					reqd: 1,
-				},
-				{ fieldname: "col_break_2", fieldtype: "Column Break" },
-				{
-					fieldname: "calculate_depreciation",
-					fieldtype: "Check",
-					label: __("Calculate Depreciation"),
-					default: 0,
-				},
-				{
-					fieldname: "depreciation_method",
-					fieldtype: "Select",
-					label: __("Depreciation Method"),
-					options: "Straight Line\nDouble Declining Balance\nWritten Down Value",
-					default: "Straight Line",
-					depends_on: "eval:doc.calculate_depreciation",
-				},
-				{
-					fieldname: "total_depreciations",
-					fieldtype: "Int",
-					label: __("Total Depreciations"),
-					default: 5,
-					depends_on: "eval:doc.calculate_depreciation",
-				},
-				{
-					fieldname: "expected_residual",
-					fieldtype: "Currency",
-					label: __("Expected Residual Value"),
-					default: 0,
-					depends_on: "eval:doc.calculate_depreciation",
 				},
 			],
 			primary_action_label: __("Create Asset"),
@@ -299,12 +280,9 @@ class DamDashboard {
 						asset_category: values.asset_category,
 						company: values.company,
 						location: values.location,
-						purchase_date: values.purchase_date,
-						gross_purchase_amount: values.gross_purchase_amount,
-						calculate_depreciation: values.calculate_depreciation ? 1 : 0,
-						depreciation_method: values.depreciation_method || "Straight Line",
-						total_depreciations: values.total_depreciations || 5,
-						expected_residual: values.expected_residual || 0,
+						purchase_date: values.posting_date,
+						warehouse: values.warehouse,
+						qty: values.qty || 1,
 					},
 					callback(r) {
 						if (r.message) {

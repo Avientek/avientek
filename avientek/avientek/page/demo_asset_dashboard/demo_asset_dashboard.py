@@ -153,10 +153,8 @@ def get_items_out_for_demo(company=None):
 
 @frappe.whitelist()
 def create_demo_asset(item_code, asset_name, company, location, purchase_date,
-		gross_purchase_amount, asset_category=None, calculate_depreciation=0,
-		depreciation_method="Straight Line", total_depreciations=5,
-		frequency_of_depreciation=12, expected_residual=0):
-	"""Create a draft Asset from a stock item, pre-marked as a demo asset."""
+		warehouse, qty=1, asset_category=None):
+	"""Create a Demo Asset via Asset Capitalization (consumes stock, creates Asset)."""
 	item = frappe.db.get_value("Item", item_code, ["asset_category", "item_name", "is_fixed_asset"], as_dict=True)
 	if not item:
 		frappe.throw(_("Item {0} not found").format(item_code))
@@ -165,35 +163,42 @@ def create_demo_asset(item_code, asset_name, company, location, purchase_date,
 	if not resolved_category:
 		frappe.throw(_("Asset Category is required. Please select one in the dialog."))
 
-	# Ensure item is marked as a fixed asset (ERPNext Asset validation requires this)
+	# Ensure item is marked as a fixed asset (required by Asset Capitalization)
 	if not item.is_fixed_asset:
 		frappe.db.set_value("Item", item_code, {
 			"is_fixed_asset": 1,
 			"asset_category": resolved_category,
 		})
+	elif not item.asset_category:
+		frappe.db.set_value("Item", item_code, "asset_category", resolved_category)
 
-	asset = frappe.new_doc("Asset")
-	asset.item_code = item_code
-	asset.asset_name = asset_name or item.item_name
-	asset.asset_category = resolved_category
-	asset.company = company
-	asset.location = location
-	asset.purchase_date = purchase_date
-	asset.available_for_use_date = purchase_date
-	asset.gross_purchase_amount = flt(gross_purchase_amount)
-	asset.is_existing_asset = 1
-	asset.custom_is_demo_asset = 1
-	asset.custom_dam_status = "Free"
+	# Create and submit Asset Capitalization — this deducts stock and creates the Asset
+	cap = frappe.new_doc("Asset Capitalization")
+	cap.capitalization_method = "Create a new composite asset"
+	cap.company = company
+	cap.posting_date = purchase_date
+	cap.target_item_code = item_code
+	cap.target_asset_location = location
+	cap.append("stock_items", {
+		"item_code": item_code,
+		"warehouse": warehouse,
+		"stock_qty": flt(qty),
+	})
+	cap.insert(ignore_permissions=True)
+	cap.submit()
 
-	if cint(calculate_depreciation):
-		asset.calculate_depreciation = 1
-		asset.append("finance_books", {
-			"depreciation_method": depreciation_method,
-			"total_number_of_depreciations": cint(total_depreciations),
-			"frequency_of_depreciation": cint(frequency_of_depreciation),
-			"depreciation_start_date": purchase_date,
-			"expected_value_after_useful_life": flt(expected_residual),
-		})
+	# Mark the resulting Asset as a demo asset
+	asset_name_created = cap.target_asset
+	if not asset_name_created:
+		frappe.throw(_("Asset Capitalization submitted but no Asset was created. Please check the Asset Capitalization {0}.").format(cap.name))
 
-	asset.insert(ignore_permissions=True)
-	return asset.name
+	frappe.db.set_value("Asset", asset_name_created, {
+		"custom_is_demo_asset": 1,
+		"custom_dam_status": "Free",
+	})
+
+	# Override asset_name if provided
+	if asset_name and asset_name != item.item_name:
+		frappe.db.set_value("Asset", asset_name_created, "asset_name", asset_name)
+
+	return asset_name_created
