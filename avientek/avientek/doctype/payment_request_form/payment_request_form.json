@@ -8,7 +8,6 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "workflow_state",
   "type_of_payment_section",
   "naming_series",
   "payment_type",
@@ -384,12 +383,6 @@
   {
    "fieldname": "column_break_mlnn",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "workflow_state",
-   "fieldtype": "Link",
-   "label": "Workflow State",
-   "options": "Workflow State"
   },
   {
    "fetch_from": "issued_bank.account",
