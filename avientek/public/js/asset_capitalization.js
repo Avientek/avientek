@@ -30,7 +30,7 @@ function _render_stock_availability(frm) {
 
 	frappe.call({
 		method: "avientek.api.stock_availability.get_batch_stock",
-		args: { item_codes: JSON.stringify(item_codes) },
+		args: { item_codes: JSON.stringify(item_codes), company: frm.doc.company || "" },
 		async: true,
 		callback(r) {
 			if (!r.message) return;
@@ -48,7 +48,7 @@ function _render_stock_availability(frm) {
 				const stock = data[item_code] || [];
 				html += `<div style="margin-bottom: 10px;">
 					<div style="font-weight: 500; margin-bottom: 4px;">
-						${frappe.utils.get_form_link("Item", item_code, true)} ${item_code}
+						${frappe.utils.get_form_link("Item", item_code, true)}
 					</div>`;
 
 				if (!stock.length) {
