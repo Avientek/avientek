@@ -316,8 +316,8 @@ class DamDashboard {
 					callback(r) {
 						if (r.message) {
 							d.hide();
-							frappe.show_alert({ message: __("Demo Asset {0} created", [r.message]), indicator: "green" });
-							frappe.set_route("Form", "Asset", r.message);
+							frappe.show_alert({ message: __("Asset Capitalization {0} created", [r.message]), indicator: "green" });
+							frappe.set_route("Form", "Asset Capitalization", r.message);
 						}
 					},
 				});

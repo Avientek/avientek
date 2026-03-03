@@ -199,20 +199,5 @@ def create_demo_asset(item_code, asset_name, company, location, purchase_date,
 		stock_row["batch_no"] = batch_no
 	cap.append("stock_items", stock_row)
 	cap.insert(ignore_permissions=True)
-	cap.submit()
 
-	# Mark the resulting Asset as a demo asset
-	asset_name_created = cap.target_asset
-	if not asset_name_created:
-		frappe.throw(_("Asset Capitalization submitted but no Asset was created. Please check the Asset Capitalization {0}.").format(cap.name))
-
-	frappe.db.set_value("Asset", asset_name_created, {
-		"custom_is_demo_asset": 1,
-		"custom_dam_status": "Free",
-	})
-
-	# Override asset_name if provided
-	if asset_name and asset_name != item.item_name:
-		frappe.db.set_value("Asset", asset_name_created, "asset_name", asset_name)
-
-	return asset_name_created
+	return cap.name
