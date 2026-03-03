@@ -1,13 +1,26 @@
 frappe.ui.form.on("Asset Capitalization", {
 	refresh(frm) {
-		if (frm.doc.docstatus === 0 && frm.doc.stock_items && frm.doc.stock_items.length) {
-			frm.add_custom_button(__("Update Batch"), function () {
-				_update_batch_dialog(frm);
-			}, __("Tools"));
-		}
 		_render_stock_availability(frm);
+		_add_update_batch_btn(frm);
 	},
 });
+
+function _add_update_batch_btn(frm) {
+	if (frm.doc.docstatus !== 0) return;
+	const grid = frm.fields_dict.stock_items.grid;
+	const $btnRow = grid.wrapper.find(".grid-footer .btn-open-row").parent();
+
+	// Remove old button if exists
+	$btnRow.find(".btn-update-batch").remove();
+
+	if (!(frm.doc.stock_items || []).length) return;
+
+	const $btn = $(`<button class="btn btn-xs btn-default btn-update-batch" style="margin-left: 8px;">
+		${__("Update Batch")}
+	</button>`);
+	$btn.on("click", () => _update_batch_dialog(frm));
+	$btnRow.append($btn);
+}
 
 frappe.ui.form.on("Asset Capitalization Stock Item", {
 	item_code(frm) { _render_stock_availability(frm); },
