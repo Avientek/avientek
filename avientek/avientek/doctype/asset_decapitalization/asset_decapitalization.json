@@ -1,0 +1,290 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-03-03 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "is_submittable": 1,
+ "field_order": [
+  "naming_series",
+  "asset",
+  "asset_name",
+  "item_code",
+  "company",
+  "column_break_asset",
+  "posting_date",
+  "posting_time",
+  "asset_category",
+  "cost_center",
+  "section_valuation",
+  "gross_purchase_amount",
+  "accumulated_depreciation",
+  "value_after_depreciation",
+  "column_break_valuation",
+  "entry_value",
+  "gain_loss_amount",
+  "section_target",
+  "target_item_code",
+  "target_item_name",
+  "target_warehouse",
+  "column_break_target",
+  "target_qty",
+  "serial_no",
+  "batch_no",
+  "section_items",
+  "items",
+  "section_amendment",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "ADEC-.YYYY.-.#####",
+   "reqd": 1
+  },
+  {
+   "bold": 1,
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Asset",
+   "options": "Asset",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "asset.asset_name",
+   "fieldname": "asset_name",
+   "fieldtype": "Data",
+   "label": "Asset Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "asset.item_code",
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "asset.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_asset",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Posting Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "posting_time",
+   "fieldtype": "Time",
+   "label": "Posting Time",
+   "hidden": 1
+  },
+  {
+   "fetch_from": "asset.asset_category",
+   "fieldname": "asset_category",
+   "fieldtype": "Link",
+   "label": "Asset Category",
+   "options": "Asset Category",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "section_valuation",
+   "fieldtype": "Section Break",
+   "label": "Valuation"
+  },
+  {
+   "fieldname": "gross_purchase_amount",
+   "fieldtype": "Currency",
+   "label": "Gross Purchase Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "accumulated_depreciation",
+   "fieldtype": "Currency",
+   "label": "Accumulated Depreciation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "value_after_depreciation",
+   "fieldtype": "Currency",
+   "label": "Value After Depreciation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_valuation",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Value at which the item will be received into stock. Defaults to net book value.",
+   "fieldname": "entry_value",
+   "fieldtype": "Currency",
+   "label": "Stock Entry Value",
+   "reqd": 1
+  },
+  {
+   "description": "Positive = loss, Negative = gain",
+   "fieldname": "gain_loss_amount",
+   "fieldtype": "Currency",
+   "label": "Gain / Loss Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_target",
+   "fieldtype": "Section Break",
+   "label": "Target Stock"
+  },
+  {
+   "description": "The stock item to receive into warehouse. Must have Is Stock Item enabled.",
+   "fieldname": "target_item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Target Item Code",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "target_item_code.item_name",
+   "fieldname": "target_item_name",
+   "fieldtype": "Data",
+   "label": "Target Item Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "target_warehouse",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Target Warehouse",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_target",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "target_qty",
+   "fieldtype": "Int",
+   "label": "Qty",
+   "reqd": 1
+  },
+  {
+   "fieldname": "serial_no",
+   "fieldtype": "Small Text",
+   "label": "Serial No"
+  },
+  {
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "label": "Batch No",
+   "options": "Batch"
+  },
+  {
+   "fieldname": "section_items",
+   "fieldtype": "Section Break",
+   "hidden": 1
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "hidden": 1,
+   "label": "Items",
+   "options": "Asset Decapitalization Item"
+  },
+  {
+   "fieldname": "section_amendment",
+   "fieldtype": "Section Break",
+   "hidden": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Asset Decapitalization",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-03-03 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Asset Decapitalization",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAM Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "asset,asset_name,company",
+ "sort_field": "posting_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "asset_name",
+ "track_changes": 1
+}

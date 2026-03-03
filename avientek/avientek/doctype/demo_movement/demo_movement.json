@@ -85,7 +85,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Open\nReturned\nOverdue",
+   "options": "Open\nReturned\nOverdue\nCompleted",
    "default": "Open",
    "read_only": 1,
    "in_list_view": 1,

@@ -14,10 +14,14 @@ frappe.pages["demo-asset-dashboard"].on_page_show = function () {
 	}
 };
 
+const DAM_API = "avientek.avientek.page.demo_asset_dashboard.demo_asset_dashboard";
+
 class DamDashboard {
 	constructor(page) {
 		this.page = page;
 		this.company = null;
+		this.current_view = "dashboard";
+		this.asset_filter = "All";
 		this.$main = $(this.page.main);
 		this.setup_page();
 	}
@@ -25,7 +29,6 @@ class DamDashboard {
 	setup_page() {
 		this.page.set_secondary_action(__("Refresh"), () => this.refresh(), "octicon octicon-sync");
 
-		// Company filter
 		this.company_field = this.page.add_field({
 			fieldname: "company",
 			fieldtype: "Link",
@@ -40,42 +43,117 @@ class DamDashboard {
 		this.company = this.company_field.get_value();
 
 		this.$main.html(this.get_skeleton());
+		this.$sidebar = this.$main.find(".dam-sidebar");
+		this.$content = this.$main.find(".dam-main-content");
+
+		this.render_sidebar();
 		this.refresh();
 	}
 
 	get_skeleton() {
 		return `
-		<div class="dam-dashboard">
-			<div class="dam-stat-row" id="dam-stats"></div>
-			<div class="dam-overdue-banner" id="dam-overdue" style="display:none"></div>
-			<div class="dam-content-row">
-				<div class="dam-panel dam-movements" id="dam-movements"></div>
-				<div class="dam-panel dam-quick-actions" id="dam-quick-actions"></div>
-			</div>
+		<div class="dam-app">
+			<aside class="dam-sidebar"></aside>
+			<main class="dam-main-content"></main>
 		</div>`;
 	}
 
+	render_sidebar() {
+		const nav = [
+			{ id: "dashboard", label: __("Dashboard"), icon: "\u2B21" },
+			{ id: "demo-assets", label: __("Demo Assets"), icon: "\u25C8" },
+			{ id: "items-out", label: __("Items Out for Demo"), icon: "\u2197" },
+			{ id: "divider1", type: "divider" },
+			{ id: "new-movement", label: __("New Movement"), icon: "\u21C4", action: () => frappe.new_doc("Demo Movement") },
+			{ id: "rma-cases", label: __("RMA Cases"), icon: "\u21BA" },
+			{ id: "new-rma", label: __("New RMA Case"), icon: "\uFF0B", action: () => frappe.new_doc("RMA Case") },
+			{ id: "divider2", type: "divider" },
+			{ id: "ack", label: __("Acknowledgement"), icon: "\u2726", action: () => frappe.set_route("List", "Demo Movement", { docstatus: 1 }) },
+		];
+
+		let html = `
+			<ul class="dam-nav">`;
+
+		nav.forEach(n => {
+			if (n.type === "divider") {
+				html += `<li class="dam-nav-divider"></li>`;
+			} else {
+				const active = n.id === this.current_view ? " active" : "";
+				html += `
+				<li class="dam-nav-item${active}" data-view="${n.id}" data-is-action="${n.action ? 1 : 0}">
+					<span class="dam-nav-icon">${n.icon}</span>
+					${n.label}
+				</li>`;
+			}
+		});
+
+		html += `</ul>`;
+		this.$sidebar.html(html);
+
+		// Bind click handlers
+		const self = this;
+		this.$sidebar.find(".dam-nav-item").on("click", function () {
+			const view = $(this).data("view");
+			const is_action = $(this).data("is-action");
+			if (is_action) {
+				const item = nav.find(n => n.id === view);
+				if (item && item.action) item.action();
+			} else {
+				self.switch_view(view);
+			}
+		});
+	}
+
+	switch_view(view_key) {
+		this.current_view = view_key;
+		this.$sidebar.find(".dam-nav-item").removeClass("active");
+		this.$sidebar.find(`[data-view="${view_key}"]`).addClass("active");
+		this.$content.empty();
+		this.refresh_current();
+	}
+
 	refresh() {
+		this.refresh_current();
+	}
+
+	refresh_current() {
+		switch (this.current_view) {
+			case "dashboard": this.refresh_dashboard(); break;
+			case "demo-assets": this.refresh_demo_assets(); break;
+			case "items-out": this.refresh_items_out(); break;
+			case "rma-cases": this.refresh_rma_cases(); break;
+		}
+	}
+
+	// ─── Dashboard View ───
+
+	refresh_dashboard() {
 		const company = this.company || null;
+		this.$content.html(`
+			<div class="dam-dashboard">
+				<div class="dam-stat-row" id="dam-stats"></div>
+				<div class="dam-overdue-banner" id="dam-overdue" style="display:none"></div>
+				<div class="dam-panel dam-movements" id="dam-movements"></div>
+			</div>`);
+
 		Promise.all([
-			frappe.call({ method: "avientek.avientek.page.demo_asset_dashboard.demo_asset_dashboard.get_dashboard_stats", args: { company } }),
-			frappe.call({ method: "avientek.avientek.page.demo_asset_dashboard.demo_asset_dashboard.get_overdue_assets", args: { company } }),
-			frappe.call({ method: "avientek.avientek.page.demo_asset_dashboard.demo_asset_dashboard.get_recent_movements", args: { company, limit: 8 } }),
+			frappe.call({ method: `${DAM_API}.get_dashboard_stats`, args: { company } }),
+			frappe.call({ method: `${DAM_API}.get_overdue_assets`, args: { company } }),
+			frappe.call({ method: `${DAM_API}.get_recent_movements`, args: { company, limit: 8 } }),
 		]).then(([stats_r, overdue_r, movements_r]) => {
 			this.render_stats(stats_r.message || {});
 			this.render_overdue_banner(overdue_r.message || []);
 			this.render_movements(movements_r.message || []);
-			this.render_quick_actions();
 		});
 	}
 
 	render_stats(data) {
 		const cards = [
-			{ label: "Total Demo Assets", value: data.total || 0, color: "#2563EB", icon: "assets", route: ["List", "Asset", { custom_is_demo_asset: 1 }] },
-			{ label: "Out for Demo", value: data.out_for_demo || 0, color: "#EA580C", icon: "arrow-up-right", route: ["List", "Asset", { custom_dam_status: "On Demo" }] },
-			{ label: "Overdue", value: data.overdue || 0, color: "#DC2626", icon: "alert", route: ["demo-asset-dashboard"] },
-			{ label: "Free / Available", value: data.free || 0, color: "#059669", icon: "circle", route: ["List", "Asset", { custom_dam_status: "Free", custom_is_demo_asset: 1 }] },
-			{ label: "Open RMA Cases", value: data.open_rma || 0, color: "#D97706", icon: "refresh", route: ["List", "RMA Case", {}] },
+			{ label: "Total Demo Assets", value: data.total || 0, color: "#2563EB", icon: "\u25C8", route: ["List", "Asset", { custom_is_demo_asset: 1 }] },
+			{ label: "Out for Demo", value: data.out_for_demo || 0, color: "#EA580C", icon: "\u2197", route: ["List", "Asset", { custom_dam_status: "On Demo" }] },
+			{ label: "Overdue", value: data.overdue || 0, color: "#DC2626", icon: "\u26A0", route: null },
+			{ label: "Free / Available", value: data.free || 0, color: "#059669", icon: "\u25CB", route: ["List", "Asset", { custom_dam_status: "Free", custom_is_demo_asset: 1 }] },
+			{ label: "Open RMA Cases", value: data.open_rma || 0, color: "#0EA5C9", icon: "\u21BA", route: null },
 		];
 
 		const html = cards.map(c => `
@@ -85,30 +163,35 @@ class DamDashboard {
 				<div class="dam-stat-label">${__(c.label)}</div>
 			</div>`).join("");
 
-		this.$main.find("#dam-stats").html(html);
+		this.$content.find("#dam-stats").html(html);
 
-		// Card click routing
-		this.$main.find(".dam-stat-card").on("click", function () {
+		const self = this;
+		this.$content.find(".dam-stat-card").on("click", function () {
 			const route = $(this).data("route");
-			if (route) frappe.set_route(...route);
+			if (route) {
+				frappe.set_route(...route);
+			} else {
+				// Overdue or RMA — switch to internal view
+				const label = $(this).find(".dam-stat-label").text();
+				if (label.includes("Overdue")) self.switch_view("items-out");
+				else if (label.includes("RMA")) self.switch_view("rma-cases");
+			}
 		});
 	}
 
 	render_overdue_banner(overdue) {
-		const $banner = this.$main.find("#dam-overdue");
+		const $banner = this.$content.find("#dam-overdue");
 		if (!overdue.length) {
 			$banner.hide();
 			return;
 		}
 		const names = overdue.slice(0, 3).map(o =>
-			`<a href="/app/demo-movement?asset=${o.asset}">
-				${o.asset_name} @ ${o.customer} (${o.days_overdue}d overdue)
-			</a>`
-		).join(" &middot; ");
+			`${o.asset_name} @ ${o.customer}`
+		).join(" \u00B7 ");
 
 		$banner.show().html(`
 			<div class="dam-overdue-content">
-				<span class="dam-overdue-icon">⚠</span>
+				<span class="dam-overdue-icon">\u26A0\uFE0F</span>
 				<span>
 					<strong>${overdue.length} demo unit${overdue.length > 1 ? "s" : ""} overdue for return</strong>
 					<span class="dam-overdue-names">${names}</span>
@@ -116,24 +199,30 @@ class DamDashboard {
 				<button class="btn btn-danger btn-xs dam-view-all">${__("View All")}</button>
 			</div>`);
 
-		$banner.find(".dam-view-all").on("click", () => {
-			frappe.set_route("List", "Demo Movement", {
-				movement_type: "Move Out",
-				status: "Overdue",
-			});
-		});
+		$banner.find(".dam-view-all").on("click", () => this.switch_view("items-out"));
 	}
 
 	render_movements(movements) {
 		if (!movements.length) {
-			this.$main.find("#dam-movements").html(`
+			this.$content.find("#dam-movements").html(`
 				<div class="dam-panel-header">${__("Recent Asset Movements")}</div>
 				<div class="dam-empty">${__("No movements yet")}</div>`);
 			return;
 		}
 
 		const rows = movements.map(m => {
-			const status_color = { Open: "orange", Returned: "green", Overdue: "red" }[m.status] || "gray";
+			const display_status = (m.status === "Returned" || m.status === "Completed")
+				? m.status
+				: (m.custom_dam_status || m.status);
+			const status_color = {
+				"On Demo": "orange",
+				"Issued as Standby": "blue",
+				"Free": "green",
+				"Returned": "green",
+				"Completed": "green",
+				"Open": "orange",
+				"Overdue": "red",
+			}[display_status] || "gray";
 			return `
 			<tr class="dam-movement-row" onclick="frappe.set_route('Form','Demo Movement','${m.name}')"
 				style="cursor:pointer">
@@ -141,15 +230,15 @@ class DamDashboard {
 					<div class="dam-asset-name">${m.asset_name || m.asset}</div>
 					<div class="dam-asset-sub">${m.asset}</div>
 				</td>
-				<td>${m.customer || "—"}</td>
-				<td>${frappe.datetime.str_to_user(m.movement_date) || "—"}</td>
+				<td>${m.customer || "\u2014"}</td>
+				<td>${frappe.datetime.str_to_user(m.movement_date) || "\u2014"}</td>
 				<td>
-					<span class="indicator-pill ${status_color}">${__(m.status)}</span>
+					<span class="indicator-pill ${status_color}">${__(display_status).toUpperCase()}</span>
 				</td>
 			</tr>`;
 		}).join("");
 
-		this.$main.find("#dam-movements").html(`
+		this.$content.find("#dam-movements").html(`
 			<div class="dam-panel-header">
 				${__("Recent Asset Movements")}
 				<a class="dam-see-all" onclick="frappe.set_route('List','Demo Movement',{})">${__("See All")}</a>
@@ -167,28 +256,329 @@ class DamDashboard {
 			</table>`);
 	}
 
-	render_quick_actions() {
-		const actions = [
-			{ label: "Quick Create Demo Asset", icon: "+", color: "#7C3AED", action: () => frappe.new_doc("Asset Capitalization") },
-			{ label: "New Demo Movement", icon: "↕", color: "#2563EB", action: () => frappe.new_doc("Demo Movement") },
-			{ label: "Open RMA Case", icon: "⟳", color: "#D97706", action: () => frappe.new_doc("RMA Case") },
-			{ label: "All Demo Assets", icon: "◆", color: "#059669", action: () => frappe.set_route("List", "Asset", { custom_is_demo_asset: 1 }) },
-			{ label: "Items Out for Demo", icon: "↗", color: "#EA580C", action: () => frappe.set_route("List", "Asset", { custom_dam_status: "On Demo" }) },
-			{ label: "View Overdue", icon: "⚠", color: "#DC2626", action: () => frappe.set_route("List", "Demo Movement", { status: "Overdue" }) },
-		];
+	// ─── Demo Assets View ───
 
-		const html = actions.map(a => `
-			<div class="dam-quick-action" style="cursor:pointer; border-left: 3px solid ${a.color}">
-				<span class="dam-qa-icon" style="color:${a.color}">${a.icon}</span>
-				<span class="dam-qa-label">${__(a.label)}</span>
-			</div>`).join("");
+	refresh_demo_assets() {
+		const company = this.company || null;
+		const filter = this.asset_filter || "All";
 
-		this.$main.find("#dam-quick-actions").html(`
-			<div class="dam-panel-header">${__("Quick Actions")}</div>
-			${html}`);
+		this.$content.html(`
+			<div class="dam-view-header">
+				<div class="dam-view-title">
+					<h2>${__("Demo Asset Register")}</h2>
+					<p>${__("All capitalized demo equipment \u2014 UAE & KSA")}</p>
+				</div>
+				<button class="dam-btn-primary" id="dam-capitalize-btn">+ ${__("Capitalize New Asset")}</button>
+			</div>
+			<div class="dam-filter-row" id="dam-asset-filters"></div>
+			<div class="dam-table-card" id="dam-asset-table">
+				<div class="dam-empty">${__("Loading...")}</div>
+			</div>`);
 
-		actions.forEach((a, i) => {
-			this.$main.find(".dam-quick-action").eq(i).on("click", a.action);
+		this.$content.find("#dam-capitalize-btn").on("click", () => frappe.new_doc("Asset Capitalization"));
+
+		// Render filter pills
+		const filters = ["All", "Free", "On Demo", "Issued as Standby"];
+		const pills = filters.map(f =>
+			`<span class="dam-filter-pill${f === filter ? " active" : ""}" data-filter="${f}">${__(f)}</span>`
+		).join("");
+		this.$content.find("#dam-asset-filters").html(pills);
+
+		this.$content.find(".dam-filter-pill").on("click", (e) => {
+			this.asset_filter = $(e.currentTarget).data("filter");
+			this.refresh_demo_assets();
+		});
+
+		frappe.call({
+			method: `${DAM_API}.get_demo_assets`,
+			args: { company, status_filter: filter },
+		}).then(r => {
+			this.render_demo_assets(r.message || []);
 		});
 	}
+
+	render_demo_assets(data) {
+		const $table = this.$content.find("#dam-asset-table");
+
+		if (!data.length) {
+			$table.html(`<div class="dam-empty">${__("No demo assets found")}</div>`);
+			return;
+		}
+
+		const rows = data.map(a => {
+			const status = a.custom_dam_status || "Free";
+			const badge_cls = {
+				"Free": "dam-badge-free",
+				"On Demo": "dam-badge-on-demo",
+				"Issued as Standby": "dam-badge-standby",
+			}[status] || "";
+
+			let days_html = `<span style="color:var(--text-muted)">\u2014</span>`;
+			if (a.days_out !== null && a.days_out !== undefined) {
+				const cls = a.is_overdue ? "dam-days-overdue" : a.days_out > 10 ? "dam-days-warning" : "dam-days-ok";
+				days_html = `<span class="dam-days-out ${cls}">${a.days_out}d${a.is_overdue ? " \u26A0" : ""}</span>`;
+			}
+
+			const location = a.custom_dam_customer || a.location || "\u2014";
+			const serial = a.custom_serial_no || "\u2014";
+			const part_no = a.custom_part_no || "\u2014";
+			const owned_by = a.asset_owner_company || "\u2014";
+			const country = a.custom_dam_country || "\u2014";
+			const notes = a.custom_dam_notes || "";
+			const so_num = a.custom_so_number || "\u2014";
+			const so_date = a.custom_so_date || "\u2014";
+
+			let actions = `<button class="dam-btn-view" onclick="frappe.set_route('Form','Asset','${a.name}')">${__("View")}</button>`;
+			if (status === "Free") {
+				actions += ` <button class="dam-btn-moveout" onclick="frappe.new_doc('Demo Movement',{asset:'${a.name}',movement_type:'Move Out',company:'${a.company}'})">${__("Move Out")}</button>`;
+			}
+
+			return `
+			<tr class="${a.is_overdue ? "dam-row-overdue" : ""}">
+				<td><span class="dam-badge ${badge_cls}">${__(status).toUpperCase()}</span></td>
+				<td>${country}</td>
+				<td style="color:var(--text-muted); font-size:0.85rem">${location}</td>
+				<td>
+					<div class="dam-asset-name">${a.brand || "\u2014"}</div>
+				</td>
+				<td>
+					<div class="dam-asset-sub">${a.asset_name || a.item_code || ""}</div>
+				</td>
+				<td class="dam-mono-cell">${serial}</td>
+				<td class="dam-mono-cell">${part_no}</td>
+				<td>${owned_by}</td>
+				<td style="color:var(--text-muted); font-size:0.82rem; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${frappe.utils.escape_html(notes)}">${notes || "\u2014"}</td>
+				<td class="dam-mono-cell">${so_date}</td>
+				<td>${so_num !== "\u2014" ? `<a onclick="frappe.set_route('Form','Sales Order','${so_num}')">${so_num}</a>` : "\u2014"}</td>
+				<td>${days_html}</td>
+				<td><div style="display:flex;gap:6px">${actions}</div></td>
+			</tr>`;
+		}).join("");
+
+		$table.html(`
+			<div style="overflow-x:auto">
+			<table class="dam-table">
+				<thead><tr>
+					<th>${__("Status")}</th>
+					<th>${__("Country")}</th>
+					<th>${__("Location")}</th>
+					<th>${__("Brand")}</th>
+					<th>${__("Model")}</th>
+					<th>${__("Serial No")}</th>
+					<th>${__("Part No")}</th>
+					<th>${__("Owned By")}</th>
+					<th>${__("Note")}</th>
+					<th>${__("SO Date")}</th>
+					<th>${__("SO No")}</th>
+					<th>${__("Days Out")}</th>
+					<th>${__("Actions")}</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>
+			</div>`);
+	}
+
+	// ─── Items Out for Demo View ───
+
+	refresh_items_out() {
+		const company = this.company || null;
+
+		this.$content.html(`
+			<div class="dam-view-header">
+				<div class="dam-view-title">
+					<h2>${__("Items Out for Demo")}</h2>
+					<p>${__("Live tracker \u2014 units currently at customer sites")}</p>
+				</div>
+			</div>
+			<div class="dam-table-card" id="dam-out-table">
+				<div class="dam-empty">${__("Loading...")}</div>
+			</div>`);
+
+		frappe.call({
+			method: `${DAM_API}.get_items_out_for_demo`,
+			args: { company },
+		}).then(r => {
+			this.render_items_out(r.message || []);
+		});
+	}
+
+	render_items_out(data) {
+		const $table = this.$content.find("#dam-out-table");
+
+		if (!data.length) {
+			$table.html(`<div class="dam-empty">${__("No assets currently out for demo")}</div>`);
+			return;
+		}
+
+		const rows = data.map(a => {
+			const is_overdue = a.is_overdue;
+			const days_cls = is_overdue ? "dam-days-overdue" : a.days_outstanding > 10 ? "dam-days-warning" : "dam-days-ok";
+
+			let return_date_html = "\u2014";
+			if (a.expected_return_date) {
+				const date_str = frappe.datetime.str_to_user(a.expected_return_date);
+				if (is_overdue) {
+					return_date_html = `<span style="color:#DC2626; font-weight:700">${date_str} <span style="font-size:0.72rem">OVERDUE</span></span>`;
+				} else {
+					return_date_html = date_str;
+				}
+			}
+
+			const status_badge = is_overdue
+				? `<span class="dam-badge dam-badge-overdue">OVERDUE</span>`
+				: `<span class="dam-badge dam-badge-on-demo">ON DEMO</span>`;
+
+			return `
+			<tr class="${is_overdue ? "dam-row-overdue" : ""}" style="cursor:pointer"
+				onclick="frappe.set_route('Form','Demo Movement','${a.movement_name}')">
+				<td>
+					<div class="dam-asset-name">${a.asset_name || a.asset}</div>
+					<div class="dam-asset-sub dam-asset-id">${a.asset}</div>
+				</td>
+				<td style="font-weight:500">${a.customer || "\u2014"}</td>
+				<td style="color:var(--text-muted)">${frappe.datetime.str_to_user(a.movement_date) || "\u2014"}</td>
+				<td>${return_date_html}</td>
+				<td><span class="dam-days-out ${days_cls}">${a.days_outstanding}d</span></td>
+				<td style="color:var(--text-muted)">${a.requested_salesperson || "\u2014"}</td>
+				<td>
+					<div style="display:flex; gap:6px; align-items:center">
+						${status_badge}
+						<button class="dam-btn-return" data-asset="${a.asset}" data-movement="${a.movement_name}"
+							onclick="event.stopPropagation(); window._dam_return_asset(this.dataset.movement)">
+							${__("Return")}
+						</button>
+					</div>
+				</td>
+			</tr>`;
+		}).join("");
+
+		$table.html(`
+			<table class="dam-table">
+				<thead><tr>
+					<th>${__("Asset")}</th>
+					<th>${__("Customer / Site")}</th>
+					<th>${__("Movement Date")}</th>
+					<th>${__("Expected Return")}</th>
+					<th>${__("Days Outstanding")}</th>
+					<th>${__("Salesperson")}</th>
+					<th>${__("Status")}</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>`);
+	}
+
+	// ─── RMA Cases View ───
+
+	refresh_rma_cases() {
+		const company = this.company || null;
+
+		this.$content.html(`
+			<div class="dam-view-header">
+				<div class="dam-view-title">
+					<h2>${__("RMA Case Register")}</h2>
+					<p>${__("Return Merchandise Authorization \u2014 all active and closed cases")}</p>
+				</div>
+				<button class="dam-btn-primary" id="dam-new-rma-btn">+ ${__("New RMA Case")}</button>
+			</div>
+			<div class="dam-table-card" id="dam-rma-table">
+				<div class="dam-empty">${__("Loading...")}</div>
+			</div>`);
+
+		this.$content.find("#dam-new-rma-btn").on("click", () => frappe.new_doc("RMA Case"));
+
+		frappe.call({
+			method: `${DAM_API}.get_rma_cases`,
+			args: { company },
+		}).then(r => {
+			this.render_rma_cases(r.message || []);
+		});
+	}
+
+	render_rma_cases(data) {
+		const $table = this.$content.find("#dam-rma-table");
+
+		if (!data.length) {
+			$table.html(`<div class="dam-empty">${__("No RMA cases found")}</div>`);
+			return;
+		}
+
+		const status_badge_map = {
+			"Open": "dam-badge-open",
+			"In Progress": "dam-badge-in-progress",
+			"Pending Parts": "dam-badge-pending-parts",
+			"Sent for Repair": "dam-badge-sent-for-repair",
+			"Repaired": "dam-badge-repaired",
+			"Replaced": "dam-badge-replaced",
+			"Closed": "dam-badge-closed",
+			"Cancelled": "dam-badge-cancelled",
+		};
+
+		const rows = data.map(r => {
+			const badge_cls = status_badge_map[r.status] || "";
+			const warranty_cls = r.warranty_status === "Active" ? "dam-badge-active"
+				: r.warranty_status === "Expired" ? "dam-badge-expired" : "";
+
+			const standby_html = r.standby_unit
+				? `<span class="dam-asset-id" onclick="event.stopPropagation(); frappe.set_route('Form','Asset','${r.standby_unit}')">${r.standby_unit}</span>`
+				: `<span style="color:var(--text-muted)">\u2014</span>`;
+
+			return `
+			<tr style="cursor:pointer" onclick="frappe.set_route('Form','RMA Case','${r.name}')">
+				<td><span class="dam-asset-id">${r.name}</span></td>
+				<td style="font-weight:600">${r.customer || "\u2014"}</td>
+				<td style="color:var(--text-muted); font-size:0.82rem">${r.item_description || "\u2014"}</td>
+				<td style="color:var(--text-muted); font-size:0.78rem; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${r.fault_description || "\u2014"}</td>
+				<td>${r.warranty_status ? `<span class="dam-badge ${warranty_cls}">${__(r.warranty_status).toUpperCase()}</span>` : "\u2014"}</td>
+				<td>${standby_html}</td>
+				<td><span class="dam-badge ${badge_cls}">${__(r.status).toUpperCase()}</span></td>
+				<td style="color:var(--text-muted); font-size:0.82rem">${frappe.datetime.str_to_user(r.rma_date) || "\u2014"}</td>
+			</tr>`;
+		}).join("");
+
+		$table.html(`
+			<table class="dam-table">
+				<thead><tr>
+					<th>${__("Case ID")}</th>
+					<th>${__("Customer")}</th>
+					<th>${__("Product")}</th>
+					<th>${__("Issue")}</th>
+					<th>${__("Warranty")}</th>
+					<th>${__("Standby Unit")}</th>
+					<th>${__("Status")}</th>
+					<th>${__("Created")}</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>`);
+	}
 }
+
+// Helper: short company name for badge
+function _get_company_short(company) {
+	if (!company) return "\u2014";
+	if (company.includes("FZCO") || company.includes("LLC")) return "UAE";
+	if (company.includes("WLL") || company.includes("KSA")) return "KSA";
+	return company.split(" ")[0];
+}
+
+// Helper: create Return movement with all fields from the original Move Out
+window._dam_return_asset = function (movement_name) {
+	frappe.db.get_value("Demo Movement", movement_name, [
+		"asset", "company", "customer", "contact_person", "mobile",
+		"email", "country", "purpose", "requested_salesperson", "serial_number",
+	], (r) => {
+		if (!r) return;
+		frappe.new_doc("Demo Movement", {
+			asset: r.asset,
+			movement_type: "Return",
+			company: r.company,
+			customer: r.customer,
+			contact_person: r.contact_person,
+			mobile: r.mobile,
+			email: r.email,
+			country: r.country,
+			purpose: r.purpose,
+			requested_salesperson: r.requested_salesperson,
+			serial_number: r.serial_number,
+		});
+	});
+};

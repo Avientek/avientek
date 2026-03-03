@@ -4,7 +4,7 @@
  "creation": "2026-03-02 00:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
- "is_submittable": 0,
+ "is_submittable": 1,
  "field_order": [
   "naming_series",
   "status",
@@ -13,6 +13,7 @@
   "company",
   "rma_date",
   "closed_date",
+  "amended_from",
   "section_customer",
   "customer",
   "contact_person",
@@ -62,7 +63,8 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "reqd": 1,
-   "bold": 1
+   "bold": 1,
+   "allow_on_submit": 1
   },
   {
    "fieldname": "priority",
@@ -98,6 +100,16 @@
    "fieldname": "closed_date",
    "fieldtype": "Date",
    "label": "Closed Date",
+   "read_only": 1,
+   "allow_on_submit": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "RMA Case",
+   "print_hide": 1,
    "read_only": 1
   },
   {
@@ -205,7 +217,8 @@
    "fieldtype": "Link",
    "label": "Standby Unit Issued",
    "options": "Asset",
-   "description": "Asset issued as standby replacement while RMA in progress"
+   "description": "Asset issued as standby replacement while RMA in progress",
+   "allow_on_submit": 1
   },
   {
    "fieldname": "section_fault",
@@ -225,7 +238,8 @@
   {
    "fieldname": "resolution_notes",
    "fieldtype": "Text",
-   "label": "Resolution Notes"
+   "label": "Resolution Notes",
+   "allow_on_submit": 1
   },
   {
    "fieldname": "section_financial",
@@ -272,7 +286,8 @@
    "fieldname": "repair_cost",
    "fieldtype": "Currency",
    "label": "Estimated Repair Cost",
-   "options": "repair_cost_currency"
+   "options": "repair_cost_currency",
+   "allow_on_submit": 1
   },
   {
    "fieldname": "repair_cost_currency",
@@ -290,7 +305,8 @@
    "fieldname": "case_log",
    "fieldtype": "Table",
    "label": "Case Log",
-   "options": "RMA Case Log"
+   "options": "RMA Case Log",
+   "allow_on_submit": 1
   }
  ],
  "grid_page_length": 20,
@@ -303,6 +319,8 @@
  "owner": "Administrator",
  "permissions": [
   {
+   "amend": 1,
+   "cancel": 1,
    "create": 1,
    "delete": 1,
    "email": 1,
@@ -312,9 +330,12 @@
    "report": 1,
    "role": "System Manager",
    "share": 1,
+   "submit": 1,
    "write": 1
   },
   {
+   "amend": 1,
+   "cancel": 1,
    "create": 1,
    "delete": 0,
    "email": 1,
@@ -324,9 +345,12 @@
    "report": 1,
    "role": "DAM Manager",
    "share": 1,
+   "submit": 1,
    "write": 1
   },
   {
+   "amend": 0,
+   "cancel": 0,
    "create": 1,
    "delete": 0,
    "email": 1,
@@ -336,9 +360,12 @@
    "report": 1,
    "role": "DAM User",
    "share": 0,
+   "submit": 1,
    "write": 1
   },
   {
+   "amend": 0,
+   "cancel": 0,
    "create": 1,
    "delete": 0,
    "email": 1,
@@ -348,6 +375,7 @@
    "report": 1,
    "role": "Sales User",
    "share": 0,
+   "submit": 1,
    "write": 1
   },
   {
@@ -364,7 +392,8 @@
   }
  ],
  "row_format": "Dynamic",
- "search_fields": "customer,asset_serial_number,item_description,status",
+ "search_fields": "customer,asset_serial_number,item_description",
+ "show_title_field_in_link": 1,
  "sort_field": "rma_date",
  "sort_order": "DESC",
  "states": [

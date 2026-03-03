@@ -23,9 +23,13 @@ class DemoMovement(Document):
 			self._set_asset_status("Free", "")
 
 	def on_cancel(self):
-		self._set_asset_status("Free", "")
-		if self.movement_type == "Return":
+		if self.movement_type == "Move Out":
+			self._set_asset_status("Free", "")
+		elif self.movement_type == "Return":
+			self._set_asset_status("Free", "")
 			self._reopen_previous_movement()
+		elif self.movement_type == "Internal Transfer":
+			self._set_asset_status("Free", "")
 
 	def _set_asset_status(self, status, customer):
 		frappe.db.set_value("Asset", self.asset, {
@@ -53,6 +57,9 @@ class DemoMovement(Document):
 				"status": "Returned",
 				"actual_return_date": today(),
 			})
+
+		# Mark this Return movement as Completed
+		frappe.db.set_value("Demo Movement", self.name, "status", "Completed")
 
 	def _reopen_previous_movement(self):
 		"""On cancel of Return, revert the matched move-out back to Open/Overdue."""

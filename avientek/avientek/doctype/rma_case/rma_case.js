@@ -4,24 +4,26 @@ frappe.ui.form.on("RMA Case", {
 		frm.trigger("set_status_indicator");
 		frm.trigger("add_action_buttons");
 
-		// Filter asset field to demo assets only
+		// Filter asset field to demo assets only (exclude cancelled)
 		frm.set_query("demo_asset", () => ({
-			filters: { custom_is_demo_asset: 1 },
+			filters: { custom_is_demo_asset: 1, docstatus: ["!=", 2] },
 		}));
-		frm.set_query("standby_unit", () => ({
-			filters: { custom_is_demo_asset: 1, custom_dam_status: "Free" },
-		}));
+		frm.set_query("standby_unit", () => {
+			const filters = { custom_is_demo_asset: 1, docstatus: ["!=", 2], custom_dam_status: "Free" };
+			if (frm.doc.demo_asset) filters.name = ["!=", frm.doc.demo_asset];
+			return { filters };
+		});
 	},
 
 	demo_asset(frm) {
 		if (!frm.doc.demo_asset) return;
 		frappe.db.get_value("Asset", frm.doc.demo_asset, [
-			"gross_purchase_amount", "asset_value", "company",
+			"gross_purchase_amount", "value_after_depreciation", "company",
 		], (r) => {
 			if (!r) return;
 			frm.set_value("gross_asset_value", r.gross_purchase_amount || 0);
-			frm.set_value("net_asset_value", r.asset_value || 0);
-			frm.set_value("accumulated_depreciation", (r.gross_purchase_amount || 0) - (r.asset_value || 0));
+			frm.set_value("net_asset_value", r.value_after_depreciation || 0);
+			frm.set_value("accumulated_depreciation", (r.gross_purchase_amount || 0) - (r.value_after_depreciation || 0));
 			if (r.company && !frm.doc.company) {
 				frm.set_value("company", r.company);
 			}
@@ -54,21 +56,25 @@ frappe.ui.form.on("RMA Case", {
 	},
 
 	add_action_buttons(frm) {
-		if (frm.is_new()) return;
+		if (frm.is_new() || frm.doc.docstatus !== 1) return;
 
 		// Issue Standby Unit
-		if (frm.doc.status === "In Progress" && !frm.doc.standby_unit) {
+		if (!["Closed", "Cancelled"].includes(frm.doc.status) && !frm.doc.standby_unit) {
 			frm.add_custom_button(__("Issue Standby Unit"), () => {
 				frappe.prompt({
 					fieldname: "standby_asset",
 					fieldtype: "Link",
 					options: "Asset",
 					label: __("Asset (Free demo unit to issue as standby)"),
-					get_query: () => ({ filters: { custom_is_demo_asset: 1, custom_dam_status: "Free" } }),
+					get_query: () => {
+					const filters = { custom_is_demo_asset: 1, docstatus: ["!=", 2], custom_dam_status: "Free" };
+					if (frm.doc.demo_asset) filters.name = ["!=", frm.doc.demo_asset];
+					return { filters };
+				},
 					reqd: 1,
 				}, (values) => {
 					frm.set_value("standby_unit", values.standby_asset);
-					frm.save();
+					frm.save("Update");
 					frappe.show_alert({ message: __("Standby unit assigned"), indicator: "green" });
 				}, __("Issue Standby Unit"), __("Assign"));
 			}, __("Actions"));
@@ -77,9 +83,14 @@ frappe.ui.form.on("RMA Case", {
 		// Return Standby Unit
 		if (frm.doc.standby_unit && !["Closed", "Cancelled", "Replaced"].includes(frm.doc.status)) {
 			frm.add_custom_button(__("Return Standby Unit"), () => {
-				frm.set_value("standby_unit", "");
-				frm.save();
-				frappe.show_alert({ message: __("Standby unit returned to Free"), indicator: "blue" });
+				frappe.confirm(
+					__("Return standby unit <b>{0}</b>? Its status will be set back to Free.", [frm.doc.standby_unit]),
+					() => {
+						frm.set_value("standby_unit", "");
+						frm.save("Update");
+						frappe.show_alert({ message: __("Standby unit returned to Free"), indicator: "green" });
+					}
+				);
 			}, __("Actions"));
 		}
 
@@ -90,7 +101,7 @@ frappe.ui.form.on("RMA Case", {
 					__("Close this RMA Case? This will set the status to Closed."),
 					() => {
 						frm.set_value("status", "Closed");
-						frm.save();
+						frm.save("Update");
 					}
 				);
 			}, __("Actions"));
@@ -125,7 +136,7 @@ frappe.ui.form.on("RMA Case", {
 						log_date: frappe.datetime.now_datetime(),
 					});
 					frm.refresh_field("case_log");
-					frm.save();
+					frm.save("Update");
 					d.hide();
 					frappe.show_alert({ message: __("Log entry added"), indicator: "green" });
 				},

@@ -1,16 +1,21 @@
 {
- "creation": "2026-03-02 00:00:00.000000",
+ "creation": "2026-03-02 00:00:00",
+ "docstatus": 0,
  "doctype": "Number Card",
  "document_type": "Asset",
- "filters_json": "[{\"fieldname\":\"custom_is_demo_asset\",\"filter_type\":\"==\",\"value\":\"1\",\"label\":\"Is Demo Asset\"}]",
+ "filters_json": "[[\"Asset\",\"custom_is_demo_asset\",\"=\",1]]",
  "function": "Count",
+ "idx": 0,
  "is_public": 1,
+ "is_standard": 1,
  "label": "Total Demo Assets",
- "modified": "2026-03-02 00:00:00.000000",
+ "modified": "2026-03-03 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Total Demo Assets",
  "owner": "Administrator",
+ "show_full_number": 0,
  "show_percentage_stats": 0,
- "stats_time_interval": "Monthly"
+ "stats_time_interval": "Monthly",
+ "type": "Document Type"
 }
