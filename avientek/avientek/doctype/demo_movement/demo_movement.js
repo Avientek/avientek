@@ -2,6 +2,15 @@ frappe.ui.form.on("Demo Movement", {
 	refresh(frm) {
 		frm.trigger("set_status_color");
 		if (frm.doc.docstatus === 1 && frm.doc.movement_type === "Move Out" && frm.doc.status !== "Returned") {
+			frm.add_custom_button(__("Record Return"), () => {
+				frappe.new_doc("Demo Movement", {
+					asset: frm.doc.asset,
+					movement_type: "Return",
+					company: frm.doc.company,
+					customer: frm.doc.customer,
+				});
+			}, __("Demo"));
+
 			frm.add_custom_button(__("Print Acknowledgement"), () => {
 				frappe.set_route("print", "Demo Movement", frm.doc.name, {
 					print_format: "Customer Acknowledgement",
