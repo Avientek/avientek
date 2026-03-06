@@ -1,0 +1,133 @@
+[
+ {
+  "doctype": "Workflow",
+  "name": "Quotation Final",
+  "document_type": "Quotation",
+  "is_active": 1,
+  "override_status": 0,
+  "send_email_alert": 0,
+  "custom_enable_confirmation": 1,
+  "workflow_name": "Quotation Final",
+  "workflow_state_field": "workflow_state",
+  "states": [
+   {
+    "state": "Draft",
+    "doc_status": "0",
+    "allow_edit": "Sales User",
+    "is_optional_state": 0
+   },
+   {
+    "state": "Pending Level 1 Approval",
+    "doc_status": "0",
+    "allow_edit": "Dept Head",
+    "is_optional_state": 0
+   },
+   {
+    "state": "Pending Level 2 Approval",
+    "doc_status": "0",
+    "allow_edit": "GM",
+    "is_optional_state": 0
+   },
+   {
+    "state": "Approved",
+    "doc_status": "1",
+    "allow_edit": "Sales User",
+    "is_optional_state": 0
+   },
+   {
+    "state": "Rejected",
+    "doc_status": "0",
+    "allow_edit": "Sales User",
+    "is_optional_state": 0
+   },
+   {
+    "state": "Cancelled",
+    "doc_status": "2",
+    "allow_edit": "Sales User",
+    "is_optional_state": 0
+   }
+  ],
+  "transitions": [
+   {
+    "state": "Draft",
+    "action": "Submit",
+    "next_state": "Approved",
+    "allowed": "Sales User",
+    "allow_self_approval": 1,
+    "condition": "doc.custom_auto_approve_ok == 1"
+   },
+   {
+    "state": "Draft",
+    "action": "Send For Approval",
+    "next_state": "Pending Level 1 Approval",
+    "allowed": "Sales User",
+    "allow_self_approval": 1,
+    "condition": "doc.custom_auto_approve_ok == 0 and doc.custom_level_1_approve_ok == 1"
+   },
+   {
+    "state": "Draft",
+    "action": "Send For Approval",
+    "next_state": "Pending Level 2 Approval",
+    "allowed": "Sales User",
+    "allow_self_approval": 1,
+    "condition": "doc.custom_auto_approve_ok == 0 and doc.custom_level_1_approve_ok == 0"
+   },
+   {
+    "state": "Pending Level 1 Approval",
+    "action": "Approve",
+    "next_state": "Approved",
+    "allowed": "Dept Head",
+    "allow_self_approval": 0,
+    "condition": "doc.custom_level_1_approve_ok == 1"
+   },
+   {
+    "state": "Pending Level 1 Approval",
+    "action": "Escalate",
+    "next_state": "Pending Level 2 Approval",
+    "allowed": "Dept Head",
+    "allow_self_approval": 1,
+    "condition": "doc.custom_level_1_approve_ok == 0"
+   },
+   {
+    "state": "Pending Level 1 Approval",
+    "action": "Reject",
+    "next_state": "Rejected",
+    "allowed": "Dept Head",
+    "allow_self_approval": 1,
+    "condition": null
+   },
+   {
+    "state": "Pending Level 2 Approval",
+    "action": "Approve",
+    "next_state": "Approved",
+    "allowed": "GM",
+    "allow_self_approval": 0,
+    "condition": null
+   },
+   {
+    "state": "Pending Level 2 Approval",
+    "action": "Reject",
+    "next_state": "Rejected",
+    "allowed": "GM",
+    "allow_self_approval": 1,
+    "condition": null
+   },
+   {
+    "state": "Approved",
+    "action": "Cancel",
+    "next_state": "Cancelled",
+    "allowed": "Sales Manager",
+    "allow_self_approval": 1,
+    "condition": null
+   },
+   {
+    "state": "Rejected",
+    "action": "Revise",
+    "next_state": "Draft",
+    "allowed": "Sales User",
+    "allow_self_approval": 1,
+    "condition": null
+   }
+  ]
+ }
+]
