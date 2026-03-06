@@ -72,6 +72,8 @@
   "currency_totals_html",
   "payment_history_section",
   "payment_history_html",
+  "additional_documents_section",
+  "additional_documents",
   "more_information_section",
   "remarks",
   "amended_from",
@@ -86,6 +88,7 @@
   "account_number",
   "bank",
   "swift_code",
+  "bank_letter",
   "connections_tab",
   "total_outstanding_amount",
   "total_payment_amount",
@@ -197,10 +200,24 @@
    "label": "Reference"
   },
   {
+   "allow_bulk_edit": 1,
    "fieldname": "payment_references",
    "fieldtype": "Table",
    "label": "Payment References",
    "options": "Payment Request Reference"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "additional_documents_section",
+   "fieldtype": "Section Break",
+   "label": "Additional Documents"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "additional_documents",
+   "fieldtype": "Table",
+   "label": "Additional Documents",
+   "options": "Payment Request Additional Document"
   },
   {
    "collapsible": 1,
@@ -372,6 +389,13 @@
    "fieldname": "swift_code",
    "fieldtype": "Data",
    "label": "SWIFT Code"
+  },
+  {
+   "description": "Fetched from Supplier master",
+   "fieldname": "bank_letter",
+   "fieldtype": "Attach",
+   "label": "Bank Letter",
+   "read_only": 1
   },
   {
    "fieldname": "total_payment_amount",
@@ -618,7 +642,7 @@
    "link_fieldname": "custom_payment_request_form"
   }
  ],
- "modified": "2026-03-02 11:51:39.600392",
+ "modified": "2026-03-06 13:31:56.629928",
  "modified_by": "support@quarkcs.com",
  "module": "Avientek",
  "name": "Payment Request Form",

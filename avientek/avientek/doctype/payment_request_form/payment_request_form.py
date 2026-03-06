@@ -162,37 +162,36 @@ def _get_customer_credit_documents(args):
         if je.company != args.get("company") or je.docstatus != 1:
             continue
 
-        # Calculate total credit for this customer in this JE
-        total_credit = sum(
-            flt(acc.credit_in_account_currency)
-            for acc in je.accounts
-            if acc.party_type == "Customer" and acc.party == args.get("party")
-        )
-        total_base_credit = sum(
-            flt(acc.credit)
-            for acc in je.accounts
-            if acc.party_type == "Customer" and acc.party == args.get("party")
-        )
+        # Group party credit accounts by currency to avoid mixing currencies
+        currency_groups = {}
+        for acc in je.accounts:
+            if acc.party_type == "Customer" and acc.party == args.get("party") and flt(acc.credit_in_account_currency) > 0:
+                curr = acc.account_currency or company_currency
+                if curr not in currency_groups:
+                    currency_groups[curr] = {"credit": 0, "base_credit": 0, "exchange_rate": flt(acc.exchange_rate) or 1}
+                currency_groups[curr]["credit"] += flt(acc.credit_in_account_currency)
+                currency_groups[curr]["base_credit"] += flt(acc.credit)
 
-        if total_credit <= 0:
-            continue
+        for curr, data in currency_groups.items():
+            if data["credit"] <= 0:
+                continue
 
-        rows.append({
-            "voucher_type": "Journal Entry",
-            "voucher_no": je.name,
-            "bill_no": je.name,
-            "posting_date": je.posting_date,
-            "due_date": je.posting_date,
-            "grand_total": total_credit,
-            "base_grand_total": total_base_credit,
-            "outstanding": total_credit,
-            "base_outstanding": total_base_credit,
-            "currency": jea.account_currency or company_currency,
-            "exchange_rate": flt(jea.exchange_rate) or 1,
-            "is_return": 0,
-            "return_against": "",
-            "document_reference": je.user_remark or "",
-        })
+            rows.append({
+                "voucher_type": "Journal Entry",
+                "voucher_no": je.name,
+                "bill_no": je.name,
+                "posting_date": je.posting_date,
+                "due_date": je.posting_date,
+                "grand_total": data["credit"],
+                "base_grand_total": data["base_credit"],
+                "outstanding": data["credit"],
+                "base_outstanding": data["base_credit"],
+                "currency": curr,
+                "exchange_rate": data["exchange_rate"],
+                "is_return": 0,
+                "return_against": "",
+                "document_reference": je.user_remark or "",
+            })
 
     # 3. Payment Entries with unallocated amount for this customer
     payment_entries = frappe.get_all(
@@ -334,6 +333,66 @@ def _get_outstanding_expense_claims(args):
             "base_outstanding": outstanding,
             "currency": company_currency,
             "exchange_rate": 1,
+            "is_return": 0,
+            "return_against": "",
+            "document_reference": "",
+        })
+
+    return rows
+
+
+def _get_outstanding_purchase_orders(args):
+    """Fetch outstanding Purchase Orders for a supplier (for advance payments).
+
+    Purchase Orders don't create Payment Ledger Entries until invoiced,
+    so we query the Purchase Order doctype directly.
+    """
+    from frappe.utils import flt
+
+    if not args.get("party") or not args.get("company"):
+        return []
+
+    company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
+
+    purchase_orders = frappe.get_all(
+        "Purchase Order",
+        filters={
+            "supplier": args.get("party"),
+            "company": args.get("company"),
+            "docstatus": 1,
+            "status": ["not in", ["Completed", "Cancelled", "Closed"]],
+        },
+        fields=[
+            "name", "transaction_date", "grand_total", "base_grand_total",
+            "advance_paid", "currency", "conversion_rate", "schedule_date",
+        ],
+    )
+
+    rows = []
+    for po in purchase_orders:
+        exchange_rate = flt(po.conversion_rate) or 1
+        currency = po.currency or company_currency
+
+        # advance_paid is in company currency; outstanding = base_grand_total - advance_paid
+        outstanding_base = flt(po.base_grand_total) - flt(po.advance_paid)
+        if outstanding_base <= 0:
+            continue
+
+        # Convert outstanding to PO currency
+        outstanding_fc = outstanding_base / exchange_rate if exchange_rate else outstanding_base
+
+        rows.append({
+            "voucher_type": "Purchase Order",
+            "voucher_no": po.name,
+            "bill_no": po.name,
+            "posting_date": po.transaction_date,
+            "due_date": po.schedule_date or po.transaction_date,
+            "grand_total": flt(po.grand_total),
+            "base_grand_total": flt(po.base_grand_total),
+            "outstanding": outstanding_fc,
+            "base_outstanding": outstanding_base,
+            "currency": currency,
+            "exchange_rate": exchange_rate,
             "is_return": 0,
             "return_against": "",
             "document_reference": "",
@@ -640,6 +699,11 @@ def get_outstanding_reference_documents(args):
             except Exception:
                 frappe.log_error(frappe.get_traceback(), f"Error processing standalone debit note {dn.name}")
 
+    # Also include open Purchase Orders when fetching Purchase Invoices
+    if args.get("reference_doctype") == "Purchase Invoice":
+        po_rows = _get_outstanding_purchase_orders(args)
+        filtered_rows.extend(po_rows)
+
     return filtered_rows
 
 
@@ -903,6 +967,34 @@ def download_payment_pdf(docname):
                     merger.append(io.BytesIO(quotation_pdf))
         except Exception as e:
             frappe.log_error(f"Error fetching Quotation PDFs for {purchase_invoice_name}: {e}")
+
+    # Bank Letter (Supplier only, after reference docs)
+    if doc.bank_letter:
+        try:
+            file_url = doc.bank_letter
+            if file_url.lower().endswith('.pdf'):
+                if not file_url.startswith("http"):
+                    file_url = base_url + file_url
+                res = requests.get(file_url, headers=headers, verify=False)
+                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
+                    merger.append(io.BytesIO(res.content))
+        except Exception as e:
+            frappe.log_error(f"Error merging bank letter: {e}")
+
+    # Additional Documents (always last in the combined PDF)
+    for addl_doc in (doc.additional_documents or []):
+        if not addl_doc.attachment:
+            continue
+        try:
+            file_url = addl_doc.attachment
+            if file_url.lower().endswith('.pdf'):
+                if not file_url.startswith("http"):
+                    file_url = base_url + file_url
+                res = requests.get(file_url, headers=headers, verify=False)
+                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
+                    merger.append(io.BytesIO(res.content))
+        except Exception as e:
+            frappe.log_error(f"Error merging additional document {addl_doc.label}: {e}")
 
     # Output merged PDF
     output = io.BytesIO()
@@ -1253,7 +1345,7 @@ def get_pdf_as_images(doctype, docname, max_pages=2):
 
     # Cache result for 5 minutes
     if result:
-        frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+        frappe.cache().set_value(cache_key, result, expires_in_sec=3600)
 
     return result
 
@@ -1366,7 +1458,7 @@ def get_reference_attachment_images(reference_doctype, reference_name, max_pages
 
     # Cache result for 5 minutes
     if all_images:
-        frappe.cache().set_value(cache_key, all_images, expires_in_sec=300)
+        frappe.cache().set_value(cache_key, all_images, expires_in_sec=3600)
 
     return all_images
 
@@ -1420,7 +1512,7 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=2)
 
         # Cache result for 5 minutes
         if images:
-            frappe.cache().set_value(cache_key, images, expires_in_sec=300)
+            frappe.cache().set_value(cache_key, images, expires_in_sec=3600)
 
         return images
 
@@ -1430,6 +1522,80 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=2)
             "Print Format to Image Conversion"
         )
         return []
+
+
+@frappe.whitelist()
+def get_all_print_attachments(docname):
+    """
+    Batch pre-fetch ALL attachment images for a Payment Request Form in one call.
+    This eliminates per-row frappe.call() in the Jinja template.
+
+    Returns a dict with:
+        - prev_payment_images: list of base64 images
+        - ref_images: {row_idx: [base64 images]}
+        - po_images: {row_idx: [base64 images]}
+        - costing_images: {row_idx: [base64 images]}
+        - bank_letter_images: [base64 images]
+        - additional_doc_images: {row_idx: [base64 images]}
+    """
+    doc = frappe.get_doc("Payment Request Form", docname)
+    result = {
+        "prev_payment_images": [],
+        "ref_images": {},
+        "po_images": {},
+        "costing_images": {},
+        "bank_letter_images": [],
+        "additional_doc_images": {},
+    }
+
+    # 1) Previous Payment Details (from first row)
+    first_row = doc.payment_references[0] if doc.payment_references else None
+    if first_row and first_row.previous_payment_details:
+        result["prev_payment_images"] = get_attachment_as_images(
+            first_row.previous_payment_details, max_pages=5
+        ) or []
+
+    # 2) Per-row: reference attachments, linked POs, costing sheets
+    for idx, row in enumerate(doc.payment_references):
+        # Reference document attachments
+        if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
+            ref_imgs = get_reference_attachment_images(
+                row.reference_doctype, row.reference_name, max_pages=5
+            ) or []
+            if ref_imgs:
+                result["ref_images"][str(idx)] = ref_imgs
+
+        # Linked Purchase Orders (Supplier only)
+        if doc.party_type == "Supplier" and row.reference_doctype in ["Purchase Invoice", "Debit Note"]:
+            linked_po = get_linked_po_for_invoice(row.reference_name)
+            if linked_po:
+                po_imgs = get_print_format_as_images(
+                    "Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=5
+                ) or []
+                if po_imgs:
+                    result["po_images"][str(idx)] = {"po_name": linked_po, "images": po_imgs}
+
+            # Costing sheets
+            if row.costing_sheet_attachment:
+                cs_imgs = get_attachment_as_images(row.costing_sheet_attachment, max_pages=5) or []
+                if cs_imgs:
+                    result["costing_images"][str(idx)] = cs_imgs
+
+    # 3) Bank letter
+    if doc.bank_letter:
+        result["bank_letter_images"] = get_attachment_as_images(doc.bank_letter, max_pages=5) or []
+
+    # 4) Additional documents
+    for idx, addl_doc in enumerate(doc.additional_documents or []):
+        if addl_doc.attachment:
+            addl_imgs = get_attachment_as_images(addl_doc.attachment, max_pages=10) or []
+            if addl_imgs:
+                result["additional_doc_images"][str(idx)] = {
+                    "label": addl_doc.label or "Additional Document",
+                    "images": addl_imgs,
+                }
+
+    return result
 
 
 @frappe.whitelist()
@@ -1504,7 +1670,7 @@ def get_attachment_as_images(file_url, max_pages=2):
 
         # Cache result for 5 minutes
         if images:
-            frappe.cache().set_value(cache_key, images, expires_in_sec=300)
+            frappe.cache().set_value(cache_key, images, expires_in_sec=3600)
 
         return images
 

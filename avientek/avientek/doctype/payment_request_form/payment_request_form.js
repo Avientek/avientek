@@ -248,9 +248,6 @@ frappe.ui.form.on('Payment Request Form', {
 	get_purchase_invoice: function(frm) {
 		frm.events._fetch_outstanding(frm, "Purchase Invoice");
 	},
-	get_purchase_order: function(frm) {
-		frm.events._fetch_outstanding(frm, "Purchase Order");
-	},
 	get_expense_claim: function(frm) {
 		// Fetch both Expense Claims and Employee Advances for employees
 		frm.clear_table("payment_references");
@@ -379,26 +376,40 @@ frappe.ui.form.on('Payment Request Form', {
         is_updating_fields = true;
 
         let total_base_amount = 0;      // Company currency total (always consistent)
+        let total_base_outstanding = 0; // Company currency outstanding total
         let currency_totals = {};       // Group totals by currency
 
         (frm.doc.payment_references || []).forEach(row => {
             // Sum amounts in company currency - include all rows (positive and negative)
-            total_base_amount += flt(row.base_grand_total || 0);
+            total_base_amount += flt(row.base_grand_total || 0, 2);
+            total_base_outstanding += flt(row.base_outstanding_amount || 0, 2);
 
             // Group by billing currency
             let curr = row.currency || 'Unknown';
             if (!currency_totals[curr]) {
-                currency_totals[curr] = { billing: 0, base: 0 };
+                currency_totals[curr] = { billing: 0, base: 0, outstanding: 0, base_outstanding: 0 };
             }
-            currency_totals[curr].billing += flt(row.grand_total || 0);
-            currency_totals[curr].base += flt(row.base_grand_total || 0);
+            currency_totals[curr].billing += flt(row.grand_total || 0, 2);
+            currency_totals[curr].base += flt(row.base_grand_total || 0, 2);
+            currency_totals[curr].outstanding += flt(row.outstanding_amount || 0, 2);
+            currency_totals[curr].base_outstanding += flt(row.base_outstanding_amount || 0, 2);
+        });
+
+        // Round accumulated totals to avoid floating-point drift
+        total_base_amount = flt(total_base_amount, 2);
+        total_base_outstanding = flt(total_base_outstanding, 2);
+        Object.keys(currency_totals).forEach(curr => {
+            currency_totals[curr].billing = flt(currency_totals[curr].billing, 2);
+            currency_totals[curr].base = flt(currency_totals[curr].base, 2);
+            currency_totals[curr].outstanding = flt(currency_totals[curr].outstanding, 2);
+            currency_totals[curr].base_outstanding = flt(currency_totals[curr].base_outstanding, 2);
         });
 
         // Build HTML table for currency totals
-        frm.events.render_currency_totals(frm, currency_totals, total_base_amount);
+        frm.events.render_currency_totals(frm, currency_totals, total_base_amount, total_base_outstanding);
 
         // Only set value if it actually changed (to avoid "Not Saved" on refresh)
-        if (flt(frm.doc.total_outstanding_amount) !== flt(total_base_amount)) {
+        if (flt(frm.doc.total_outstanding_amount, 2) !== flt(total_base_amount, 2)) {
             frappe.run_serially([
                 () => frm.set_value("total_outstanding_amount", total_base_amount),
                 () => { is_updating_fields = false; }
@@ -408,17 +419,19 @@ frappe.ui.form.on('Payment Request Form', {
         }
     },
 
-    render_currency_totals: function(frm, currency_totals, total_base_amount) {
+    render_currency_totals: function(frm, currency_totals, total_base_amount, total_base_outstanding) {
         // Get company currency for display
         let company_currency = frm.doc.currency || 'AED';
 
         let html = `<div class="currency-totals-container" style="margin: 10px 0;">
-            <table class="table table-bordered table-sm" style="width: auto; min-width: 400px;">
+            <table class="table table-bordered table-sm" style="width: auto; min-width: 600px;">
                 <thead style="background-color: #f5f5f5;">
                     <tr>
                         <th style="padding: 8px 12px;">Currency</th>
                         <th style="padding: 8px 12px; text-align: right;">Billing Amount</th>
                         <th style="padding: 8px 12px; text-align: right;">Base Amount (${company_currency})</th>
+                        <th style="padding: 8px 12px; text-align: right;">Outstanding</th>
+                        <th style="padding: 8px 12px; text-align: right;">Base Outstanding (${company_currency})</th>
                     </tr>
                 </thead>
                 <tbody>`;
@@ -429,21 +442,29 @@ frappe.ui.form.on('Payment Request Form', {
             let data = currency_totals[curr];
             let billingFormatted = format_currency(data.billing, curr);
             let baseFormatted = format_currency(data.base, company_currency);
+            let outstandingFormatted = format_currency(data.outstanding, curr);
+            let baseOutstandingFormatted = format_currency(data.base_outstanding, company_currency);
 
             // Color negative values red
             let billingStyle = data.billing < 0 ? 'color: #e74c3c;' : '';
             let baseStyle = data.base < 0 ? 'color: #e74c3c;' : '';
+            let outstandingStyle = data.outstanding < 0 ? 'color: #e74c3c;' : '';
+            let baseOutstandingStyle = data.base_outstanding < 0 ? 'color: #e74c3c;' : '';
 
             html += `<tr>
                 <td style="padding: 8px 12px; font-weight: 500;">${curr}</td>
                 <td style="padding: 8px 12px; text-align: right; ${billingStyle}">${billingFormatted}</td>
                 <td style="padding: 8px 12px; text-align: right; ${baseStyle}">${baseFormatted}</td>
+                <td style="padding: 8px 12px; text-align: right; ${outstandingStyle}">${outstandingFormatted}</td>
+                <td style="padding: 8px 12px; text-align: right; ${baseOutstandingStyle}">${baseOutstandingFormatted}</td>
             </tr>`;
         });
 
         // Add total row
         let totalBaseFormatted = format_currency(total_base_amount, company_currency);
+        let totalBaseOutstandingFormatted = format_currency(total_base_outstanding, company_currency);
         let totalStyle = total_base_amount < 0 ? 'color: #e74c3c;' : 'color: #2e7d32;';
+        let totalOutstandingStyle = total_base_outstanding < 0 ? 'color: #e74c3c;' : 'color: #2e7d32;';
 
         html += `</tbody>
                 <tfoot style="background-color: #e8f5e9; font-weight: bold;">
@@ -451,6 +472,8 @@ frappe.ui.form.on('Payment Request Form', {
                         <td style="padding: 10px 12px;">TOTAL</td>
                         <td style="padding: 10px 12px; text-align: right;">-</td>
                         <td style="padding: 10px 12px; text-align: right; ${totalStyle}">${totalBaseFormatted}</td>
+                        <td style="padding: 10px 12px; text-align: right;">-</td>
+                        <td style="padding: 10px 12px; text-align: right; ${totalOutstandingStyle}">${totalBaseOutstandingFormatted}</td>
                     </tr>
                 </tfoot>
             </table>
@@ -850,6 +873,17 @@ function fetch_supplier_details(frm, force_update) {
                 }
             });
         }
+    }
+
+    // Fetch bank letter from Supplier master
+    if (frm.doc.party_type === "Supplier") {
+        frappe.db.get_value('Supplier', frm.doc.party, 'avientek_bank_letter').then(r => {
+            if (r.message && r.message.avientek_bank_letter) {
+                set_if_changed(frm, "bank_letter", r.message.avientek_bank_letter);
+            } else if (force_update) {
+                set_if_changed(frm, "bank_letter", "");
+            }
+        });
     }
 
     // Fetch party balance

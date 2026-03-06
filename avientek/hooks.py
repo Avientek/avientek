@@ -73,6 +73,7 @@ fixtures = [
 					"Purchase Order-avientek_exchange_rate",
 					"Purchase Order Item-avientek_exchange_rate",
 					"Supplier-avientek_display_currency",
+				"Supplier-avientek_bank_letter",
 					"Customer-avientek_display_currency",
 					"Quotation Item-custom_finance_",
 					"Quotation Item-custom_transport_",
