@@ -653,12 +653,13 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
     )
 
     if not ip and company:
-        # No Item Price for this company — signal to client
-        result["no_price_for_company"] = True
-        result["item_code"] = item_code
-        result["company"] = company
-        result["price_list"] = price_list
-        return result
+        # Only warn when "Item Price Variation in Quotation" is enabled in Avientek Settings
+        if frappe.db.get_single_value("Avientek Settings", "item_price_variation_in_quotation"):
+            result["no_price_for_company"] = True
+            result["item_code"] = item_code
+            result["company"] = company
+            result["price_list"] = price_list
+            return result
 
     if ip:
         std_price = flt(ip.price_list_rate)
@@ -823,3 +824,77 @@ def set_margin_flags(doc, method=None):
     elif level_1_required:
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 1
+
+
+@frappe.whitelist()
+def update_special_price(quotation_name, items):
+    """Update Special Price on a submitted Quotation.
+    Recalculates COGS and margin but keeps Selling Price / Rate / Amount unchanged."""
+    items = frappe.parse_json(items)
+    doc = frappe.get_doc("Quotation", quotation_name)
+
+    if doc.docstatus != 1:
+        frappe.throw("This action is only allowed on submitted Quotations.")
+
+    for item_update in items:
+        row_name = item_update.get("name")
+        if not row_name:
+            continue
+
+        # Load the current row values
+        row = None
+        for r in doc.items:
+            if r.name == row_name:
+                row = r
+                break
+        if not row:
+            continue
+
+        new_sp = flt(item_update.get("custom_special_price"))
+        note = item_update.get("custom_special_price_note") or ""
+        qty = max(cint(row.qty), 1)
+        std_price = _to_flt(row.custom_standard_price_)
+
+        # Recalculate cost components with new SP
+        shipping  = flt(_to_flt(row.shipping_per)      * std_price / 100 * qty, 4)
+        finance   = flt(_to_flt(row.custom_finance_)   * new_sp    / 100 * qty, 4)
+        transport = flt(_to_flt(row.custom_transport_)  * std_price / 100 * qty, 4)
+        reward    = flt(_to_flt(row.reward_per)         * new_sp    / 100 * qty, 4)
+
+        base_amt = flt(new_sp * qty + shipping + finance + transport + reward, 4)
+
+        incentive = flt(_to_flt(row.custom_incentive_) * new_sp * qty / 100, 4)
+
+        cogs_before_customs = flt(base_amt + incentive, 4)
+        customs = flt(_to_flt(row.custom_customs_) * cogs_before_customs / 100, 4)
+
+        cogs = flt(cogs_before_customs + customs, 4)
+
+        markup = flt(_to_flt(row.custom_markup_) * cogs / 100, 4)
+
+        # Keep existing selling price unchanged
+        selling = flt(row.custom_selling_price)
+
+        # Recalculate margin based on existing selling vs new cogs
+        margin_val = flt(selling - cogs, 4)
+        margin_pct = flt(margin_val / selling * 100, 4) if selling else 0.0
+
+        frappe.db.set_value("Quotation Item", row_name, {
+            "custom_special_price": new_sp,
+            "custom_special_price_note": note,
+            "shipping": shipping,
+            "custom_finance_value": finance,
+            "custom_transport_value": transport,
+            "reward": reward,
+            "custom_incentive_value": incentive,
+            "custom_customs_value": customs,
+            "custom_markup_value": markup,
+            "custom_cogs": cogs,
+            "custom_margin_": margin_pct,
+            "custom_margin_value": margin_val,
+        }, update_modified=True)
+
+    frappe.db.set_value("Quotation", quotation_name, "modified", frappe.utils.now())
+    frappe.db.commit()
+
+    return {"message": "Special Price updated successfully"}

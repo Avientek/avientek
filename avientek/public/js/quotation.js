@@ -329,6 +329,31 @@ frappe.ui.form.on('Quotation', {
         readonly_fields.forEach(field => {
             frm.fields_dict.items.grid.update_docfield_property(field, "read_only", 1);
         });
+
+        // Make parent-level total/summary fields read-only
+        const readonly_parent_fields = [
+            "custom_total_shipping_new",
+            "custom_total_finance_new",
+            "custom_total_transport_new",
+            "custom_total_reward_new",
+            "custom_total_incentive_new",
+            "custom_total_customs_new",
+            "custom_total_margin_percent_new",
+            "custom_total_margin_new",
+            "custom_total_buying_price",
+            "custom_total_cost_new",
+            "custom_total_selling_new",
+        ];
+        readonly_parent_fields.forEach(field => {
+            frm.set_df_property(field, "read_only", 1);
+        });
+
+        // "Update Special Price" button on submitted Quotations
+        if (frm.doc.docstatus === 1) {
+            frm.add_custom_button(__('Update Special Price'), function () {
+                show_update_special_price_dialog(frm);
+            });
+        }
     },
 
     onload(frm) {
@@ -1036,4 +1061,78 @@ function setup_items_grid_click_handler(frm) {
             }
         }
     });
+}
+
+
+/**
+ * Dialog to update Special Price and Special Price Note on a submitted Quotation.
+ * Does NOT recalculate Selling Price or Selling Amount.
+ */
+function show_update_special_price_dialog(frm) {
+    let items = (frm.doc.items || []).map(row => ({
+        name: row.name,
+        item_code: row.item_code,
+        qty: row.qty,
+        custom_special_price: row.custom_special_price,
+        custom_special_price_note: row.custom_special_price_note || "",
+        custom_special_rate: row.custom_special_rate,
+        custom_selling_price: row.custom_selling_price,
+        custom_margin_: row.custom_margin_,
+    }));
+
+    let fields = [
+        {
+            fieldtype: "Table",
+            fieldname: "items",
+            label: __("Items"),
+            cannot_add_rows: true,
+            cannot_delete_rows: true,
+            in_place_edit: true,
+            data: items,
+            fields: [
+                { fieldname: "name", fieldtype: "Data", hidden: 1 },
+                { fieldname: "item_code", fieldtype: "Data", label: __("Item Code"), in_list_view: 1, read_only: 1, columns: 2 },
+                { fieldname: "qty", fieldtype: "Float", label: __("Qty"), in_list_view: 1, read_only: 1, columns: 1 },
+                { fieldname: "custom_special_price", fieldtype: "Currency", label: __("Special Price"), in_list_view: 1, columns: 2 },
+                { fieldname: "custom_special_price_note", fieldtype: "Data", label: __("Special Price Note"), in_list_view: 1, columns: 2 },
+                { fieldname: "custom_special_rate", fieldtype: "Currency", label: __("Selling Price"), in_list_view: 1, read_only: 1, columns: 2 },
+                { fieldname: "custom_margin_", fieldtype: "Percent", label: __("Margin %"), in_list_view: 1, read_only: 1, columns: 1 },
+            ]
+        }
+    ];
+
+    let d = new frappe.ui.Dialog({
+        title: __("Update Special Price"),
+        fields: fields,
+        size: "extra-large",
+        primary_action_label: __("Update"),
+        primary_action(values) {
+            let updated_items = (values.items || []).map(row => ({
+                name: row.name,
+                custom_special_price: row.custom_special_price,
+                custom_special_price_note: row.custom_special_price_note,
+            }));
+
+            frappe.call({
+                method: "avientek.events.quotation.update_special_price",
+                args: {
+                    quotation_name: frm.doc.name,
+                    items: JSON.stringify(updated_items),
+                },
+                freeze: true,
+                freeze_message: __("Updating Special Price..."),
+                callback(r) {
+                    if (r.message) {
+                        d.hide();
+                        frm.reload_doc();
+                        frappe.show_alert({ message: __("Special Price updated"), indicator: "green" });
+                    }
+                }
+            });
+        }
+    });
+
+    d.show();
+    // Widen dialog beyond extra-large default for better table readability
+    d.$wrapper.find(".modal-dialog").css("max-width", "1100px");
 }

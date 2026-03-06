@@ -1,0 +1,20 @@
+{
+  "creation": "2026-02-26 14:00:00.000000",
+  "docstatus": 0,
+  "doctype": "Page",
+  "icon": "fa fa-bar-chart",
+  "idx": 0,
+  "modified": "2026-02-26 14:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Avientek",
+  "name": "sales-team-dashboard",
+  "owner": "Administrator",
+  "page_name": "sales-team-dashboard",
+  "roles": [
+    {"role": "Sales User"},
+    {"role": "Sales Manager"},
+    {"role": "System Manager"}
+  ],
+  "standard": "Yes",
+  "title": "Sales Team Dashboard"
+}

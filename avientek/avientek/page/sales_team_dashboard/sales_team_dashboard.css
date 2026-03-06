@@ -1,0 +1,121 @@
+.std-cards-container {
+    padding: 20px 0 10px;
+}
+
+.std-cards-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.std-summary-card {
+    flex: 1;
+    min-width: 220px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    cursor: pointer;
+    transition: box-shadow 0.2s, border-color 0.2s;
+    overflow: hidden;
+}
+
+.std-summary-card:hover {
+    box-shadow: var(--shadow-sm);
+}
+
+.std-summary-card.active {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 1px var(--primary);
+}
+
+.std-summary-card .card-color-bar {
+    height: 4px;
+}
+
+.std-summary-card .card-body-inner {
+    padding: 16px 20px;
+}
+
+.std-summary-card .card-title {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.std-summary-card .card-count {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-color);
+    line-height: 1.2;
+}
+
+.std-summary-card .card-value {
+    font-size: var(--text-md);
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.std-summary-card .card-hint {
+    font-size: var(--text-xs);
+    margin-top: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.std-summary-card:hover .card-hint {
+    opacity: 1;
+}
+
+/* Detail section */
+.std-detail-container {
+    padding: 10px 0 20px;
+}
+
+.detail-header h5 {
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--heading-color);
+}
+
+.detail-tables-wrapper {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+
+.detail-section {
+    flex: 1;
+    min-width: 300px;
+}
+
+.detail-section h6 {
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: var(--heading-color);
+}
+
+.std-detail-table {
+    font-size: var(--text-sm);
+}
+
+.std-detail-table thead th {
+    background: var(--subtle-accent);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.std-detail-table .text-right {
+    text-align: right;
+}
+
+.std-detail-table a {
+    color: var(--primary);
+}
+
+.std-detail-table a:hover {
+    text-decoration: underline;
+}

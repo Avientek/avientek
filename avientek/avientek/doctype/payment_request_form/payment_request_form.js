@@ -112,6 +112,14 @@ frappe.ui.form.on('Payment Request Form', {
             frm.events.render_payment_history(frm);
         }
 
+        // Reset dirty state after initial load (async fetches may mark form dirty)
+        if (!frm.doc.__islocal) {
+            setTimeout(() => {
+                frm.doc.__unsaved = 0;
+                frm.page.clear_indicator();
+            }, 1500);
+        }
+
         if (frm.doc.payment_type == "Pay" && !frm.doc.__islocal) {
             frm.add_custom_button(__('Download Combined PDF'), function () {
                 window.open(
@@ -886,21 +894,23 @@ function fetch_supplier_details(frm, force_update) {
         });
     }
 
-    // Fetch party balance
-    frappe.call({
-        method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
-        args: {
-            company: frm.doc.company,
-            party_type: frm.doc.party_type,
-            party: frm.doc.party,
-            date: frm.doc.posting_date
-        },
-        callback: function(r) {
-            if (r.message) {
-                set_if_changed(frm, "supplier_balance", r.message.party_balance);
+    // Fetch party balance only for new docs or when user changes party
+    if (!frm.doc.supplier_balance || force_update) {
+        frappe.call({
+            method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
+            args: {
+                company: frm.doc.company,
+                party_type: frm.doc.party_type,
+                party: frm.doc.party,
+                date: frm.doc.posting_date
+            },
+            callback: function(r) {
+                if (r.message) {
+                    set_if_changed(frm, "supplier_balance", r.message.party_balance);
+                }
             }
-        }
-    });
+        });
+    }
 }
 // Track which row/field is being updated to prevent infinite loops
 let row_updating = {};

@@ -1008,6 +1008,85 @@ def download_payment_pdf(docname):
 
 
 @frappe.whitelist()
+def get_voucher_print_data(docname):
+    """
+    Single consolidated method for the Payment Voucher print format.
+    Fetches all data needed in one call to avoid multiple round-trips from Jinja.
+    """
+    doc = frappe.get_doc("Payment Request Form", docname)
+
+    company_currency = frappe.db.get_value("Company", doc.company, "default_currency") or "AED"
+
+    # Supplier/party bank details
+    supplier_bank = frappe.db.get_value(
+        "Bank Account",
+        {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
+        ["name", "bank", "bank_account_no", "iban", "branch_code"],
+        as_dict=True
+    ) or {}
+    supplier_swift = ""
+    if supplier_bank and supplier_bank.get("bank"):
+        supplier_swift = frappe.db.get_value("Bank", supplier_bank.bank, "swift_number") or ""
+
+    # Issued bank details (single query instead of two)
+    issued_bank_details = frappe.db.get_value(
+        "Bank Account", doc.issued_bank,
+        ["bank", "bank_account_no", "iban", "account_currency"],
+        as_dict=True
+    ) or {}
+    issued_bank_currency = issued_bank_details.get("account_currency") or company_currency
+
+    # Payment history
+    payment_history = get_supplier_payment_history(doc.party, doc.company, limit=10)
+
+    # Previous payment attachment images
+    first_row = doc.payment_references[0] if doc.payment_references else None
+    prev_payment_attachment = first_row.previous_payment_details if first_row else None
+    prev_payment_images = []
+    if prev_payment_attachment:
+        prev_payment_images = get_attachment_as_images(prev_payment_attachment, max_pages=3) or []
+
+    # Pre-compute all per-row attachment data
+    ref_label_map = {
+        "Purchase Invoice": "Supplier Invoice", "Debit Note": "Debit Note",
+        "Credit Note": "Credit Note", "Sales Invoice": "Sales Invoice",
+        "Expense Claim": "Expense Claim", "Payment Entry": "Payment Entry",
+        "Journal Entry": "Journal Entry", "Purchase Order": "Purchase Order"
+    }
+    row_attachments = []
+    for row in doc.payment_references:
+        row_data = {"ref_images": [], "po_images": [], "costing_images": [], "ref_label": "", "ref_name": "", "linked_po": ""}
+        if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
+            row_data["ref_label"] = ref_label_map.get(row.reference_doctype, row.reference_doctype)
+            row_data["ref_name"] = row.reference_name
+            row_data["ref_images"] = get_reference_attachment_images(row.reference_doctype, row.reference_name, max_pages=3) or []
+
+            # Linked PO (supplier only)
+            if doc.party_type == "Supplier" and row.reference_doctype in ("Purchase Invoice", "Debit Note"):
+                linked_po = get_linked_po_for_invoice(row.reference_name)
+                if linked_po:
+                    row_data["linked_po"] = linked_po
+                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
+
+                # Costing sheet
+                if row.costing_sheet_attachment:
+                    row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
+
+        row_attachments.append(row_data)
+
+    return {
+        "company_currency": company_currency,
+        "supplier_bank": supplier_bank,
+        "supplier_swift": supplier_swift,
+        "issued_bank_details": issued_bank_details,
+        "issued_bank_currency": issued_bank_currency,
+        "payment_history": payment_history,
+        "prev_payment_images": prev_payment_images,
+        "row_attachments": row_attachments,
+    }
+
+
+@frappe.whitelist()
 def get_supplier_payment_history(supplier, company=None, limit=50):
     """
     Fetch payment history for a supplier from Payment Entry and Journal Entry.
@@ -1044,40 +1123,45 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
         limit_page_length=limit
     )
 
+    # Batch-fetch all bank account details to avoid N+1 queries
+    all_bank_accounts = set()
     for pe in payment_entries:
-        # Get bank account details
+        if pe.bank_account:
+            all_bank_accounts.add(pe.bank_account)
+        if pe.party_bank_account:
+            all_bank_accounts.add(pe.party_bank_account)
+
+    bank_account_map = {}
+    if all_bank_accounts:
+        bank_rows = frappe.get_all(
+            "Bank Account",
+            filters={"name": ["in", list(all_bank_accounts)]},
+            fields=["name", "bank", "bank_account_no", "iban"]
+        )
+        bank_account_map = {r.name: r for r in bank_rows}
+
+    for pe in payment_entries:
         bank_name = ""
         beneficiary_account = ""
         debit_account_no = ""
 
-        if pe.bank_account:
-            bank_data = frappe.db.get_value(
-                "Bank Account", pe.bank_account,
-                ["bank", "bank_account_no"], as_dict=True
-            )
-            if bank_data:
-                bank_name = bank_data.get("bank") or ""
-                debit_account_no = bank_data.get("bank_account_no") or ""
+        if pe.bank_account and pe.bank_account in bank_account_map:
+            bd = bank_account_map[pe.bank_account]
+            bank_name = bd.get("bank") or ""
+            debit_account_no = bd.get("bank_account_no") or ""
 
-        if pe.party_bank_account:
-            party_bank_data = frappe.db.get_value(
-                "Bank Account", pe.party_bank_account,
-                ["bank_account_no", "iban"], as_dict=True
-            )
-            if party_bank_data:
-                beneficiary_account = party_bank_data.get("iban") or party_bank_data.get("bank_account_no") or ""
+        if pe.party_bank_account and pe.party_bank_account in bank_account_map:
+            pbd = bank_account_map[pe.party_bank_account]
+            beneficiary_account = pbd.get("iban") or pbd.get("bank_account_no") or ""
 
-        # Determine payment type (TT/TR based on mode_of_payment or reference)
-        payment_type_code = "TR"  # Default to Transfer
+        payment_type_code = "TR"
         if pe.mode_of_payment:
             mop = pe.mode_of_payment.upper()
             if "TT" in mop or "TELEGRAPHIC" in mop:
                 payment_type_code = "TT"
-            elif "TR" in mop or "TRANSFER" in mop:
-                payment_type_code = "TR"
 
         payment_history.append({
-            "sl_no": 0,  # Will be set later
+            "sl_no": 0,
             "bank": bank_name,
             "type": payment_type_code,
             "voucher_no": pe.name,
@@ -1113,35 +1197,40 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
         as_dict=True
     )
 
+    # Batch-fetch JE bank accounts
+    je_bank_accounts = set()
     for je in journal_entries:
-        # Get bank and account details
+        if je.bank_account:
+            je_bank_accounts.add(je.bank_account)
+
+    je_bank_map = {}
+    if je_bank_accounts:
+        je_bank_rows = frappe.get_all(
+            "Bank Account",
+            filters={"name": ["in", list(je_bank_accounts)]},
+            fields=["name", "bank", "bank_account_no"]
+        )
+        je_bank_map = {r.name: r for r in je_bank_rows}
+
+    # Fetch supplier default bank & name once (not per row)
+    supplier_bank = frappe.db.get_value(
+        "Bank Account",
+        {"party_type": "Supplier", "party": supplier, "is_default": 1},
+        ["bank_account_no", "iban"],
+        as_dict=True
+    ) or {}
+    beneficiary_account_default = supplier_bank.get("iban") or supplier_bank.get("bank_account_no") or ""
+    supplier_name = frappe.db.get_value("Supplier", supplier, "supplier_name") or supplier
+
+    for je in journal_entries:
         bank_name = ""
         debit_account_no = ""
-        beneficiary_account = ""
 
-        if je.bank_account:
-            bank_data = frappe.db.get_value(
-                "Bank Account", je.bank_account,
-                ["bank", "bank_account_no"], as_dict=True
-            )
-            if bank_data:
-                bank_name = bank_data.get("bank") or ""
-                debit_account_no = bank_data.get("bank_account_no") or ""
+        if je.bank_account and je.bank_account in je_bank_map:
+            bd = je_bank_map[je.bank_account]
+            bank_name = bd.get("bank") or ""
+            debit_account_no = bd.get("bank_account_no") or ""
 
-        # Get supplier's default bank account
-        supplier_bank = frappe.db.get_value(
-            "Bank Account",
-            {"party_type": "Supplier", "party": supplier, "is_default": 1},
-            ["bank_account_no", "iban"],
-            as_dict=True
-        )
-        if supplier_bank:
-            beneficiary_account = supplier_bank.get("iban") or supplier_bank.get("bank_account_no") or ""
-
-        # Get supplier name
-        supplier_name = frappe.db.get_value("Supplier", supplier, "supplier_name") or supplier
-
-        # Determine payment type
         payment_type_code = "TR"
         if je.mode_of_payment:
             mop = je.mode_of_payment.upper()
@@ -1155,7 +1244,7 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
             "voucher_no": je.cheque_no or je.name,
             "date": je.posting_date,
             "beneficiary": supplier_name,
-            "beneficiary_account": beneficiary_account,
+            "beneficiary_account": beneficiary_account_default,
             "debit_account": debit_account_no,
             "currency": je.account_currency or "AED",
             "amount": je.debit_in_account_currency or 0,
@@ -1510,7 +1599,7 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=2)
             is_bytes=True
         )
 
-        # Cache result for 5 minutes
+        # Cache result for 1 hour
         if images:
             frappe.cache().set_value(cache_key, images, expires_in_sec=3600)
 
@@ -1668,7 +1757,7 @@ def get_attachment_as_images(file_url, max_pages=2):
             is_bytes=False
         )
 
-        # Cache result for 5 minutes
+        # Cache result for 1 hour
         if images:
             frappe.cache().set_value(cache_key, images, expires_in_sec=3600)
 
