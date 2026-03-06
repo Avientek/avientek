@@ -630,9 +630,11 @@ function load_item_defaults(frm, cdt, cdn) {
                 return;
             }
 
-            // Always set prices
-            frappe.model.set_value(cdt, cdn, "custom_standard_price_", d.custom_standard_price_ || 0);
-            frappe.model.set_value(cdt, cdn, "custom_special_price", d.custom_special_price || 0);
+            // Always set prices — special price defaults to standard price if not set
+            let std_price = d.custom_standard_price_ || 0;
+            let sp = d.custom_special_price || std_price;
+            frappe.model.set_value(cdt, cdn, "custom_standard_price_", std_price);
+            frappe.model.set_value(cdt, cdn, "custom_special_price", sp);
 
             // Set defaults only if field is currently empty (preserve user edits)
             if (!row.shipping_per)      frappe.model.set_value(cdt, cdn, "shipping_per", d.shipping_per_air || 0);
