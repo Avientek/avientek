@@ -1,0 +1,315 @@
+/* ── RMA Dashboard — theme-aware using Frappe CSS variables ── */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+/* ── App Layout ── */
+.rma-app {
+	display: flex;
+	min-height: calc(100vh - 60px);
+	background: var(--bg-color);
+	font-family: 'IBM Plex Sans', var(--font-stack);
+}
+
+/* ── Sidebar ── */
+.rma-sidebar {
+	width: 240px;
+	flex-shrink: 0;
+	background: var(--card-bg);
+	border-right: 1px solid var(--border-color);
+	display: flex;
+	flex-direction: column;
+}
+
+.rma-nav {
+	list-style: none;
+	padding: 12px 0;
+	margin: 0;
+	flex: 1;
+}
+
+.rma-nav-item {
+	padding: 10px 20px;
+	cursor: pointer;
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	transition: background 0.12s, color 0.12s;
+	border-left: 3px solid transparent;
+}
+
+.rma-nav-item:hover {
+	background: var(--hover-bg);
+	color: var(--text-color);
+}
+
+.rma-nav-item.active {
+	background: rgba(14, 165, 201, 0.08);
+	color: #0EA5C9;
+	border-left-color: #0EA5C9;
+	font-weight: 700;
+}
+
+.rma-nav-icon {
+	font-size: 1rem;
+	width: 20px;
+	text-align: center;
+	flex-shrink: 0;
+}
+
+.rma-nav-divider {
+	height: 1px;
+	background: var(--border-color);
+	margin: 8px 16px;
+}
+
+/* ── Main Content ── */
+.rma-main-content {
+	flex: 1;
+	min-width: 0;
+	padding: 24px 28px;
+	overflow-y: auto;
+}
+
+/* ── Stat Cards ── */
+.rma-stat-row {
+	display: flex;
+	gap: 16px;
+	margin-bottom: 20px;
+	flex-wrap: wrap;
+}
+
+.rma-stat-card {
+	flex: 1;
+	min-width: 130px;
+	background: var(--card-bg);
+	border-radius: var(--border-radius-lg);
+	padding: 20px 24px;
+	box-shadow: var(--card-shadow);
+	transition: transform 0.15s, box-shadow 0.15s;
+	cursor: pointer;
+}
+
+.rma-stat-card:hover {
+	transform: translateY(-2px);
+	box-shadow: var(--shadow-lg);
+}
+
+.rma-stat-value {
+	font-size: 2.2rem;
+	font-weight: 700;
+	line-height: 1;
+	margin-bottom: 6px;
+}
+
+.rma-stat-label {
+	font-size: 0.78rem;
+	color: var(--text-muted);
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+/* ── View Header ── */
+.rma-view-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	margin-bottom: 24px;
+}
+
+.rma-view-title h2 {
+	font-size: 1.3rem;
+	font-weight: 800;
+	color: var(--heading-color);
+	margin: 0;
+}
+
+.rma-view-title p {
+	font-size: 0.82rem;
+	color: var(--text-muted);
+	margin: 4px 0 0;
+}
+
+.rma-btn-primary {
+	background: #0EA5C9;
+	color: #fff;
+	border: none;
+	border-radius: 8px;
+	padding: 8px 18px;
+	font-weight: 700;
+	font-size: 0.82rem;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.rma-btn-primary:hover {
+	opacity: 0.9;
+}
+
+/* ── Filter Pills ── */
+.rma-filter-row {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 20px;
+	flex-wrap: wrap;
+}
+
+.rma-filter-pill {
+	padding: 5px 14px;
+	border-radius: 20px;
+	font-size: 0.78rem;
+	font-weight: 700;
+	cursor: pointer;
+	border: 1px solid var(--border-color);
+	background: var(--card-bg);
+	color: var(--text-muted);
+	transition: all 0.15s;
+}
+
+.rma-filter-pill:hover {
+	border-color: #0EA5C9;
+	color: var(--text-color);
+}
+
+.rma-filter-pill.active {
+	background: #0EA5C9;
+	color: #fff;
+	border-color: #0EA5C9;
+}
+
+/* ── Data Table Card ── */
+.rma-table-card {
+	background: var(--card-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 12px;
+	overflow: hidden;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+}
+
+.rma-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.85rem;
+}
+
+.rma-table thead tr {
+	background: #F8FAFC;
+}
+
+[data-theme="dark"] .rma-table-card .rma-table thead tr {
+	background: var(--subtle-fg);
+}
+
+.rma-table th {
+	padding: 10px 12px;
+	text-align: left;
+	font-size: 0.72rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	border-bottom: 1px solid var(--border-color);
+	white-space: nowrap;
+}
+
+.rma-table td {
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--border-color);
+	color: var(--text-color);
+	vertical-align: middle;
+	font-size: 0.82rem;
+}
+
+.rma-table tbody tr:hover td {
+	background: var(--hover-bg);
+}
+
+.rma-empty {
+	padding: 40px;
+	text-align: center;
+	color: var(--text-muted);
+	font-size: 0.9rem;
+}
+
+.rma-case-id {
+	color: #0EA5C9;
+	font-size: 0.78rem;
+	font-family: 'IBM Plex Mono', monospace;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.rma-case-id:hover {
+	text-decoration: underline;
+}
+
+/* ── Status Badges ── */
+.rma-badge {
+	padding: 2px 10px;
+	border-radius: 20px;
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	display: inline-block;
+	white-space: nowrap;
+}
+
+.rma-badge-open            { background: #FFF7ED; color: #EA580C; }
+.rma-badge-in-progress     { background: #FEF3C7; color: #92400E; }
+.rma-badge-pending-parts   { background: #FEFCE8; color: #CA8A04; }
+.rma-badge-sent-for-repair { background: #FAF5FF; color: #9333EA; }
+.rma-badge-repaired        { background: #ECFEFF; color: #0891B2; }
+.rma-badge-replaced        { background: #F0FDF4; color: #059669; }
+.rma-badge-closed          { background: #F0FDF4; color: #059669; }
+.rma-badge-cancelled       { background: #FEF2F2; color: #DC2626; }
+
+/* Priority badges */
+.rma-badge-critical { background: #FEE2E2; color: #991B1B; }
+.rma-badge-high     { background: #FFF7ED; color: #EA580C; }
+.rma-badge-medium   { background: #FEF3C7; color: #92400E; }
+.rma-badge-low      { background: #ECFDF5; color: #065F46; }
+
+/* Warranty badges */
+.rma-badge-warranty   { background: #D1FAE5; color: #065F46; }
+.rma-badge-no-warranty { background: #FEE2E2; color: #991B1B; }
+
+[data-theme="dark"] .rma-badge {
+	opacity: 0.9;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+	.rma-app {
+		flex-direction: column;
+	}
+	.rma-sidebar {
+		width: 100%;
+		border-right: none;
+		border-bottom: 1px solid var(--border-color);
+	}
+	.rma-nav {
+		display: flex;
+		overflow-x: auto;
+		padding: 8px 12px;
+		gap: 4px;
+	}
+	.rma-nav-item {
+		white-space: nowrap;
+		border-left: none;
+		border-bottom: 3px solid transparent;
+		padding: 8px 14px;
+		font-size: 0.78rem;
+	}
+	.rma-nav-item.active {
+		border-left-color: transparent;
+		border-bottom-color: #0EA5C9;
+	}
+	.rma-nav-divider { display: none; }
+	.rma-main-content { padding: 16px; }
+	.rma-stat-card {
+		min-width: 110px;
+	}
+}

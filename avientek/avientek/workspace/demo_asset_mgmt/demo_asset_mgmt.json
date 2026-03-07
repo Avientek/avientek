@@ -1,6 +1,6 @@
 {
  "charts": [],
- "content": "[{\"id\":\"dam_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"DAM Dashboard\",\"col\":4}},{\"id\":\"_bG5zxetQE\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"rQ-heiMPr5\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Free Demo Assets\",\"col\":4}},{\"id\":\"xdwxVyGXw2\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Asset Decapitalizations\",\"col\":4}},{\"id\":\"7tjAaIJ2yg\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open RMA Cases\",\"col\":4}},{\"id\":\"Ejgb9b39Dh\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Issued as Standby\",\"col\":4}},{\"id\":\"ar33nsCg7C\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Out for Demo\",\"col\":4}},{\"id\":\"YyytoJYlhM\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Issued as Standby\",\"col\":4}},{\"id\":\"dam_spacer1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"wFZTiZ-v2s\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset Capitalization\",\"col\":3}},{\"id\":\"FHxVGn0-Ux\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"RMA Case\",\"col\":3}},{\"id\":\"3CXBCzdHTS\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset\",\"col\":3}},{\"id\":\"JzO_Y8y9I_\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Demo Movement\",\"col\":3}},{\"id\":\"nAe_NrnAAE\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset Decapitalization\",\"col\":3}}]",
+ "content": "[{\"id\":\"dam_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"DAM Dashboard\",\"col\":4}},{\"id\":\"_bG5zxetQE\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"rQ-heiMPr5\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Free Demo Assets\",\"col\":4}},{\"id\":\"xdwxVyGXw2\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Asset Decapitalizations\",\"col\":4}},{\"id\":\"Ejgb9b39Dh\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Issued as Standby\",\"col\":4}},{\"id\":\"ar33nsCg7C\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Out for Demo\",\"col\":4}},{\"id\":\"dam_spacer1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"uca8aUnB1v\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Demo Unit Request\",\"col\":3}},{\"id\":\"wFZTiZ-v2s\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset Capitalization\",\"col\":3}},{\"id\":\"3CXBCzdHTS\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset\",\"col\":3}},{\"id\":\"JzO_Y8y9I_\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Demo Movement\",\"col\":3}},{\"id\":\"nAe_NrnAAE\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset Decapitalization\",\"col\":3}}]",
  "creation": "2026-03-02 00:00:00",
  "custom_blocks": [],
  "docstatus": 0,
@@ -13,7 +13,7 @@
  "is_hidden": 0,
  "label": "Demo Asset Mgmt",
  "links": [],
- "modified": "2026-03-03 13:30:36.398459",
+ "modified": "2026-03-07 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Demo Asset Mgmt",
@@ -25,10 +25,6 @@
   {
    "label": "Asset Decapitalizations",
    "number_card_name": "Asset Decapitalizations"
-  },
-  {
-   "label": "Open RMA Cases",
-   "number_card_name": "Open RMA Cases"
   },
   {
    "label": "Out for Demo",
@@ -88,8 +84,8 @@
   {
    "color": "Grey",
    "doc_view": "List",
-   "label": "RMA Case",
-   "link_to": "RMA Case",
+   "label": "Demo Unit Request",
+   "link_to": "Demo Unit Request",
    "stats_filter": "[]",
    "type": "DocType"
   }

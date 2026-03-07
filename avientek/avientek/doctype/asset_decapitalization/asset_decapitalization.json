@@ -23,6 +23,7 @@
   "column_break_valuation",
   "entry_value",
   "gain_loss_amount",
+  "gain_loss_account",
   "section_target",
   "target_item_code",
   "target_item_name",
@@ -150,6 +151,13 @@
    "read_only": 1
   },
   {
+   "description": "Account to book gain/loss on decapitalization. Defaults to Disposal Account from Company settings.",
+   "fieldname": "gain_loss_account",
+   "fieldtype": "Link",
+   "label": "Gain / Loss Account",
+   "options": "Account"
+  },
+  {
    "fieldname": "section_target",
    "fieldtype": "Section Break",
    "label": "Target Stock"
@@ -229,7 +237,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-03-03 14:00:00.000000",
+ "modified": "2026-03-07 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Asset Decapitalization",

@@ -186,9 +186,10 @@ class AssetDecapitalization(Document):
 		fixed_asset_account, accumulated_depr_account, _dep_exp = get_depreciation_accounts(
 			asset.asset_category, asset.company
 		)
-		disposal_account, depreciation_cost_center = get_disposal_account_and_cost_center(
+		_disposal_account, depreciation_cost_center = get_disposal_account_and_cost_center(
 			asset.company
 		)
+		disposal_account = self.gain_loss_account or _disposal_account
 		cost_center = self.cost_center or depreciation_cost_center
 
 		# 1. Debit Warehouse Account (stock received)
@@ -257,6 +258,7 @@ class AssetDecapitalization(Document):
 		frappe.db.set_value("Asset", self.asset, {
 			"disposal_date": self.posting_date,
 			"journal_entry_for_scrap": self.name,
+			"custom_is_demo_asset": 0,
 		})
 
 		asset = frappe.get_doc("Asset", self.asset)
@@ -345,6 +347,7 @@ class AssetDecapitalization(Document):
 		# validation would fail if we don't clear it beforehand.
 		asset.db_set("disposal_date", None)
 		asset.db_set("journal_entry_for_scrap", None)
+		asset.db_set("custom_is_demo_asset", 1)
 
 		if asset.calculate_depreciation:
 			asset.reload()

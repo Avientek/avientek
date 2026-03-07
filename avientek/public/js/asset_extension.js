@@ -7,8 +7,18 @@ frappe.ui.form.on("Asset", {
 			const decap_statuses = ["Submitted", "Partially Depreciated", "Fully Depreciated"];
 			if (decap_statuses.includes(frm.doc.status)) {
 				frm.add_custom_button(__("Decapitalize"), () => {
-					frappe.new_doc("Asset Decapitalization", {
-						asset: frm.doc.name,
+					frappe.call({
+						method: "avientek.events.asset_capitalization.get_decapitalization_defaults",
+						args: { asset_name: frm.doc.name },
+						callback(r) {
+							const defaults = r.message || {};
+							frappe.new_doc("Asset Decapitalization", {
+								asset: frm.doc.name,
+								target_item_code: defaults.target_item_code || "",
+								target_warehouse: defaults.target_warehouse || "",
+								batch_no: defaults.batch_no || "",
+							});
+						},
 					});
 				}, __("Manage"));
 			}

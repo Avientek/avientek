@@ -65,8 +65,6 @@ class DamDashboard {
 			{ id: "items-out", label: __("Items Out for Demo"), icon: "\u2197" },
 			{ id: "divider1", type: "divider" },
 			{ id: "new-movement", label: __("New Movement"), icon: "\u21C4", action: () => frappe.new_doc("Demo Movement") },
-			{ id: "rma-cases", label: __("RMA Cases"), icon: "\u21BA" },
-			{ id: "new-rma", label: __("New RMA Case"), icon: "\uFF0B", action: () => frappe.new_doc("RMA Case") },
 			{ id: "divider2", type: "divider" },
 			{ id: "ack", label: __("Acknowledgement"), icon: "\u2726", action: () => frappe.set_route("List", "Demo Movement", { docstatus: 1 }) },
 		];
@@ -121,7 +119,6 @@ class DamDashboard {
 			case "dashboard": this.refresh_dashboard(); break;
 			case "demo-assets": this.refresh_demo_assets(); break;
 			case "items-out": this.refresh_items_out(); break;
-			case "rma-cases": this.refresh_rma_cases(); break;
 		}
 	}
 
@@ -153,7 +150,6 @@ class DamDashboard {
 			{ label: "Out for Demo", value: data.out_for_demo || 0, color: "#EA580C", icon: "\u2197", route: ["List", "Asset", { custom_dam_status: "On Demo" }] },
 			{ label: "Overdue", value: data.overdue || 0, color: "#DC2626", icon: "\u26A0", route: null },
 			{ label: "Free / Available", value: data.free || 0, color: "#059669", icon: "\u25CB", route: ["List", "Asset", { custom_dam_status: "Free", custom_is_demo_asset: 1 }] },
-			{ label: "Open RMA Cases", value: data.open_rma || 0, color: "#0EA5C9", icon: "\u21BA", route: null },
 		];
 
 		const html = cards.map(c => `
@@ -174,7 +170,6 @@ class DamDashboard {
 				// Overdue or RMA — switch to internal view
 				const label = $(this).find(".dam-stat-label").text();
 				if (label.includes("Overdue")) self.switch_view("items-out");
-				else if (label.includes("RMA")) self.switch_view("rma-cases");
 			}
 		});
 	}
@@ -325,9 +320,6 @@ class DamDashboard {
 			const owned_by = a.asset_owner_company || "\u2014";
 			const country = a.custom_dam_country || "\u2014";
 			const notes = a.custom_dam_notes || "";
-			const so_num = a.custom_so_number || "\u2014";
-			const so_date = a.custom_so_date || "\u2014";
-
 			let actions = `<button class="dam-btn-view" onclick="frappe.set_route('Form','Asset','${a.name}')">${__("View")}</button>`;
 			if (status === "Free") {
 				actions += ` <button class="dam-btn-moveout" onclick="frappe.new_doc('Demo Movement',{asset:'${a.name}',movement_type:'Move Out',company:'${a.company}'})">${__("Move Out")}</button>`;
@@ -348,8 +340,6 @@ class DamDashboard {
 				<td class="dam-mono-cell">${part_no}</td>
 				<td>${owned_by}</td>
 				<td style="color:var(--text-muted); font-size:0.82rem; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${frappe.utils.escape_html(notes)}">${notes || "\u2014"}</td>
-				<td class="dam-mono-cell">${so_date}</td>
-				<td>${so_num !== "\u2014" ? `<a onclick="frappe.set_route('Form','Sales Order','${so_num}')">${so_num}</a>` : "\u2014"}</td>
 				<td>${days_html}</td>
 				<td><div style="display:flex;gap:6px">${actions}</div></td>
 			</tr>`;
@@ -368,8 +358,6 @@ class DamDashboard {
 					<th>${__("Part No")}</th>
 					<th>${__("Owned By")}</th>
 					<th>${__("Note")}</th>
-					<th>${__("SO Date")}</th>
-					<th>${__("SO No")}</th>
 					<th>${__("Days Out")}</th>
 					<th>${__("Actions")}</th>
 				</tr></thead>
@@ -467,89 +455,6 @@ class DamDashboard {
 			</table>`);
 	}
 
-	// ─── RMA Cases View ───
-
-	refresh_rma_cases() {
-		const company = this.company || null;
-
-		this.$content.html(`
-			<div class="dam-view-header">
-				<div class="dam-view-title">
-					<h2>${__("RMA Case Register")}</h2>
-					<p>${__("Return Merchandise Authorization \u2014 all active and closed cases")}</p>
-				</div>
-				<button class="dam-btn-primary" id="dam-new-rma-btn">+ ${__("New RMA Case")}</button>
-			</div>
-			<div class="dam-table-card" id="dam-rma-table">
-				<div class="dam-empty">${__("Loading...")}</div>
-			</div>`);
-
-		this.$content.find("#dam-new-rma-btn").on("click", () => frappe.new_doc("RMA Case"));
-
-		frappe.call({
-			method: `${DAM_API}.get_rma_cases`,
-			args: { company },
-		}).then(r => {
-			this.render_rma_cases(r.message || []);
-		});
-	}
-
-	render_rma_cases(data) {
-		const $table = this.$content.find("#dam-rma-table");
-
-		if (!data.length) {
-			$table.html(`<div class="dam-empty">${__("No RMA cases found")}</div>`);
-			return;
-		}
-
-		const status_badge_map = {
-			"Open": "dam-badge-open",
-			"In Progress": "dam-badge-in-progress",
-			"Pending Parts": "dam-badge-pending-parts",
-			"Sent for Repair": "dam-badge-sent-for-repair",
-			"Repaired": "dam-badge-repaired",
-			"Replaced": "dam-badge-replaced",
-			"Closed": "dam-badge-closed",
-			"Cancelled": "dam-badge-cancelled",
-		};
-
-		const rows = data.map(r => {
-			const badge_cls = status_badge_map[r.status] || "";
-			const warranty_cls = r.warranty_status === "Active" ? "dam-badge-active"
-				: r.warranty_status === "Expired" ? "dam-badge-expired" : "";
-
-			const standby_html = r.standby_unit
-				? `<span class="dam-asset-id" onclick="event.stopPropagation(); frappe.set_route('Form','Asset','${r.standby_unit}')">${r.standby_unit}</span>`
-				: `<span style="color:var(--text-muted)">\u2014</span>`;
-
-			return `
-			<tr style="cursor:pointer" onclick="frappe.set_route('Form','RMA Case','${r.name}')">
-				<td><span class="dam-asset-id">${r.name}</span></td>
-				<td style="font-weight:600">${r.customer || "\u2014"}</td>
-				<td style="color:var(--text-muted); font-size:0.82rem">${r.item_description || "\u2014"}</td>
-				<td style="color:var(--text-muted); font-size:0.78rem; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${r.fault_description || "\u2014"}</td>
-				<td>${r.warranty_status ? `<span class="dam-badge ${warranty_cls}">${__(r.warranty_status).toUpperCase()}</span>` : "\u2014"}</td>
-				<td>${standby_html}</td>
-				<td><span class="dam-badge ${badge_cls}">${__(r.status).toUpperCase()}</span></td>
-				<td style="color:var(--text-muted); font-size:0.82rem">${frappe.datetime.str_to_user(r.rma_date) || "\u2014"}</td>
-			</tr>`;
-		}).join("");
-
-		$table.html(`
-			<table class="dam-table">
-				<thead><tr>
-					<th>${__("Case ID")}</th>
-					<th>${__("Customer")}</th>
-					<th>${__("Product")}</th>
-					<th>${__("Issue")}</th>
-					<th>${__("Warranty")}</th>
-					<th>${__("Standby Unit")}</th>
-					<th>${__("Status")}</th>
-					<th>${__("Created")}</th>
-				</tr></thead>
-				<tbody>${rows}</tbody>
-			</table>`);
-	}
 }
 
 // Helper: short company name for badge

@@ -43,18 +43,12 @@ def get_dashboard_stats(company=None):
 		  {company_clause}
 	""", params)[0][0]
 
-	open_rma = 0
-	if frappe.db.table_exists("RMA Case"):
-		rma_filters = {"docstatus": 1} if not company else {"company": company, "docstatus": 1}
-		open_rma = frappe.db.count("RMA Case", {**rma_filters, "status": ["not in", ["Closed", "Cancelled"]]})
-
 	return {
 		"total": total,
 		"out_for_demo": out_for_demo,
 		"overdue": overdue,
 		"free": free,
 		"standby": standby,
-		"open_rma": open_rma,
 	}
 
 
@@ -183,8 +177,6 @@ def get_demo_assets(company=None, status_filter="All"):
 			a.asset_owner_company,
 			a.custom_dam_country,
 			a.custom_dam_notes,
-			a.custom_so_number,
-			a.custom_so_date,
 			dm_latest.serial_number AS movement_serial_number,
 			dm_latest.movement_date,
 			dm_latest.expected_return_date,
@@ -230,31 +222,3 @@ def get_demo_assets(company=None, status_filter="All"):
 	}, as_dict=True)
 
 
-@frappe.whitelist()
-def get_rma_cases(company=None):
-	"""Return all RMA cases for the dashboard view."""
-	company_clause = "AND rc.company = %(company)s" if company else ""
-
-	return frappe.db.sql(f"""
-		SELECT
-			rc.name,
-			rc.status,
-			rc.priority,
-			rc.customer,
-			rc.item_description,
-			rc.fault_description,
-			rc.warranty_status,
-			rc.standby_unit,
-			rc.rma_date,
-			rc.demo_asset,
-			rc.asset_serial_number
-		FROM `tabRMA Case` rc
-		WHERE rc.docstatus = 1
-		  {company_clause}
-		ORDER BY
-			FIELD(rc.status, 'Open', 'In Progress', 'Pending Parts',
-			      'Sent for Repair', 'Repaired', 'Replaced', 'Closed', 'Cancelled'),
-			rc.rma_date DESC
-	""", {
-		"company": company,
-	}, as_dict=True)

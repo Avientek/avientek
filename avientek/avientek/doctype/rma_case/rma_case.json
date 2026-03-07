@@ -24,13 +24,19 @@
   "sales_invoice",
   "requested_salesperson",
   "section_asset",
+  "item_code",
+  "item_description",
   "demo_asset",
   "asset_serial_number",
-  "item_description",
   "column_break_asset",
+  "warranty_list",
   "warranty_status",
   "warranty_expiry_date",
+  "section_standby",
   "standby_unit",
+  "standby_source",
+  "column_break_standby",
+  "standby_availability_html",
   "section_fault",
   "fault_description",
   "column_break_fault",
@@ -174,11 +180,26 @@
    "label": "Faulty Unit"
   },
   {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item",
+   "in_standard_filter": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "item_description",
+   "fieldtype": "Data",
+   "label": "Item Description",
+   "in_list_view": 1,
+   "fetch_from": "item_code.item_name"
+  },
+  {
    "fieldname": "demo_asset",
    "fieldtype": "Link",
    "label": "Asset (Faulty Unit)",
    "options": "Asset",
-   "description": "Link the faulty Asset record",
+   "description": "Link the faulty Asset record (if applicable)",
    "in_standard_filter": 1
   },
   {
@@ -189,14 +210,15 @@
    "in_standard_filter": 1
   },
   {
-   "fieldname": "item_description",
-   "fieldtype": "Data",
-   "label": "Item Description",
-   "in_list_view": 1
-  },
-  {
    "fieldname": "column_break_asset",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "warranty_list",
+   "fieldtype": "Link",
+   "label": "Warranty Record",
+   "options": "Warranty List",
+   "description": "Link to the Warranty List record for this item"
   },
   {
    "fieldname": "warranty_status",
@@ -213,12 +235,34 @@
    "label": "Warranty Expiry Date"
   },
   {
+   "fieldname": "section_standby",
+   "fieldtype": "Section Break",
+   "label": "Standby / Replacement Unit"
+  },
+  {
    "fieldname": "standby_unit",
    "fieldtype": "Link",
    "label": "Standby Unit Issued",
    "options": "Asset",
    "description": "Asset issued as standby replacement while RMA in progress",
    "allow_on_submit": 1
+  },
+  {
+   "fieldname": "standby_source",
+   "fieldtype": "Select",
+   "label": "Standby Source",
+   "options": "\nExisting Demo Asset\nCapitalized from Stock",
+   "read_only": 1,
+   "allow_on_submit": 1
+  },
+  {
+   "fieldname": "column_break_standby",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "standby_availability_html",
+   "fieldtype": "HTML",
+   "label": "Availability"
   },
   {
    "fieldname": "section_fault",
@@ -392,7 +436,7 @@
   }
  ],
  "row_format": "Dynamic",
- "search_fields": "customer,asset_serial_number,item_description",
+ "search_fields": "customer,item_code,asset_serial_number,item_description",
  "show_title_field_in_link": 1,
  "sort_field": "rma_date",
  "sort_order": "DESC",

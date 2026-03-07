@@ -52,6 +52,15 @@ frappe.ui.form.on("Asset Decapitalization", {
 		frm.set_query("batch_no", () => ({
 			filters: { item: frm.doc.target_item_code },
 		}));
+
+		// Query: gain/loss account — income or expense accounts in same company
+		frm.set_query("gain_loss_account", () => ({
+			filters: {
+				company: frm.doc.company,
+				root_type: ["in", ["Income", "Expense"]],
+				is_group: 0,
+			},
+		}));
 	},
 
 	asset(frm) {
@@ -81,6 +90,19 @@ frappe.ui.form.on("Asset Decapitalization", {
 				flt(r.gross_purchase_amount) - flt(r.value_after_depreciation));
 			frm.set_value("entry_value", r.value_after_depreciation || 0);
 			frm.set_value("gain_loss_amount", 0);
+
+			// Auto-set gain/loss account from Asset Category's depreciation expense account
+			if (r.asset_category && r.company) {
+				frappe.call({
+					method: "avientek.events.asset_capitalization.get_depreciation_expense_account",
+					args: { asset_category: r.asset_category, company: r.company },
+					callback(cat_r) {
+						if (cat_r.message) {
+							frm.set_value("gain_loss_account", cat_r.message);
+						}
+					},
+				});
+			}
 
 			// Auto-set target_item_code if the asset's item is a stock item
 			if (r.item_code) {
