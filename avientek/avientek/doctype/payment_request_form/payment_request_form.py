@@ -95,6 +95,9 @@ def _get_customer_credit_documents(args):
     """Fetch Credit Notes (return Sales Invoices) and credit Journal Entries for a customer."""
     from frappe.utils import flt
 
+    if not args.get("party") or not args.get("company"):
+        return []
+
     company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
     rows = []
 
@@ -159,37 +162,36 @@ def _get_customer_credit_documents(args):
         if je.company != args.get("company") or je.docstatus != 1:
             continue
 
-        # Calculate total credit for this customer in this JE
-        total_credit = sum(
-            flt(acc.credit_in_account_currency)
-            for acc in je.accounts
-            if acc.party_type == "Customer" and acc.party == args.get("party")
-        )
-        total_base_credit = sum(
-            flt(acc.credit)
-            for acc in je.accounts
-            if acc.party_type == "Customer" and acc.party == args.get("party")
-        )
+        # Group party credit accounts by currency to avoid mixing currencies
+        currency_groups = {}
+        for acc in je.accounts:
+            if acc.party_type == "Customer" and acc.party == args.get("party") and flt(acc.credit_in_account_currency) > 0:
+                curr = acc.account_currency or company_currency
+                if curr not in currency_groups:
+                    currency_groups[curr] = {"credit": 0, "base_credit": 0, "exchange_rate": flt(acc.exchange_rate) or 1}
+                currency_groups[curr]["credit"] += flt(acc.credit_in_account_currency)
+                currency_groups[curr]["base_credit"] += flt(acc.credit)
 
-        if total_credit <= 0:
-            continue
+        for curr, data in currency_groups.items():
+            if data["credit"] <= 0:
+                continue
 
-        rows.append({
-            "voucher_type": "Journal Entry",
-            "voucher_no": je.name,
-            "bill_no": je.name,
-            "posting_date": je.posting_date,
-            "due_date": je.posting_date,
-            "grand_total": total_credit,
-            "base_grand_total": total_base_credit,
-            "outstanding": total_credit,
-            "base_outstanding": total_base_credit,
-            "currency": jea.account_currency or company_currency,
-            "exchange_rate": flt(jea.exchange_rate) or 1,
-            "is_return": 0,
-            "return_against": "",
-            "document_reference": je.user_remark or "",
-        })
+            rows.append({
+                "voucher_type": "Journal Entry",
+                "voucher_no": je.name,
+                "bill_no": je.name,
+                "posting_date": je.posting_date,
+                "due_date": je.posting_date,
+                "grand_total": data["credit"],
+                "base_grand_total": data["base_credit"],
+                "outstanding": data["credit"],
+                "base_outstanding": data["base_credit"],
+                "currency": curr,
+                "exchange_rate": data["exchange_rate"],
+                "is_return": 0,
+                "return_against": "",
+                "document_reference": je.user_remark or "",
+            })
 
     # 3. Payment Entries with unallocated amount for this customer
     payment_entries = frappe.get_all(
@@ -234,9 +236,68 @@ def _get_customer_credit_documents(args):
     return rows
 
 
+def _get_outstanding_employee_advances(args):
+    """Fetch outstanding Employee Advances for an employee (advances that need to be paid to the employee)."""
+    from frappe.utils import flt
+
+    if not args.get("party") or not args.get("company"):
+        return []
+
+    company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
+
+    # Get Employee Advances that are unpaid or partially paid
+    advances = frappe.get_all(
+        "Employee Advance",
+        filters={
+            "employee": args.get("party"),
+            "company": args.get("company"),
+            "docstatus": 1,
+            "status": ["in", ["Unpaid", "Partly Paid and Claimed", "Partly Claimed and Returned"]],
+        },
+        fields=[
+            "name", "posting_date", "advance_amount", "paid_amount",
+            "claimed_amount", "return_amount", "currency", "exchange_rate",
+            "purpose",
+        ],
+    )
+
+    rows = []
+    for ea in advances:
+        # Outstanding = advance_amount - paid_amount
+        outstanding = flt(ea.advance_amount) - flt(ea.paid_amount)
+        if outstanding <= 0:
+            continue
+
+        # Get exchange rate, default to 1
+        exchange_rate = flt(ea.exchange_rate) or 1
+        currency = ea.currency or company_currency
+
+        rows.append({
+            "voucher_type": "Employee Advance",
+            "voucher_no": ea.name,
+            "bill_no": ea.name,
+            "posting_date": ea.posting_date,
+            "due_date": ea.posting_date,
+            "grand_total": flt(ea.advance_amount),
+            "base_grand_total": flt(ea.advance_amount) * exchange_rate,
+            "outstanding": outstanding,
+            "base_outstanding": outstanding * exchange_rate,
+            "currency": currency,
+            "exchange_rate": exchange_rate,
+            "is_return": 0,
+            "return_against": "",
+            "document_reference": ea.purpose or "",
+        })
+
+    return rows
+
+
 def _get_outstanding_expense_claims(args):
     """Fetch outstanding Expense Claims for an employee."""
     from frappe.utils import flt
+
+    if not args.get("party") or not args.get("company"):
+        return []
 
     company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
 
@@ -280,24 +341,98 @@ def _get_outstanding_expense_claims(args):
     return rows
 
 
+def _get_outstanding_purchase_orders(args):
+    """Fetch outstanding Purchase Orders for a supplier (for advance payments).
+
+    Purchase Orders don't create Payment Ledger Entries until invoiced,
+    so we query the Purchase Order doctype directly.
+    """
+    from frappe.utils import flt
+
+    if not args.get("party") or not args.get("company"):
+        return []
+
+    company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
+
+    purchase_orders = frappe.get_all(
+        "Purchase Order",
+        filters={
+            "supplier": args.get("party"),
+            "company": args.get("company"),
+            "docstatus": 1,
+            "status": ["not in", ["Completed", "Cancelled", "Closed"]],
+        },
+        fields=[
+            "name", "transaction_date", "grand_total", "base_grand_total",
+            "advance_paid", "currency", "conversion_rate", "schedule_date",
+        ],
+    )
+
+    rows = []
+    for po in purchase_orders:
+        exchange_rate = flt(po.conversion_rate) or 1
+        currency = po.currency or company_currency
+
+        # advance_paid is in company currency; outstanding = base_grand_total - advance_paid
+        outstanding_base = flt(po.base_grand_total) - flt(po.advance_paid)
+        if outstanding_base <= 0:
+            continue
+
+        # Convert outstanding to PO currency
+        outstanding_fc = outstanding_base / exchange_rate if exchange_rate else outstanding_base
+
+        rows.append({
+            "voucher_type": "Purchase Order",
+            "voucher_no": po.name,
+            "bill_no": po.name,
+            "posting_date": po.transaction_date,
+            "due_date": po.schedule_date or po.transaction_date,
+            "grand_total": flt(po.grand_total),
+            "base_grand_total": flt(po.base_grand_total),
+            "outstanding": outstanding_fc,
+            "base_outstanding": outstanding_base,
+            "currency": currency,
+            "exchange_rate": exchange_rate,
+            "is_return": 0,
+            "return_against": "",
+            "document_reference": "",
+        })
+
+    return rows
+
+
 @frappe.whitelist()
 def get_outstanding_reference_documents(args):
 
     if isinstance(args, str):
         args = json.loads(args)
 
+    # Early return if required fields are missing
+    if not args.get("party") or not args.get("company"):
+        return []
+
     if args.get("party_type") == "Supplier":
         supplier_status = get_supplier_block_status(args["party"])
-        if supplier_status["on_hold"]:
-            if supplier_status["hold_type"] == "All":
+        if supplier_status and supplier_status.get("on_hold"):
+            if supplier_status.get("hold_type") == "All":
                 return []
-            elif supplier_status["hold_type"] == "Payments":
-                if not supplier_status["release_date"] or getdate(nowdate()) <= supplier_status["release_date"]:
+            elif supplier_status.get("hold_type") == "Payments":
+                if not supplier_status.get("release_date") or getdate(nowdate()) <= supplier_status.get("release_date"):
                     return []
 
     # Expense Claims don't use Payment Ledger Entry - handle separately
     if args.get("reference_doctype") == "Expense Claim":
         return _get_outstanding_expense_claims(args)
+
+    # Employee Advances don't use Payment Ledger Entry - handle separately
+    if args.get("reference_doctype") == "Employee Advance":
+        return _get_outstanding_employee_advances(args)
+
+    # Combined Employee Documents - fetch both Expense Claims and Employee Advances
+    if args.get("reference_doctype") == "Employee Documents":
+        expense_claims = _get_outstanding_expense_claims(args)
+        employee_advances = _get_outstanding_employee_advances(args)
+        return expense_claims + employee_advances
 
     # Customer: fetch Credit Notes and credit JVs only
     if args.get("party_type") == "Customer":
@@ -564,6 +699,11 @@ def get_outstanding_reference_documents(args):
             except Exception:
                 frappe.log_error(frappe.get_traceback(), f"Error processing standalone debit note {dn.name}")
 
+    # Also include open Purchase Orders when fetching Purchase Invoices
+    if args.get("reference_doctype") == "Purchase Invoice":
+        po_rows = _get_outstanding_purchase_orders(args)
+        filtered_rows.extend(po_rows)
+
     return filtered_rows
 
 
@@ -828,6 +968,34 @@ def download_payment_pdf(docname):
         except Exception as e:
             frappe.log_error(f"Error fetching Quotation PDFs for {purchase_invoice_name}: {e}")
 
+    # Bank Letter (Supplier only, after reference docs)
+    if doc.bank_letter:
+        try:
+            file_url = doc.bank_letter
+            if file_url.lower().endswith('.pdf'):
+                if not file_url.startswith("http"):
+                    file_url = base_url + file_url
+                res = requests.get(file_url, headers=headers, verify=False)
+                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
+                    merger.append(io.BytesIO(res.content))
+        except Exception as e:
+            frappe.log_error(f"Error merging bank letter: {e}")
+
+    # Additional Documents (always last in the combined PDF)
+    for addl_doc in (doc.additional_documents or []):
+        if not addl_doc.attachment:
+            continue
+        try:
+            file_url = addl_doc.attachment
+            if file_url.lower().endswith('.pdf'):
+                if not file_url.startswith("http"):
+                    file_url = base_url + file_url
+                res = requests.get(file_url, headers=headers, verify=False)
+                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
+                    merger.append(io.BytesIO(res.content))
+        except Exception as e:
+            frappe.log_error(f"Error merging additional document {addl_doc.label}: {e}")
+
     # Output merged PDF
     output = io.BytesIO()
     merger.write(output)
@@ -837,6 +1005,85 @@ def download_payment_pdf(docname):
     frappe.local.response.filename = f"{docname}_combined.pdf"
     frappe.local.response.filecontent = output.read()
     frappe.local.response.type = "download"
+
+
+@frappe.whitelist()
+def get_voucher_print_data(docname):
+    """
+    Single consolidated method for the Payment Voucher print format.
+    Fetches all data needed in one call to avoid multiple round-trips from Jinja.
+    """
+    doc = frappe.get_doc("Payment Request Form", docname)
+
+    company_currency = frappe.db.get_value("Company", doc.company, "default_currency") or "AED"
+
+    # Supplier/party bank details
+    supplier_bank = frappe.db.get_value(
+        "Bank Account",
+        {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
+        ["name", "bank", "bank_account_no", "iban", "branch_code"],
+        as_dict=True
+    ) or {}
+    supplier_swift = ""
+    if supplier_bank and supplier_bank.get("bank"):
+        supplier_swift = frappe.db.get_value("Bank", supplier_bank.bank, "swift_number") or ""
+
+    # Issued bank details (single query instead of two)
+    issued_bank_details = frappe.db.get_value(
+        "Bank Account", doc.issued_bank,
+        ["bank", "bank_account_no", "iban", "account_currency"],
+        as_dict=True
+    ) or {}
+    issued_bank_currency = issued_bank_details.get("account_currency") or company_currency
+
+    # Payment history
+    payment_history = get_supplier_payment_history(doc.party, doc.company, limit=10)
+
+    # Previous payment attachment images
+    first_row = doc.payment_references[0] if doc.payment_references else None
+    prev_payment_attachment = first_row.previous_payment_details if first_row else None
+    prev_payment_images = []
+    if prev_payment_attachment:
+        prev_payment_images = get_attachment_as_images(prev_payment_attachment, max_pages=3) or []
+
+    # Pre-compute all per-row attachment data
+    ref_label_map = {
+        "Purchase Invoice": "Supplier Invoice", "Debit Note": "Debit Note",
+        "Credit Note": "Credit Note", "Sales Invoice": "Sales Invoice",
+        "Expense Claim": "Expense Claim", "Payment Entry": "Payment Entry",
+        "Journal Entry": "Journal Entry", "Purchase Order": "Purchase Order"
+    }
+    row_attachments = []
+    for row in doc.payment_references:
+        row_data = {"ref_images": [], "po_images": [], "costing_images": [], "ref_label": "", "ref_name": "", "linked_po": ""}
+        if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
+            row_data["ref_label"] = ref_label_map.get(row.reference_doctype, row.reference_doctype)
+            row_data["ref_name"] = row.reference_name
+            row_data["ref_images"] = get_reference_attachment_images(row.reference_doctype, row.reference_name, max_pages=3) or []
+
+            # Linked PO (supplier only)
+            if doc.party_type == "Supplier" and row.reference_doctype in ("Purchase Invoice", "Debit Note"):
+                linked_po = get_linked_po_for_invoice(row.reference_name)
+                if linked_po:
+                    row_data["linked_po"] = linked_po
+                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
+
+                # Costing sheet
+                if row.costing_sheet_attachment:
+                    row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
+
+        row_attachments.append(row_data)
+
+    return {
+        "company_currency": company_currency,
+        "supplier_bank": supplier_bank,
+        "supplier_swift": supplier_swift,
+        "issued_bank_details": issued_bank_details,
+        "issued_bank_currency": issued_bank_currency,
+        "payment_history": payment_history,
+        "prev_payment_images": prev_payment_images,
+        "row_attachments": row_attachments,
+    }
 
 
 @frappe.whitelist()
@@ -876,40 +1123,45 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
         limit_page_length=limit
     )
 
+    # Batch-fetch all bank account details to avoid N+1 queries
+    all_bank_accounts = set()
     for pe in payment_entries:
-        # Get bank account details
+        if pe.bank_account:
+            all_bank_accounts.add(pe.bank_account)
+        if pe.party_bank_account:
+            all_bank_accounts.add(pe.party_bank_account)
+
+    bank_account_map = {}
+    if all_bank_accounts:
+        bank_rows = frappe.get_all(
+            "Bank Account",
+            filters={"name": ["in", list(all_bank_accounts)]},
+            fields=["name", "bank", "bank_account_no", "iban"]
+        )
+        bank_account_map = {r.name: r for r in bank_rows}
+
+    for pe in payment_entries:
         bank_name = ""
         beneficiary_account = ""
         debit_account_no = ""
 
-        if pe.bank_account:
-            bank_data = frappe.db.get_value(
-                "Bank Account", pe.bank_account,
-                ["bank", "bank_account_no"], as_dict=True
-            )
-            if bank_data:
-                bank_name = bank_data.get("bank") or ""
-                debit_account_no = bank_data.get("bank_account_no") or ""
+        if pe.bank_account and pe.bank_account in bank_account_map:
+            bd = bank_account_map[pe.bank_account]
+            bank_name = bd.get("bank") or ""
+            debit_account_no = bd.get("bank_account_no") or ""
 
-        if pe.party_bank_account:
-            party_bank_data = frappe.db.get_value(
-                "Bank Account", pe.party_bank_account,
-                ["bank_account_no", "iban"], as_dict=True
-            )
-            if party_bank_data:
-                beneficiary_account = party_bank_data.get("iban") or party_bank_data.get("bank_account_no") or ""
+        if pe.party_bank_account and pe.party_bank_account in bank_account_map:
+            pbd = bank_account_map[pe.party_bank_account]
+            beneficiary_account = pbd.get("iban") or pbd.get("bank_account_no") or ""
 
-        # Determine payment type (TT/TR based on mode_of_payment or reference)
-        payment_type_code = "TR"  # Default to Transfer
+        payment_type_code = "TR"
         if pe.mode_of_payment:
             mop = pe.mode_of_payment.upper()
             if "TT" in mop or "TELEGRAPHIC" in mop:
                 payment_type_code = "TT"
-            elif "TR" in mop or "TRANSFER" in mop:
-                payment_type_code = "TR"
 
         payment_history.append({
-            "sl_no": 0,  # Will be set later
+            "sl_no": 0,
             "bank": bank_name,
             "type": payment_type_code,
             "voucher_no": pe.name,
@@ -945,35 +1197,40 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
         as_dict=True
     )
 
+    # Batch-fetch JE bank accounts
+    je_bank_accounts = set()
     for je in journal_entries:
-        # Get bank and account details
+        if je.bank_account:
+            je_bank_accounts.add(je.bank_account)
+
+    je_bank_map = {}
+    if je_bank_accounts:
+        je_bank_rows = frappe.get_all(
+            "Bank Account",
+            filters={"name": ["in", list(je_bank_accounts)]},
+            fields=["name", "bank", "bank_account_no"]
+        )
+        je_bank_map = {r.name: r for r in je_bank_rows}
+
+    # Fetch supplier default bank & name once (not per row)
+    supplier_bank = frappe.db.get_value(
+        "Bank Account",
+        {"party_type": "Supplier", "party": supplier, "is_default": 1},
+        ["bank_account_no", "iban"],
+        as_dict=True
+    ) or {}
+    beneficiary_account_default = supplier_bank.get("iban") or supplier_bank.get("bank_account_no") or ""
+    supplier_name = frappe.db.get_value("Supplier", supplier, "supplier_name") or supplier
+
+    for je in journal_entries:
         bank_name = ""
         debit_account_no = ""
-        beneficiary_account = ""
 
-        if je.bank_account:
-            bank_data = frappe.db.get_value(
-                "Bank Account", je.bank_account,
-                ["bank", "bank_account_no"], as_dict=True
-            )
-            if bank_data:
-                bank_name = bank_data.get("bank") or ""
-                debit_account_no = bank_data.get("bank_account_no") or ""
+        if je.bank_account and je.bank_account in je_bank_map:
+            bd = je_bank_map[je.bank_account]
+            bank_name = bd.get("bank") or ""
+            debit_account_no = bd.get("bank_account_no") or ""
 
-        # Get supplier's default bank account
-        supplier_bank = frappe.db.get_value(
-            "Bank Account",
-            {"party_type": "Supplier", "party": supplier, "is_default": 1},
-            ["bank_account_no", "iban"],
-            as_dict=True
-        )
-        if supplier_bank:
-            beneficiary_account = supplier_bank.get("iban") or supplier_bank.get("bank_account_no") or ""
-
-        # Get supplier name
-        supplier_name = frappe.db.get_value("Supplier", supplier, "supplier_name") or supplier
-
-        # Determine payment type
         payment_type_code = "TR"
         if je.mode_of_payment:
             mop = je.mode_of_payment.upper()
@@ -987,7 +1244,7 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
             "voucher_no": je.cheque_no or je.name,
             "date": je.posting_date,
             "beneficiary": supplier_name,
-            "beneficiary_account": beneficiary_account,
+            "beneficiary_account": beneficiary_account_default,
             "debit_account": debit_account_no,
             "currency": je.account_currency or "AED",
             "amount": je.debit_in_account_currency or 0,
@@ -1002,30 +1259,126 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
     return payment_history
 
 
-@frappe.whitelist()
-def get_pdf_as_images(doctype, docname, max_pages=10):
+# ──────────────────────────── OPTIMIZED PDF CONVERSION HELPERS ────────────────────────────
+import hashlib
+
+def _get_cache_key(prefix, *args):
+    """Generate a unique cache key from arguments."""
+    key_data = "|".join(str(a) for a in args)
+    return f"pdf_img_{prefix}_{hashlib.md5(key_data.encode()).hexdigest()[:16]}"
+
+
+def _convert_pdf_to_images_optimized(pdf_source, max_pages=2, zoom=1.0, jpeg_quality=60, is_bytes=False):
     """
-    Get PDF attachments for a document and convert them to base64 images.
-    Returns a list of image data that can be embedded in print formats.
+    Optimized PDF to image conversion with lower resolution and quality for faster loading.
 
     Args:
-        doctype: The doctype to fetch attachments from
-        docname: The document name
-        max_pages: Maximum number of pages to convert per PDF (default: 10)
+        pdf_source: File path (string) or PDF bytes (if is_bytes=True)
+        max_pages: Maximum pages to convert (default 2 for speed)
+        zoom: Zoom factor (1.0 = 72 DPI, lower = faster)
+        jpeg_quality: JPEG quality 0-100 (lower = smaller file, faster)
+        is_bytes: Whether pdf_source is bytes (True) or file path (False)
 
     Returns:
-        List of dicts with 'file_name' and 'images' (list of base64 image strings)
+        List of base64 image data URIs
     """
     try:
         import fitz  # PyMuPDF
     except ImportError:
-        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
         return []
 
+    try:
+        if is_bytes:
+            pdf_document = fitz.open(stream=pdf_source, filetype="pdf")
+        else:
+            if not os.path.exists(pdf_source):
+                return []
+            pdf_document = fitz.open(pdf_source)
+
+        images = []
+        num_pages = min(pdf_document.page_count, max_pages)
+
+        for page_num in range(num_pages):
+            page = pdf_document.load_page(page_num)
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+
+            # Use JPEG with specified quality for smaller file size
+            img_bytes = pix.tobytes(output="jpeg", jpg_quality=jpeg_quality)
+            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+            images.append(f"data:image/jpeg;base64,{img_base64}")
+
+        pdf_document.close()
+        return images
+    except Exception as e:
+        frappe.log_error(f"PDF conversion error: {str(e)}", "PDF to Image")
+        return []
+
+
+def _get_file_path_from_url(file_url):
+    """Convert a file URL to absolute file path."""
+    if not file_url:
+        return None
+    if file_url.startswith("/private/"):
+        return frappe.get_site_path() + file_url
+    elif file_url.startswith("/files/"):
+        return frappe.get_site_path("public") + file_url
+    return None
+
+
+@frappe.whitelist()
+def clear_pdf_cache(doctype=None, docname=None):
+    """
+    Clear PDF image cache for a specific document or all caches.
+    Call this when attachments are updated.
+
+    Args:
+        doctype: Optional - clear cache for specific doctype
+        docname: Optional - clear cache for specific document
+
+    Returns:
+        dict with status message
+    """
+    try:
+        if doctype and docname:
+            # Clear specific document caches
+            for max_pages in [2, 5, 10]:
+                cache_key = _get_cache_key("pdf_attach", doctype, docname, max_pages)
+                frappe.cache().delete_value(cache_key)
+                cache_key = _get_cache_key("ref_attach", doctype, docname, max_pages)
+                frappe.cache().delete_value(cache_key)
+            return {"status": "success", "message": f"Cleared cache for {doctype} {docname}"}
+        else:
+            # Clear all PDF caches (pattern-based clearing not available, so just return info)
+            return {"status": "info", "message": "Caches will expire automatically in 5 minutes"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@frappe.whitelist()
+def get_pdf_as_images(doctype, docname, max_pages=2):
+    """
+    Get PDF attachments for a document and convert them to base64 images.
+    OPTIMIZED: Uses caching, lower resolution (1.0x), JPEG quality 60.
+
+    Args:
+        doctype: The doctype to fetch attachments from
+        docname: The document name
+        max_pages: Maximum number of pages to convert per PDF (default: 2)
+
+    Returns:
+        List of dicts with 'file_name' and 'images' (list of base64 image strings)
+    """
     if not doctype or not docname:
         return []
 
-    max_pages = int(max_pages) if max_pages else 10
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("pdf_attach", doctype, docname, max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     # Get all PDF attachments
     attachments = frappe.get_all(
@@ -1050,42 +1403,21 @@ def get_pdf_as_images(doctype, docname, max_pages=10):
         try:
             # Get the file path
             file_url = attachment.get("file_url", "")
+            file_path = _get_file_path_from_url(file_url)
 
-            if file_url.startswith("/private/"):
-                file_path = frappe.get_site_path() + file_url
-            elif file_url.startswith("/files/"):
-                file_path = frappe.get_site_path("public") + file_url
-            else:
+            if not file_path:
                 # Try to get from File doc
                 file_doc = frappe.get_doc("File", attachment.get("name"))
                 file_path = file_doc.get_full_path()
 
-            if not os.path.exists(file_path):
-                frappe.log_error(f"File not found: {file_path}", "PDF to Image Conversion")
-                continue
-
-            # Open PDF and convert pages to images
-            pdf_document = fitz.open(file_path)
-            images = []
-
-            num_pages = min(pdf_document.page_count, max_pages)
-
-            for page_num in range(num_pages):
-                page = pdf_document.load_page(page_num)
-
-                # Render page to image (2x resolution for better quality)
-                zoom = 2.0
-                mat = fitz.Matrix(zoom, zoom)
-                pix = page.get_pixmap(matrix=mat)
-
-                # Convert to PNG bytes
-                img_bytes = pix.tobytes("png")
-
-                # Convert to base64
-                img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-                images.append(f"data:image/png;base64,{img_base64}")
-
-            pdf_document.close()
+            # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+            images = _convert_pdf_to_images_optimized(
+                file_path,
+                max_pages=max_pages,
+                zoom=1.0,
+                jpeg_quality=60,
+                is_bytes=False
+            )
 
             if images:
                 result.append({
@@ -1100,18 +1432,22 @@ def get_pdf_as_images(doctype, docname, max_pages=10):
                 "PDF to Image Conversion"
             )
 
+    # Cache result for 5 minutes
+    if result:
+        frappe.cache().set_value(cache_key, result, expires_in_sec=3600)
+
     return result
 
 
 @frappe.whitelist()
-def get_invoice_attachment_images(invoice_name, max_pages=5):
+def get_invoice_attachment_images(invoice_name, max_pages=2):
     """
     Wrapper function to get PDF attachments as images for a Purchase Invoice.
-    This is specifically designed for use in print formats.
+    OPTIMIZED: Uses max_pages=2 default for faster loading.
 
     Args:
         invoice_name: The Purchase Invoice name
-        max_pages: Maximum pages to convert per PDF
+        max_pages: Maximum pages to convert per PDF (default: 2)
 
     Returns:
         List of base64 image strings
@@ -1136,6 +1472,7 @@ REFERENCE_DOCTYPE_MAP = {
     "Credit Note": "Sales Invoice",
     "Sales Invoice": "Sales Invoice",
     "Expense Claim": "Expense Claim",
+    "Employee Advance": "Employee Advance",
     "Payment Entry": "Payment Entry",
     "Journal Entry": "Journal Entry",
     "Purchase Order": "Purchase Order",
@@ -1143,11 +1480,13 @@ REFERENCE_DOCTYPE_MAP = {
 
 
 @frappe.whitelist()
-def get_reference_attachment_images(reference_doctype, reference_name, max_pages=5):
+def get_reference_attachment_images(reference_doctype, reference_name, max_pages=2):
     """
     Generic function to get ALL attachments (PDFs converted to images + direct images)
-    from any reference document. Handles the mapping from PRF reference_doctype
-    (e.g. "Credit Note") to actual Frappe doctype (e.g. "Sales Invoice").
+    from any reference document. OPTIMIZED with caching.
+
+    Handles the mapping from PRF reference_doctype (e.g. "Credit Note") to actual
+    Frappe doctype (e.g. "Sales Invoice").
 
     If no file attachments are found, falls back to rendering the document's
     own print format as images — so there is always something to show.
@@ -1158,11 +1497,17 @@ def get_reference_attachment_images(reference_doctype, reference_name, max_pages
         return []
 
     actual_doctype = REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
-    max_pages = int(max_pages) if max_pages else 5
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("ref_attach", reference_doctype, reference_name, max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     all_images = []
 
-    # 1) PDF attachments → convert to images
+    # 1) PDF attachments → convert to images (uses optimized helper with caching)
     pdf_data = get_pdf_as_images(actual_doctype, reference_name, max_pages)
     for pdf in pdf_data:
         all_images.extend(pdf.get("images", []))
@@ -1183,15 +1528,8 @@ def get_reference_attachment_images(reference_doctype, reference_name, max_pages
         if ext not in IMAGE_EXTS:
             continue
 
-        file_url = att.get("file_url", "")
-        if file_url.startswith("/private/"):
-            file_path = frappe.get_site_path() + file_url
-        elif file_url.startswith("/files/"):
-            file_path = frappe.get_site_path("public") + file_url
-        else:
-            continue
-
-        if not os.path.exists(file_path):
+        file_path = _get_file_path_from_url(att.get("file_url", ""))
+        if not file_path or not os.path.exists(file_path):
             continue
 
         try:
@@ -1207,34 +1545,38 @@ def get_reference_attachment_images(reference_doctype, reference_name, max_pages
     if not all_images:
         all_images = get_print_format_as_images(actual_doctype, reference_name, max_pages=max_pages)
 
+    # Cache result for 5 minutes
+    if all_images:
+        frappe.cache().set_value(cache_key, all_images, expires_in_sec=3600)
+
     return all_images
 
 
 @frappe.whitelist()
-def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10):
+def get_print_format_as_images(doctype, docname, print_format=None, max_pages=2):
     """
     Render a document's print format to PDF and convert to images.
-    This allows embedding print formats within other print formats.
+    OPTIMIZED: Uses caching, lower resolution (1.0x), JPEG quality 60.
 
     Args:
         doctype: The doctype to print
         docname: The document name
         print_format: The print format name (optional, uses default if not specified)
-        max_pages: Maximum pages to convert
+        max_pages: Maximum pages to convert (default: 2)
 
     Returns:
         List of base64 image strings
     """
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
-        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
-        return []
-
     if not doctype or not docname:
         return []
 
-    max_pages = int(max_pages) if max_pages else 10
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("print_fmt", doctype, docname, print_format or "default", max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     try:
         # Generate PDF from print format
@@ -1248,28 +1590,18 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10
         if not pdf_content:
             return []
 
-        # Open PDF from bytes and convert to images
-        pdf_document = fitz.open(stream=pdf_content, filetype="pdf")
-        images = []
+        # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+        images = _convert_pdf_to_images_optimized(
+            pdf_content,
+            max_pages=max_pages,
+            zoom=1.0,
+            jpeg_quality=60,
+            is_bytes=True
+        )
 
-        num_pages = min(pdf_document.page_count, max_pages)
-
-        for page_num in range(num_pages):
-            page = pdf_document.load_page(page_num)
-
-            # Render page to image (2x resolution for better quality)
-            zoom = 2.0
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat)
-
-            # Convert to PNG bytes
-            img_bytes = pix.tobytes("png")
-
-            # Convert to base64
-            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-            images.append(f"data:image/png;base64,{img_base64}")
-
-        pdf_document.close()
+        # Cache result for 1 hour
+        if images:
+            frappe.cache().set_value(cache_key, images, expires_in_sec=3600)
 
         return images
 
@@ -1279,6 +1611,80 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=10
             "Print Format to Image Conversion"
         )
         return []
+
+
+@frappe.whitelist()
+def get_all_print_attachments(docname):
+    """
+    Batch pre-fetch ALL attachment images for a Payment Request Form in one call.
+    This eliminates per-row frappe.call() in the Jinja template.
+
+    Returns a dict with:
+        - prev_payment_images: list of base64 images
+        - ref_images: {row_idx: [base64 images]}
+        - po_images: {row_idx: [base64 images]}
+        - costing_images: {row_idx: [base64 images]}
+        - bank_letter_images: [base64 images]
+        - additional_doc_images: {row_idx: [base64 images]}
+    """
+    doc = frappe.get_doc("Payment Request Form", docname)
+    result = {
+        "prev_payment_images": [],
+        "ref_images": {},
+        "po_images": {},
+        "costing_images": {},
+        "bank_letter_images": [],
+        "additional_doc_images": {},
+    }
+
+    # 1) Previous Payment Details (from first row)
+    first_row = doc.payment_references[0] if doc.payment_references else None
+    if first_row and first_row.previous_payment_details:
+        result["prev_payment_images"] = get_attachment_as_images(
+            first_row.previous_payment_details, max_pages=5
+        ) or []
+
+    # 2) Per-row: reference attachments, linked POs, costing sheets
+    for idx, row in enumerate(doc.payment_references):
+        # Reference document attachments
+        if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
+            ref_imgs = get_reference_attachment_images(
+                row.reference_doctype, row.reference_name, max_pages=5
+            ) or []
+            if ref_imgs:
+                result["ref_images"][str(idx)] = ref_imgs
+
+        # Linked Purchase Orders (Supplier only)
+        if doc.party_type == "Supplier" and row.reference_doctype in ["Purchase Invoice", "Debit Note"]:
+            linked_po = get_linked_po_for_invoice(row.reference_name)
+            if linked_po:
+                po_imgs = get_print_format_as_images(
+                    "Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=5
+                ) or []
+                if po_imgs:
+                    result["po_images"][str(idx)] = {"po_name": linked_po, "images": po_imgs}
+
+            # Costing sheets
+            if row.costing_sheet_attachment:
+                cs_imgs = get_attachment_as_images(row.costing_sheet_attachment, max_pages=5) or []
+                if cs_imgs:
+                    result["costing_images"][str(idx)] = cs_imgs
+
+    # 3) Bank letter
+    if doc.bank_letter:
+        result["bank_letter_images"] = get_attachment_as_images(doc.bank_letter, max_pages=5) or []
+
+    # 4) Additional documents
+    for idx, addl_doc in enumerate(doc.additional_documents or []):
+        if addl_doc.attachment:
+            addl_imgs = get_attachment_as_images(addl_doc.attachment, max_pages=10) or []
+            if addl_imgs:
+                result["additional_doc_images"][str(idx)] = {
+                    "label": addl_doc.label or "Additional Document",
+                    "images": addl_imgs,
+                }
+
+    return result
 
 
 @frappe.whitelist()
@@ -1307,24 +1713,18 @@ def get_linked_po_for_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_attachment_as_images(file_url, max_pages=10):
+def get_attachment_as_images(file_url, max_pages=2):
     """
     Convert a PDF attachment URL to base64 images.
-    This is for use with Attach fields in print formats.
+    OPTIMIZED: Uses caching, lower resolution (1.0x), JPEG quality 60.
 
     Args:
         file_url: The file URL from an Attach field (e.g., /files/cost.png.pdf or /private/files/...)
-        max_pages: Maximum pages to convert
+        max_pages: Maximum pages to convert (default: 2)
 
     Returns:
         List of base64 image strings
     """
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
-        frappe.log_error("PyMuPDF (fitz) not installed. Cannot convert PDF to images.")
-        return []
-
     if not file_url:
         return []
 
@@ -1332,44 +1732,34 @@ def get_attachment_as_images(file_url, max_pages=10):
     if not file_url.lower().endswith('.pdf'):
         return []
 
-    max_pages = int(max_pages) if max_pages else 10
+    max_pages = int(max_pages) if max_pages else 2
+
+    # Check cache first
+    cache_key = _get_cache_key("attach", file_url, max_pages)
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
 
     try:
         # Get the file path from URL
-        if file_url.startswith("/private/"):
-            file_path = frappe.get_site_path() + file_url
-        elif file_url.startswith("/files/"):
-            file_path = frappe.get_site_path("public") + file_url
-        else:
-            # Handle other URL formats
+        file_path = _get_file_path_from_url(file_url)
+
+        if not file_path or not os.path.exists(file_path):
+            frappe.log_error(f"Attachment file not found: {file_url}", "Attachment to Image Conversion")
             return []
 
-        if not os.path.exists(file_path):
-            frappe.log_error(f"Attachment file not found: {file_path}", "Attachment to Image Conversion")
-            return []
+        # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+        images = _convert_pdf_to_images_optimized(
+            file_path,
+            max_pages=max_pages,
+            zoom=1.0,
+            jpeg_quality=60,
+            is_bytes=False
+        )
 
-        # Open PDF and convert pages to images
-        pdf_document = fitz.open(file_path)
-        images = []
-
-        num_pages = min(pdf_document.page_count, max_pages)
-
-        for page_num in range(num_pages):
-            page = pdf_document.load_page(page_num)
-
-            # Render page to image (2x resolution for better quality)
-            zoom = 2.0
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat)
-
-            # Convert to PNG bytes
-            img_bytes = pix.tobytes("png")
-
-            # Convert to base64
-            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
-            images.append(f"data:image/png;base64,{img_base64}")
-
-        pdf_document.close()
+        # Cache result for 1 hour
+        if images:
+            frappe.cache().set_value(cache_key, images, expires_in_sec=3600)
 
         return images
 

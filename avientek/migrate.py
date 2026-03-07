@@ -9,6 +9,7 @@ def after_migrate():
 		"Item", None, "search_fields", "item_name,description,item_group,customer_code,part_number", "Data", for_doctype="Doctype"
 	)
 	_create_asset_dam_fields()
+	_deactivate_old_quotation_workflows()
 
 
 def _create_asset_dam_fields():
@@ -68,3 +69,17 @@ def _create_asset_dam_fields():
 			# Patch specific properties that may have been added after initial creation
 			if f.get("allow_on_submit"):
 				frappe.db.set_value("Custom Field", cf_name, "allow_on_submit", f["allow_on_submit"])
+
+
+def _deactivate_old_quotation_workflows():
+	"""Deactivate old Quotation workflows when Quotation Final exists."""
+	if not frappe.db.exists("Workflow", "Quotation Final"):
+		return
+	old_workflows = ["Quotation Margin Approval", "Quotation DocFlow", "Quotation"]
+	for wf_name in old_workflows:
+		if frappe.db.exists("Workflow", wf_name):
+			wf = frappe.get_doc("Workflow", wf_name)
+			if wf.is_active:
+				wf.is_active = 0
+				wf.save(ignore_permissions=True)
+				frappe.logger().info(f"Deactivated old workflow: {wf_name}")

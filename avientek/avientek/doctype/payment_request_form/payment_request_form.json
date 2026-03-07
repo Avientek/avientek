@@ -8,7 +8,6 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "workflow_state",
   "type_of_payment_section",
   "naming_series",
   "payment_type",
@@ -34,24 +33,46 @@
   "account",
   "account_no",
   "issued_currency",
+  "issued_amount",
+  "transfer_exchange_rate",
   "column_break_dike",
   "payment_mode",
+  "is_tr_lc_payment",
   "cheque_date",
   "cheque_no",
   "receiving_bank",
   "receiving_account",
   "receving_account_no",
   "receiving_currency",
+  "receiving_amount",
   "currency_section",
   "currency",
   "column_break_wnxv",
   "conversion_rate",
+  "tr_lc_details_section",
+  "tr_type",
+  "port_of_loading",
+  "port_of_discharge",
+  "column_break_trlc1",
+  "coo_of_goods",
+  "mode_of_shipment",
+  "goods_description",
+  "tr_lc_documents_section",
+  "has_proforma_invoice",
+  "has_purchase_order",
+  "column_break_trlc2",
+  "has_commercial_invoice",
+  "has_bl_awb",
+  "has_delivery_note",
+  "has_bill_of_entry",
   "reference_section",
   "payment_references",
   "section_break_mnon",
   "currency_totals_html",
   "payment_history_section",
   "payment_history_html",
+  "additional_documents_section",
+  "additional_documents",
   "more_information_section",
   "remarks",
   "amended_from",
@@ -66,7 +87,11 @@
   "account_number",
   "bank",
   "swift_code",
-  "connections_tab"
+  "bank_letter",
+  "connections_tab",
+  "total_outstanding_amount",
+  "total_payment_amount",
+  "column_break_mlnn"
  ],
  "fields": [
   {
@@ -159,7 +184,7 @@
    "depends_on": "eval:doc.docstatus==0 && doc.party && doc.party_type=='Employee'",
    "fieldname": "get_expense_claim",
    "fieldtype": "Button",
-   "label": "Get Expense Claim"
+   "label": "Get Employee Documents"
   },
   {
    "depends_on": "eval:doc.docstatus==0 && doc.party && doc.party_type=='Customer'",
@@ -174,10 +199,24 @@
    "label": "Reference"
   },
   {
+   "allow_bulk_edit": 1,
    "fieldname": "payment_references",
    "fieldtype": "Table",
    "label": "Payment References",
    "options": "Payment Request Reference"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "additional_documents_section",
+   "fieldtype": "Section Break",
+   "label": "Additional Documents"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "additional_documents",
+   "fieldtype": "Table",
+   "label": "Additional Documents",
+   "options": "Payment Request Additional Document"
   },
   {
    "collapsible": 1,
@@ -274,6 +313,7 @@
    "label": "Exchange Rate\t"
   },
   {
+   "depends_on": "eval:doc.payment_type!=\"Internal Transfer\"",
    "fieldname": "section_break_mnon",
    "fieldtype": "Section Break",
    "label": "Currency Totals"
@@ -350,6 +390,13 @@
    "label": "SWIFT Code"
   },
   {
+   "description": "Fetched from Supplier master",
+   "fieldname": "bank_letter",
+   "fieldtype": "Attach",
+   "label": "Bank Letter",
+   "read_only": 1
+  },
+  {
    "fieldname": "total_payment_amount",
    "fieldtype": "Currency",
    "label": "Total Payment Amount",
@@ -384,12 +431,6 @@
   {
    "fieldname": "column_break_mlnn",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "workflow_state",
-   "fieldtype": "Link",
-   "label": "Workflow State",
-   "options": "Workflow State"
   },
   {
    "fetch_from": "issued_bank.account",
@@ -436,6 +477,21 @@
    "options": "Currency"
   },
   {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\" && doc.issued_currency",
+   "fieldname": "issued_amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "issued_currency"
+  },
+  {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\" && doc.issued_currency && doc.receiving_currency && doc.issued_currency != doc.receiving_currency",
+   "description": "Rate: 1 Issued Currency = X Receiving Currency",
+   "fieldname": "transfer_exchange_rate",
+   "fieldtype": "Float",
+   "label": "Exchange Rate",
+   "precision": "6"
+  },
+  {
    "depends_on": "eval:doc.payment_type==\"Internal Transfer\"&& doc.receiving_account\r\n",
    "fieldname": "receiving_currency",
    "fieldtype": "Link",
@@ -443,9 +499,128 @@
    "options": "Currency"
   },
   {
+   "depends_on": "eval:doc.payment_type==\"Internal Transfer\" && doc.receiving_currency",
+   "fieldname": "receiving_amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "receiving_currency"
+  },
+  {
    "fieldname": "connections_tab",
    "fieldtype": "Tab Break",
    "label": "Connections"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "tr_lc_details_section",
+   "fieldtype": "Section Break",
+   "label": "TR/LC Details"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "tr_type",
+   "fieldtype": "Select",
+   "label": "Type of TR",
+   "options": "\nADV\nSight\nDirect"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "port_of_loading",
+   "fieldtype": "Data",
+   "label": "Port of Loading / Airport of Departure"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "port_of_discharge",
+   "fieldtype": "Data",
+   "label": "Port of Discharge / Airport of Destination"
+  },
+  {
+   "fieldname": "column_break_trlc1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "coo_of_goods",
+   "fieldtype": "Link",
+   "label": "COO of Goods",
+   "options": "Country"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "mode_of_shipment",
+   "fieldtype": "Select",
+   "label": "Mode of Shipment",
+   "options": "\nAir\nSea\nAir/Sea"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "goods_description",
+   "fieldtype": "Small Text",
+   "label": "Brief Description of Goods"
+  },
+  {
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "tr_lc_documents_section",
+   "fieldtype": "Section Break",
+   "label": "Documents"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "has_proforma_invoice",
+   "fieldtype": "Check",
+   "label": "Proforma Invoice"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "has_purchase_order",
+   "fieldtype": "Check",
+   "label": "Purchase Order"
+  },
+  {
+   "fieldname": "column_break_trlc2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "fieldname": "has_commercial_invoice",
+   "fieldtype": "Check",
+   "label": "Commercial Invoice / Sales Invoice"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "description": "Not required for Local TR",
+   "fieldname": "has_bl_awb",
+   "fieldtype": "Check",
+   "label": "BL / AWB"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "description": "For Local TR",
+   "fieldname": "has_delivery_note",
+   "fieldtype": "Check",
+   "label": "Delivery Note"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.is_tr_lc_payment",
+   "description": "Not required for Local TR",
+   "fieldname": "has_bill_of_entry",
+   "fieldtype": "Check",
+   "label": "Bill of Entry"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_tr_lc_payment",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Is TR/LC Payment",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -460,8 +635,8 @@
    "link_fieldname": "custom_payment_request_form"
   }
  ],
- "modified": "2026-02-18 10:51:57.383243",
- "modified_by": "Administrator",
+ "modified": "2026-03-06 13:31:56.629928",
+ "modified_by": "support@quarkcs.com",
  "module": "Avientek",
  "name": "Payment Request Form",
  "naming_rule": "By \"Naming Series\" field",

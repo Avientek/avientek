@@ -73,7 +73,12 @@ fixtures = [
 					"Purchase Order-avientek_exchange_rate",
 					"Purchase Order Item-avientek_exchange_rate",
 					"Supplier-avientek_display_currency",
+					"Supplier-avientek_bank_letter",
+					"Supplier-custom_contact_details_section",
+					"Supplier-custom_contact_details",
 					"Customer-avientek_display_currency",
+					"Customer-custom_contact_details_section",
+					"Customer-custom_contact_details",
 					"Quotation Item-custom_finance_",
 					"Quotation Item-custom_transport_",
 					"Quotation Item-custom_incentive_",
@@ -151,6 +156,18 @@ fixtures = [
 					"Asset Capitalization-custom_demo_unit_request",
 					"Purchase Order-custom_demo_unit_request",
      ),
+			]
+		],
+	},
+	{
+		"dt": "Workflow",
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"Quotation Final"
+				]
 			]
 		],
 	},
@@ -343,6 +360,9 @@ override_doctype_class = {
 # Hook on document methods and events
 
 doc_events = {
+    "Customer": {
+        "after_insert": "avientek.events.customer.after_insert",
+    },
     "Purchase Order": {
         "before_update_after_submit": "avientek.events.purchase_order.po_validate",
         "validate": "avientek.events.purchase_order.check_exchange_rate",

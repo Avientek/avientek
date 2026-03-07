@@ -99,12 +99,25 @@ frappe.ui.form.on('Payment Request Form', {
         // Update Type options based on party_type
         frm.events.update_reference_type_options(frm);
 
+        // Set TR/LC document checkboxes based on TR Type (and make them read-only)
+        if (frm.doc.is_tr_lc_payment) {
+            frm.events.set_tr_document_checkboxes(frm);
+        }
+
         // Render currency totals table
         frm.events.recalculate_totals(frm);
 
         // Render payment history for suppliers
         if (frm.doc.party_type === "Supplier" && frm.doc.party) {
             frm.events.render_payment_history(frm);
+        }
+
+        // Reset dirty state after initial load (async fetches may mark form dirty)
+        if (!frm.doc.__islocal) {
+            setTimeout(() => {
+                frm.doc.__unsaved = 0;
+                frm.page.clear_indicator();
+            }, 1500);
         }
 
         if (frm.doc.payment_type == "Pay" && !frm.doc.__islocal) {
@@ -224,7 +237,7 @@ frappe.ui.form.on('Payment Request Form', {
         if (frm.doc.party_type === "Supplier") {
             options = ["", "Purchase Invoice", "Debit Note", "Purchase Order", "Journal Entry", "Manual"];
         } else if (frm.doc.party_type === "Employee") {
-            options = ["", "Expense Claim", "Journal Entry", "Manual"];
+            options = ["", "Expense Claim", "Employee Advance", "Journal Entry", "Manual"];
         } else if (frm.doc.party_type === "Customer") {
             options = ["", "Credit Note", "Sales Invoice", "Payment Entry", "Journal Entry", "Manual"];
         } else {
@@ -243,11 +256,52 @@ frappe.ui.form.on('Payment Request Form', {
 	get_purchase_invoice: function(frm) {
 		frm.events._fetch_outstanding(frm, "Purchase Invoice");
 	},
-	get_purchase_order: function(frm) {
-		frm.events._fetch_outstanding(frm, "Purchase Order");
-	},
 	get_expense_claim: function(frm) {
-		frm.events._fetch_outstanding(frm, "Expense Claim");
+		// Fetch both Expense Claims and Employee Advances for employees
+		frm.clear_table("payment_references");
+
+		if(!frm.doc.party) {
+			return;
+		}
+
+		var args = {
+			"posting_date": frm.doc.posting_date,
+			"company": frm.doc.company,
+			"party": frm.doc.party,
+			"party_type": frm.doc.party_type,
+			"reference_doctype": "Employee Documents"  // Special flag to get both
+		};
+
+		return frappe.call({
+			method: 'avientek.avientek.doctype.payment_request_form.payment_request_form.get_outstanding_reference_documents',
+			args: {
+				args: args
+			},
+			callback: function(r) {
+				if(r.message) {
+					$.each(r.message, function(i, d) {
+						let c = frm.add_child("payment_references");
+						c.reference_doctype = d.voucher_type;
+						c.reference_name = d.voucher_no;
+						c.bill_no = d.bill_no;
+						c.due_date = d.due_date;
+						c.invoice_date = d.posting_date;
+						c.grand_total = d.grand_total;
+						c.base_grand_total = d.base_grand_total;
+						c.outstanding_amount = d.outstanding;
+						c.base_outstanding_amount = d.base_outstanding;
+						c.exchange_rate = d.exchange_rate;
+						c.currency = d.currency;
+						c.document_reference = d.document_reference;
+						c.is_return = d.is_return || 0;
+						c.return_against = d.return_against || "";
+					});
+					frm.refresh_fields();
+					frm.events.recalculate_totals(frm);
+					frm.events.apply_debit_note_styling(frm);
+				}
+			}
+		});
 	},
 	get_sales_invoice: function(frm) {
 		frm.events._fetch_outstanding(frm, "Sales Invoice");
@@ -330,26 +384,40 @@ frappe.ui.form.on('Payment Request Form', {
         is_updating_fields = true;
 
         let total_base_amount = 0;      // Company currency total (always consistent)
+        let total_base_outstanding = 0; // Company currency outstanding total
         let currency_totals = {};       // Group totals by currency
 
         (frm.doc.payment_references || []).forEach(row => {
             // Sum amounts in company currency - include all rows (positive and negative)
-            total_base_amount += flt(row.base_grand_total || 0);
+            total_base_amount += flt(row.base_grand_total || 0, 2);
+            total_base_outstanding += flt(row.base_outstanding_amount || 0, 2);
 
             // Group by billing currency
             let curr = row.currency || 'Unknown';
             if (!currency_totals[curr]) {
-                currency_totals[curr] = { billing: 0, base: 0 };
+                currency_totals[curr] = { billing: 0, base: 0, outstanding: 0, base_outstanding: 0 };
             }
-            currency_totals[curr].billing += flt(row.grand_total || 0);
-            currency_totals[curr].base += flt(row.base_grand_total || 0);
+            currency_totals[curr].billing += flt(row.grand_total || 0, 2);
+            currency_totals[curr].base += flt(row.base_grand_total || 0, 2);
+            currency_totals[curr].outstanding += flt(row.outstanding_amount || 0, 2);
+            currency_totals[curr].base_outstanding += flt(row.base_outstanding_amount || 0, 2);
+        });
+
+        // Round accumulated totals to avoid floating-point drift
+        total_base_amount = flt(total_base_amount, 2);
+        total_base_outstanding = flt(total_base_outstanding, 2);
+        Object.keys(currency_totals).forEach(curr => {
+            currency_totals[curr].billing = flt(currency_totals[curr].billing, 2);
+            currency_totals[curr].base = flt(currency_totals[curr].base, 2);
+            currency_totals[curr].outstanding = flt(currency_totals[curr].outstanding, 2);
+            currency_totals[curr].base_outstanding = flt(currency_totals[curr].base_outstanding, 2);
         });
 
         // Build HTML table for currency totals
-        frm.events.render_currency_totals(frm, currency_totals, total_base_amount);
+        frm.events.render_currency_totals(frm, currency_totals, total_base_amount, total_base_outstanding);
 
         // Only set value if it actually changed (to avoid "Not Saved" on refresh)
-        if (flt(frm.doc.total_outstanding_amount) !== flt(total_base_amount)) {
+        if (flt(frm.doc.total_outstanding_amount, 2) !== flt(total_base_amount, 2)) {
             frappe.run_serially([
                 () => frm.set_value("total_outstanding_amount", total_base_amount),
                 () => { is_updating_fields = false; }
@@ -359,17 +427,19 @@ frappe.ui.form.on('Payment Request Form', {
         }
     },
 
-    render_currency_totals: function(frm, currency_totals, total_base_amount) {
+    render_currency_totals: function(frm, currency_totals, total_base_amount, total_base_outstanding) {
         // Get company currency for display
         let company_currency = frm.doc.currency || 'AED';
 
         let html = `<div class="currency-totals-container" style="margin: 10px 0;">
-            <table class="table table-bordered table-sm" style="width: auto; min-width: 400px;">
+            <table class="table table-bordered table-sm" style="width: auto; min-width: 600px;">
                 <thead style="background-color: #f5f5f5;">
                     <tr>
                         <th style="padding: 8px 12px;">Currency</th>
                         <th style="padding: 8px 12px; text-align: right;">Billing Amount</th>
                         <th style="padding: 8px 12px; text-align: right;">Base Amount (${company_currency})</th>
+                        <th style="padding: 8px 12px; text-align: right;">Outstanding</th>
+                        <th style="padding: 8px 12px; text-align: right;">Base Outstanding (${company_currency})</th>
                     </tr>
                 </thead>
                 <tbody>`;
@@ -380,21 +450,29 @@ frappe.ui.form.on('Payment Request Form', {
             let data = currency_totals[curr];
             let billingFormatted = format_currency(data.billing, curr);
             let baseFormatted = format_currency(data.base, company_currency);
+            let outstandingFormatted = format_currency(data.outstanding, curr);
+            let baseOutstandingFormatted = format_currency(data.base_outstanding, company_currency);
 
             // Color negative values red
             let billingStyle = data.billing < 0 ? 'color: #e74c3c;' : '';
             let baseStyle = data.base < 0 ? 'color: #e74c3c;' : '';
+            let outstandingStyle = data.outstanding < 0 ? 'color: #e74c3c;' : '';
+            let baseOutstandingStyle = data.base_outstanding < 0 ? 'color: #e74c3c;' : '';
 
             html += `<tr>
                 <td style="padding: 8px 12px; font-weight: 500;">${curr}</td>
                 <td style="padding: 8px 12px; text-align: right; ${billingStyle}">${billingFormatted}</td>
                 <td style="padding: 8px 12px; text-align: right; ${baseStyle}">${baseFormatted}</td>
+                <td style="padding: 8px 12px; text-align: right; ${outstandingStyle}">${outstandingFormatted}</td>
+                <td style="padding: 8px 12px; text-align: right; ${baseOutstandingStyle}">${baseOutstandingFormatted}</td>
             </tr>`;
         });
 
         // Add total row
         let totalBaseFormatted = format_currency(total_base_amount, company_currency);
+        let totalBaseOutstandingFormatted = format_currency(total_base_outstanding, company_currency);
         let totalStyle = total_base_amount < 0 ? 'color: #e74c3c;' : 'color: #2e7d32;';
+        let totalOutstandingStyle = total_base_outstanding < 0 ? 'color: #e74c3c;' : 'color: #2e7d32;';
 
         html += `</tbody>
                 <tfoot style="background-color: #e8f5e9; font-weight: bold;">
@@ -402,6 +480,8 @@ frappe.ui.form.on('Payment Request Form', {
                         <td style="padding: 10px 12px;">TOTAL</td>
                         <td style="padding: 10px 12px; text-align: right;">-</td>
                         <td style="padding: 10px 12px; text-align: right; ${totalStyle}">${totalBaseFormatted}</td>
+                        <td style="padding: 10px 12px; text-align: right;">-</td>
+                        <td style="padding: 10px 12px; text-align: right; ${totalOutstandingStyle}">${totalBaseOutstandingFormatted}</td>
                     </tr>
                 </tfoot>
             </table>
@@ -502,6 +582,68 @@ frappe.ui.form.on('Payment Request Form', {
 		});
 	},
 
+    // Check if selected Mode of Payment is TR or LC and show/hide TR/LC section
+    payment_mode: function(frm) {
+        if (frm.doc.payment_mode) {
+            frappe.call({
+                method: "frappe.client.get_value",
+                args: {
+                    doctype: "Mode of Payment",
+                    filters: { name: frm.doc.payment_mode },
+                    fieldname: ["custom_is_tr", "custom_is_lc"]
+                },
+                callback: function(r) {
+                    if (r.message) {
+                        let is_tr_lc = r.message.custom_is_tr || r.message.custom_is_lc;
+                        frm.set_value("is_tr_lc_payment", is_tr_lc ? 1 : 0);
+                    } else {
+                        frm.set_value("is_tr_lc_payment", 0);
+                    }
+                }
+            });
+        } else {
+            frm.set_value("is_tr_lc_payment", 0);
+        }
+    },
+
+    // Auto-enable document checkboxes based on TR Type selection
+    tr_type: function(frm) {
+        frm.events.set_tr_document_checkboxes(frm);
+    },
+
+    // Set TR/LC document checkboxes based on TR Type
+    set_tr_document_checkboxes: function(frm) {
+        let tr_type = frm.doc.tr_type;
+
+        // Reset all checkboxes first
+        frm.set_value("has_proforma_invoice", 0);
+        frm.set_value("has_purchase_order", 0);
+        frm.set_value("has_commercial_invoice", 0);
+        frm.set_value("has_bl_awb", 0);
+        frm.set_value("has_delivery_note", 0);
+        frm.set_value("has_bill_of_entry", 0);
+
+        if (tr_type === "ADV") {
+            // ADV: Enable Proforma Invoice and Purchase Order
+            frm.set_value("has_proforma_invoice", 1);
+            frm.set_value("has_purchase_order", 1);
+        } else if (tr_type === "Direct") {
+            // Direct: Enable Commercial Invoice, BL/AWB, Delivery Note, Bill of Entry
+            frm.set_value("has_commercial_invoice", 1);
+            frm.set_value("has_bl_awb", 1);
+            frm.set_value("has_delivery_note", 1);
+            frm.set_value("has_bill_of_entry", 1);
+        }
+
+        // Make all document checkboxes read-only (user never change)
+        frm.set_df_property("has_proforma_invoice", "read_only", 1);
+        frm.set_df_property("has_purchase_order", "read_only", 1);
+        frm.set_df_property("has_commercial_invoice", "read_only", 1);
+        frm.set_df_property("has_bl_awb", "read_only", 1);
+        frm.set_df_property("has_delivery_note", "read_only", 1);
+        frm.set_df_property("has_bill_of_entry", "read_only", 1);
+    },
+
     issued_bank : function(frm) {
         if (frm.doc.issued_bank) {
             frappe.call({
@@ -540,6 +682,140 @@ frappe.ui.form.on('Payment Request Form', {
                     }
                 }
             });
+        }
+    },
+
+    // Internal Transfer: Auto-update receiving amount when issued amount changes
+    issued_amount: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.issued_amount) {
+            frm.events.calculate_transfer_amounts(frm, 'issued');
+        }
+    },
+
+    // Internal Transfer: Auto-update issued amount when receiving amount changes
+    receiving_amount: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.receiving_amount) {
+            // Only calculate if user manually changed receiving amount (not from issued calculation)
+            if (!frm._calculating_from_issued) {
+                frm.events.calculate_transfer_amounts(frm, 'receiving');
+            }
+        }
+    },
+
+    // Calculate transfer amounts based on currency exchange rates
+    calculate_transfer_amounts: function(frm, source) {
+        let issued_currency = frm.doc.issued_currency;
+        let receiving_currency = frm.doc.receiving_currency;
+
+        if (!issued_currency || !receiving_currency) return;
+
+        // If same currency, amounts are equal
+        if (issued_currency === receiving_currency) {
+            frm.set_value('transfer_exchange_rate', 1);
+            if (source === 'issued') {
+                frm._calculating_from_issued = true;
+                frm.set_value('receiving_amount', frm.doc.issued_amount);
+                frm._calculating_from_issued = false;
+            } else {
+                frm.set_value('issued_amount', frm.doc.receiving_amount);
+            }
+            return;
+        }
+
+        // Use existing exchange rate if set and valid (not 1 for different currencies)
+        let rate = flt(frm.doc.transfer_exchange_rate);
+
+        if (rate && rate > 0 && rate !== 1) {
+            // Use existing rate for calculation
+            if (source === 'issued' && frm.doc.issued_amount) {
+                frm._calculating_from_issued = true;
+                frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
+                frm._calculating_from_issued = false;
+            } else if (source === 'receiving' && frm.doc.receiving_amount) {
+                frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
+            }
+        } else {
+            // Fetch exchange rate
+            frm.events.fetch_transfer_exchange_rate(frm, source);
+        }
+    },
+
+    // Fetch exchange rate from system
+    fetch_transfer_exchange_rate: function(frm, source) {
+        let issued_currency = frm.doc.issued_currency;
+        let receiving_currency = frm.doc.receiving_currency;
+
+        if (!issued_currency || !receiving_currency || issued_currency === receiving_currency) return;
+
+        frappe.call({
+            method: 'erpnext.setup.utils.get_exchange_rate',
+            args: {
+                from_currency: issued_currency,
+                to_currency: receiving_currency,
+                transaction_date: frm.doc.posting_date || frappe.datetime.now_date()
+            },
+            callback: function(r) {
+                if (r.message) {
+                    let rate = flt(r.message);
+
+                    // If rate is 1 for different currencies, it means no rate found - show message
+                    if (rate === 1 && issued_currency !== receiving_currency) {
+                        frappe.msgprint({
+                            title: __('Exchange Rate'),
+                            message: __('No exchange rate found for {0} to {1}. Please enter the rate manually.', [issued_currency, receiving_currency]),
+                            indicator: 'orange'
+                        });
+                        frm.set_value('transfer_exchange_rate', 0);
+                        return;
+                    }
+
+                    frm.set_value('transfer_exchange_rate', rate);
+
+                    // Calculate amounts
+                    if (source === 'issued' && frm.doc.issued_amount) {
+                        frm._calculating_from_issued = true;
+                        frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
+                        frm._calculating_from_issued = false;
+                    } else if (source === 'receiving' && frm.doc.receiving_amount) {
+                        frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
+                    }
+                }
+            }
+        });
+    },
+
+    // Recalculate when exchange rate is manually changed
+    transfer_exchange_rate: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.transfer_exchange_rate) {
+            let rate = flt(frm.doc.transfer_exchange_rate);
+            if (rate > 0 && frm.doc.issued_amount) {
+                frm._calculating_from_issued = true;
+                frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
+                frm._calculating_from_issued = false;
+            }
+        }
+    },
+
+    // Recalculate when currencies change
+    issued_currency: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer") {
+            // Reset exchange rate when currency changes
+            frm.set_value('transfer_exchange_rate', 0);
+            frm.set_value('receiving_amount', 0);
+            if (frm.doc.issued_amount && frm.doc.receiving_currency) {
+                frm.events.fetch_transfer_exchange_rate(frm, 'issued');
+            }
+        }
+    },
+
+    receiving_currency: function(frm) {
+        if (frm.doc.payment_type === "Internal Transfer") {
+            // Reset exchange rate when currency changes
+            frm.set_value('transfer_exchange_rate', 0);
+            frm.set_value('receiving_amount', 0);
+            if (frm.doc.issued_amount && frm.doc.issued_currency) {
+                frm.events.fetch_transfer_exchange_rate(frm, 'issued');
+            }
         }
     }
 });
@@ -607,21 +883,34 @@ function fetch_supplier_details(frm, force_update) {
         }
     }
 
-    // Fetch party balance
-    frappe.call({
-        method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
-        args: {
-            company: frm.doc.company,
-            party_type: frm.doc.party_type,
-            party: frm.doc.party,
-            date: frm.doc.posting_date
-        },
-        callback: function(r) {
-            if (r.message) {
-                set_if_changed(frm, "supplier_balance", r.message.party_balance);
+    // Fetch bank letter from Supplier master
+    if (frm.doc.party_type === "Supplier") {
+        frappe.db.get_value('Supplier', frm.doc.party, 'avientek_bank_letter').then(r => {
+            if (r.message && r.message.avientek_bank_letter) {
+                set_if_changed(frm, "bank_letter", r.message.avientek_bank_letter);
+            } else if (force_update) {
+                set_if_changed(frm, "bank_letter", "");
             }
-        }
-    });
+        });
+    }
+
+    // Fetch party balance only for new docs or when user changes party
+    if (!frm.doc.supplier_balance || force_update) {
+        frappe.call({
+            method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
+            args: {
+                company: frm.doc.company,
+                party_type: frm.doc.party_type,
+                party: frm.doc.party,
+                date: frm.doc.posting_date
+            },
+            callback: function(r) {
+                if (r.message) {
+                    set_if_changed(frm, "supplier_balance", r.message.party_balance);
+                }
+            }
+        });
+    }
 }
 // Track which row/field is being updated to prevent infinite loops
 let row_updating = {};
