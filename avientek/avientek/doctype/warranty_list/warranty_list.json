@@ -1,0 +1,294 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-03-07 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "is_submittable": 1,
+ "field_order": [
+  "naming_series",
+  "status",
+  "column_break_top",
+  "company",
+  "section_delivery",
+  "delivery_note",
+  "delivery_date",
+  "column_break_delivery",
+  "customer",
+  "customer_name",
+  "section_item",
+  "item_code",
+  "item_name",
+  "qty",
+  "column_break_item",
+  "serial_no",
+  "batch_no",
+  "section_warranty",
+  "warranty_months",
+  "warranty_start_date",
+  "column_break_warranty",
+  "warranty_end_date",
+  "days_remaining",
+  "section_notes",
+  "notes",
+  "section_amendment",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "WTY-.YYYY.-.#####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Under Warranty\nExpired\nVoided\nCancelled",
+   "default": "Under Warranty",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "reqd": 1,
+   "bold": 1,
+   "allow_on_submit": 1
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "section_delivery",
+   "fieldtype": "Section Break",
+   "label": "Delivery Details"
+  },
+  {
+   "fieldname": "delivery_note",
+   "fieldtype": "Link",
+   "label": "Delivery Note",
+   "options": "Delivery Note",
+   "read_only": 1
+  },
+  {
+   "fieldname": "delivery_date",
+   "fieldtype": "Date",
+   "label": "Delivery Date",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_delivery",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "label": "Customer Name",
+   "fetch_from": "customer.customer_name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_item",
+   "fieldtype": "Section Break",
+   "label": "Item Details"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name",
+   "fetch_from": "item_code.item_name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "label": "Qty",
+   "default": "1",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_item",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "serial_no",
+   "fieldtype": "Small Text",
+   "label": "Serial No"
+  },
+  {
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "label": "Batch No",
+   "options": "Batch"
+  },
+  {
+   "fieldname": "section_warranty",
+   "fieldtype": "Section Break",
+   "label": "Warranty Period"
+  },
+  {
+   "fieldname": "warranty_months",
+   "fieldtype": "Int",
+   "label": "Warranty (Months)",
+   "reqd": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "warranty_start_date",
+   "fieldtype": "Date",
+   "label": "Warranty Start Date",
+   "reqd": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "column_break_warranty",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "warranty_end_date",
+   "fieldtype": "Date",
+   "label": "Warranty End Date",
+   "reqd": 1,
+   "bold": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "days_remaining",
+   "fieldtype": "Int",
+   "label": "Days Remaining",
+   "read_only": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes",
+   "allow_on_submit": 1
+  },
+  {
+   "fieldname": "section_amendment",
+   "fieldtype": "Section Break",
+   "hidden": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Warranty List",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [
+  {
+   "group": "Reference",
+   "link_doctype": "RMA Case",
+   "link_fieldname": "warranty_list"
+  }
+ ],
+ "modified": "2026-03-07 17:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Warranty List",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAM Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 0,
+   "submit": 0,
+   "write": 0
+  },
+  {
+   "create": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 0,
+   "submit": 0,
+   "write": 0
+  }
+ ],
+ "search_fields": "item_code,item_name,customer,delivery_note",
+ "sort_field": "warranty_end_date",
+ "sort_order": "ASC",
+ "states": [
+  {"color": "green", "title": "Under Warranty"},
+  {"color": "red", "title": "Expired"},
+  {"color": "gray", "title": "Voided"},
+  {"color": "gray", "title": "Cancelled"}
+ ],
+ "title_field": "item_name",
+ "track_changes": 1
+}

@@ -148,6 +148,13 @@ fixtures = [
                     "Item Price-custom_section_break_wquw3","Item Price-custom_recommended_products","Item Price-custom_must_quote","Item Price-custom_charges_and_percentage","Item Price-custom_shipping__air_","Item Price-custom_shipping__sea_",
                     "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_","Item Price-custom_markup_",
 					"Workflow-custom_enable_confirmation",
+					"Item-custom_is_asset_capitalization",
+					"Item-custom_default_warranty_months",
+					"Asset Capitalization-custom_individual_assets",
+					"Asset-custom_part_no",
+					"Asset-custom_asset_capitalization",
+					"Asset Capitalization-custom_demo_unit_request",
+					"Purchase Order-custom_demo_unit_request",
      ),
 			]
 		],
@@ -181,6 +188,16 @@ fixtures = [
 					"Purchase Order Item-sales_order-read_only",
 					"Purchase Invoice-represents_company-ignore_user_permissions",
 					"Quotation-main-field_order",
+					"Asset Capitalization-capitalization_method-default",
+					"Asset Capitalization-capitalization_method-read_only",
+					"Asset Capitalization-capitalization_method-hidden",
+					"Asset Capitalization-finance_book-hidden",
+					"Asset Capitalization-section_break_26-hidden",
+					"Asset Capitalization-asset_items-hidden",
+					"Asset Capitalization-asset_items_total-hidden",
+					"Asset Capitalization-service_expenses_section-hidden",
+					"Asset Capitalization-service_items-hidden",
+					"Asset Capitalization-service_items_total-hidden",
 				],
 			]
 		],
@@ -217,12 +234,20 @@ doctype_js = {
 	"Expense Claim": "public/js/expense_claim.js",
 	"Payment Entry": "public/js/payment_entry.js",
 	"Sales Invoice": "public/js/sales_invoice.js",
+	"Asset": "public/js/asset_extension.js",
+	"Asset Capitalization": "public/js/asset_capitalization.js",
 }
-doctype_list_js = {"Sales Order" : "public/js/sales_order_list.js",
-	"Quotation": "public/js/quotation_list.js"
+doctype_list_js = {
+	"Sales Order": "public/js/sales_order_list.js",
+	"Quotation": "public/js/quotation_list.js",
+	"Asset": "public/js/asset_list.js",
 }
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
+
+override_doctype_dashboards = {
+	"Asset": "avientek.overrides.asset_dashboard.get_data",
+}
 
 # Svg Icons
 # ------------------
@@ -341,6 +366,8 @@ doc_events = {
     "Purchase Order": {
         "before_update_after_submit": "avientek.events.purchase_order.po_validate",
         "validate": "avientek.events.purchase_order.check_exchange_rate",
+        "on_submit": "avientek.events.demo_unit_request_links.on_linked_doc_submit",
+        "on_cancel": "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
     },
     "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
     "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
@@ -357,29 +384,37 @@ doc_events = {
     },
     "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
     "Comment": {"after_insert": "avientek.events.comment.after_insert"},
+    "Demo Movement": {
+        "on_submit": "avientek.events.demo_movement.on_submit",
+        "on_cancel": "avientek.events.demo_movement.on_cancel",
+    },
+    "Delivery Note": {
+        "on_submit": "avientek.events.warranty.on_delivery_note_submit",
+        "on_cancel": "avientek.events.warranty.on_delivery_note_cancel",
+    },
+    "Asset Capitalization": {
+        "before_submit": "avientek.events.asset_capitalization.before_submit",
+        "on_submit": [
+            "avientek.events.asset_capitalization.on_submit",
+            "avientek.events.demo_unit_request_links.on_linked_doc_submit",
+        ],
+        "on_cancel": [
+            "avientek.events.asset_capitalization.on_cancel",
+            "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
+        ],
+    },
 }
 
 
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# "all": [
-# "avientek.tasks.all"
-# ],
-# "daily": [
-# "avientek.tasks.daily"
-# ],
-# "hourly": [
-# "avientek.tasks.hourly"
-# ],
-# "weekly": [
-# "avientek.tasks.weekly"
-# ],
-# "monthly": [
-# "avientek.tasks.monthly"
-# ],
-# }
+scheduler_events = {
+    "daily": [
+        "avientek.events.demo_movement.send_return_reminders",
+        "avientek.events.warranty.expire_warranties",
+    ],
+}
 
 # Testing
 # -------

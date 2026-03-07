@@ -1,0 +1,49 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"fo_header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Field Operations</b></span>\",\"col\":12}},{\"id\":\"fo_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Material Dispatch Notes\",\"col\":4}},{\"id\":\"fo_sc2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Activity Logs\",\"col\":4}},{\"id\":\"fo_sc3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"RMA Cases FO\",\"col\":4}}]",
+ "creation": "2026-03-02 00:00:00",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "truck",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Field Operations",
+ "links": [],
+ "modified": "2026-03-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Field Operations",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [],
+ "sequence_id": 14.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "label": "Material Dispatch Notes",
+   "link_to": "Material Dispatch Note",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "label": "Employee Activity Logs",
+   "link_to": "Employee Activity Log",
+   "type": "DocType"
+  },
+  {
+   "color": "Red",
+   "label": "RMA Cases FO",
+   "link_to": "RMA Case",
+   "type": "DocType"
+  }
+ ],
+ "title": "Field Operations"
+}

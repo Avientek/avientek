@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "creation": "2026-03-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "log_date",
+  "log_type",
+  "column_break_1",
+  "logged_by",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "log_date",
+   "fieldtype": "Datetime",
+   "label": "Date & Time",
+   "default": "Now",
+   "in_list_view": 1,
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "log_type",
+   "fieldtype": "Select",
+   "label": "Type",
+   "options": "Note\nStatus Change\nCustomer Contact\nEngineer Update\nPart Ordered\nRepair Complete\nEscalation",
+   "default": "Note",
+   "in_list_view": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "logged_by",
+   "fieldtype": "Link",
+   "label": "Logged By",
+   "options": "User",
+   "default": "__user",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "in_list_view": 1,
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-03-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "RMA Case Log",
+ "owner": "Administrator",
+ "permissions": []
+}

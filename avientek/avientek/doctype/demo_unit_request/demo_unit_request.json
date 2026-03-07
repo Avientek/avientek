@@ -1,0 +1,320 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-03-07 13:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "is_submittable": 1,
+ "field_order": [
+  "naming_series",
+  "status",
+  "column_break_top",
+  "company",
+  "request_date",
+  "requested_by",
+  "section_item",
+  "item_code",
+  "item_name",
+  "qty",
+  "column_break_item",
+  "brand",
+  "warehouse",
+  "purpose",
+  "section_customer",
+  "customer",
+  "contact_person",
+  "column_break_customer",
+  "country",
+  "requested_salesperson",
+  "section_stock_availability",
+  "stock_availability_html",
+  "section_available_assets",
+  "available_demo_assets_html",
+  "section_notes",
+  "notes",
+  "section_amendment",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "DUR-.YYYY.-.#####",
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nApproved\nFulfilled\nRejected\nCancelled",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "request_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Request Date",
+   "reqd": 1
+  },
+  {
+   "default": "__user",
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Requested By",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_item",
+   "fieldtype": "Section Break",
+   "label": "Item Details"
+  },
+  {
+   "bold": 1,
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_code.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "qty",
+   "fieldtype": "Int",
+   "label": "Qty",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_item",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "item_code.brand",
+   "fieldname": "brand",
+   "fieldtype": "Link",
+   "label": "Brand",
+   "options": "Brand",
+   "read_only": 1
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Preferred Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "purpose",
+   "fieldtype": "Select",
+   "label": "Purpose",
+   "options": "\nCustomer Demo\nExhibition\nTraining\nInternal Testing\nOther"
+  },
+  {
+   "fieldname": "section_customer",
+   "fieldtype": "Section Break",
+   "label": "Customer"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "contact_person",
+   "fieldtype": "Data",
+   "label": "Contact Person"
+  },
+  {
+   "fieldname": "column_break_customer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "requested_salesperson",
+   "fieldtype": "Link",
+   "label": "Sales Person",
+   "options": "Sales Person"
+  },
+  {
+   "fieldname": "section_stock_availability",
+   "fieldtype": "Section Break",
+   "label": "Stock Availability"
+  },
+  {
+   "fieldname": "stock_availability_html",
+   "fieldtype": "HTML",
+   "label": "Stock Availability"
+  },
+  {
+   "fieldname": "section_available_assets",
+   "fieldtype": "Section Break",
+   "label": "Available Demo Assets"
+  },
+  {
+   "fieldname": "available_demo_assets_html",
+   "fieldtype": "HTML",
+   "label": "Available Demo Assets"
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "section_amendment",
+   "fieldtype": "Section Break",
+   "hidden": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Demo Unit Request",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [
+  {
+   "group": "Fulfillment",
+   "link_doctype": "Asset Capitalization",
+   "link_fieldname": "custom_demo_unit_request"
+  },
+  {
+   "group": "Fulfillment",
+   "link_doctype": "Purchase Order",
+   "link_fieldname": "custom_demo_unit_request"
+  }
+ ],
+ "modified": "2026-03-07 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Demo Unit Request",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 0,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 0,
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Team",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAM Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "item_code,item_name,customer,status",
+ "sort_field": "request_date",
+ "sort_order": "DESC",
+ "states": [
+  {
+   "color": "yellow",
+   "title": "Pending"
+  },
+  {
+   "color": "green",
+   "title": "Approved"
+  },
+  {
+   "color": "blue",
+   "title": "Fulfilled"
+  },
+  {
+   "color": "red",
+   "title": "Rejected"
+  },
+  {
+   "color": "gray",
+   "title": "Cancelled"
+  }
+ ],
+ "title_field": "item_name",
+ "track_changes": 1
+}
