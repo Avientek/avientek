@@ -171,7 +171,7 @@
    "depends_on": "party",
    "fieldname": "supplier_balance",
    "fieldtype": "Currency",
-   "label": "Supplier Balance",
+   "label": "Balance",
    "read_only": 1
   },
   {
