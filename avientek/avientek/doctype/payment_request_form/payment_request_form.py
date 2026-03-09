@@ -236,6 +236,70 @@ def _get_customer_credit_documents(args):
     return rows
 
 
+def _get_outstanding_employee_journal_entries(args):
+    """Fetch outstanding Journal Entries with credit for an employee (company owes the employee)."""
+    from frappe.utils import flt
+
+    if not args.get("party") or not args.get("company"):
+        return []
+
+    company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
+    rows = []
+
+    je_accounts = frappe.get_all(
+        "Journal Entry Account",
+        filters={
+            "party_type": "Employee",
+            "party": args.get("party"),
+            "credit_in_account_currency": [">", 0],
+            "docstatus": 1,
+        },
+        fields=["parent", "credit_in_account_currency", "credit", "account_currency", "exchange_rate"],
+    )
+
+    seen_je = set()
+    for jea in je_accounts:
+        if jea.parent in seen_je:
+            continue
+        seen_je.add(jea.parent)
+
+        je = frappe.get_doc("Journal Entry", jea.parent)
+        if je.company != args.get("company") or je.docstatus != 1:
+            continue
+
+        currency_groups = {}
+        for acc in je.accounts:
+            if acc.party_type == "Employee" and acc.party == args.get("party") and flt(acc.credit_in_account_currency) > 0:
+                curr = acc.account_currency or company_currency
+                if curr not in currency_groups:
+                    currency_groups[curr] = {"credit": 0, "base_credit": 0, "exchange_rate": flt(acc.exchange_rate) or 1}
+                currency_groups[curr]["credit"] += flt(acc.credit_in_account_currency)
+                currency_groups[curr]["base_credit"] += flt(acc.credit)
+
+        for curr, data in currency_groups.items():
+            if data["credit"] <= 0:
+                continue
+
+            rows.append({
+                "voucher_type": "Journal Entry",
+                "voucher_no": je.name,
+                "bill_no": je.name,
+                "posting_date": je.posting_date,
+                "due_date": je.posting_date,
+                "grand_total": data["credit"],
+                "base_grand_total": data["base_credit"],
+                "outstanding": data["credit"],
+                "base_outstanding": data["base_credit"],
+                "currency": curr,
+                "exchange_rate": data["exchange_rate"],
+                "is_return": 0,
+                "return_against": "",
+                "document_reference": je.user_remark or "",
+            })
+
+    return rows
+
+
 def _get_outstanding_employee_advances(args):
     """Fetch outstanding Employee Advances for an employee (advances that need to be paid to the employee)."""
     from frappe.utils import flt
@@ -428,11 +492,12 @@ def get_outstanding_reference_documents(args):
     if args.get("reference_doctype") == "Employee Advance":
         return _get_outstanding_employee_advances(args)
 
-    # Combined Employee Documents - fetch both Expense Claims and Employee Advances
+    # Combined Employee Documents - fetch Expense Claims, Employee Advances, and Journal Entries
     if args.get("reference_doctype") == "Employee Documents":
         expense_claims = _get_outstanding_expense_claims(args)
         employee_advances = _get_outstanding_employee_advances(args)
-        return expense_claims + employee_advances
+        journal_entries = _get_outstanding_employee_journal_entries(args)
+        return expense_claims + employee_advances + journal_entries
 
     # Customer: fetch Credit Notes and credit JVs only
     if args.get("party_type") == "Customer":
@@ -638,11 +703,11 @@ def get_outstanding_reference_documents(args):
 
     # Fetch standalone Debit Notes (returns without linked Purchase Invoice)
     if args.get("reference_doctype") == "Purchase Invoice":
-        # Get all debit note voucher_nos already added (to avoid duplicates)
+        # Get all voucher_nos already added (to avoid duplicates)
+        # Check ALL types, not just "Debit Note", since PLE may add returns as "Purchase Invoice"
         existing_debit_notes = set()
         for row in filtered_rows:
-            if row.get("voucher_type") == "Debit Note":
-                existing_debit_notes.add(row.get("voucher_no"))
+            existing_debit_notes.add(row.get("voucher_no"))
 
         # Fetch standalone debit notes for this supplier
         standalone_debit_notes = frappe.get_all(
