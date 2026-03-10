@@ -72,14 +72,16 @@
    "fieldname": "outstanding_amount",
    "fieldtype": "Currency",
    "label": "Outstanding",
-   "options": "currency"
+   "options": "currency",
+   "read_only": 1
   },
   {
    "columns": 2,
    "fieldname": "base_outstanding_amount",
    "fieldtype": "Currency",
    "label": "Outstanding (Company Currency)",
-   "options": "Company:company:default_currency"
+   "options": "Company:company:default_currency",
+   "read_only": 1
   },
   {
    "fieldname": "exchange_rate",
@@ -207,7 +209,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-02-19 13:21:09.186183",
+ "modified": "2026-03-10 12:07:54.643633",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Payment Request Reference",

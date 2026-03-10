@@ -1095,13 +1095,7 @@ frappe.ui.form.on('Payment Request Reference', {
 
         let rate = flt(row.exchange_rate || 1);
 
-        // Only process for Manual type entries
-        if (row.reference_doctype !== "Manual") {
-            row_updating[cdn + '_outstanding'] = false;
-            return;
-        }
-
-        // Calculate outstanding from base_outstanding
+        // Calculate outstanding from base_outstanding for all reference types
         if (rate === 1) {
             row.outstanding_amount = row.base_outstanding_amount;
         } else {
