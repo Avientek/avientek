@@ -139,65 +139,85 @@ frappe.ui.form.on('Quotation', {
         toggle_apply_discount_button(frm);
     },
 
-    // ── Discount (already server-side) ──────────────────────
+    // ── Discount (instant client-side) ─────────────────────
     custom_apply_discount(frm) {
         let discount_type = frm.doc.custom_discount_type || "Amount";
         let discount_amount = 0;
 
+        let items = frm.doc.items || [];
+        if (!items.length) {
+            frappe.msgprint(__("No items available to apply discount"));
+            return;
+        }
+
+        // Reset all items to pre-discount selling prices first
+        items.forEach(row => {
+            calculate_all_preview(frm, row.doctype, row.name);
+        });
+
+        // Now read fresh total selling value (before discount)
+        let total_selling = 0;
+        items.forEach(row => {
+            total_selling += flt(row.custom_selling_price) || flt(row.amount) || 0;
+        });
+
+        if (total_selling <= 0) {
+            frappe.msgprint(__("Invalid selling amount"));
+            return;
+        }
+
         if (discount_type === "Percentage") {
-            // Calculate amount from percentage
-            let total_selling = 0;
-            (frm.doc.items || []).forEach(row => {
-                total_selling += flt(row.custom_selling_price) || flt(row.amount) || 0;
-            });
             if (frm.doc.custom_discount_ == null || frm.doc.custom_discount_ === "") {
                 frappe.msgprint(__("Please enter discount percentage"));
                 return;
             }
             discount_amount = (total_selling * flt(frm.doc.custom_discount_)) / 100;
+            frm.set_value("custom_discount_amount_value", discount_amount);
         } else {
-            // Use amount directly
             if (frm.doc.custom_discount_amount_value == null || frm.doc.custom_discount_amount_value === "") {
                 frappe.msgprint(__("Please enter discount amount"));
                 return;
             }
             discount_amount = flt(frm.doc.custom_discount_amount_value);
+            if (total_selling > 0) {
+                frm.set_value("custom_discount_", (discount_amount / total_selling) * 100);
+            }
         }
 
-        frappe.call({
-            method: "avientek.events.quotation.apply_discount",
-            args: {
-                doc: frm.doc,
-                discount_amount: discount_amount
-            },
-            callback(r) {
-                if (r.message) {
-                    frm.set_value("custom_discount_amount_value", r.message.custom_discount_amount_value);
-                    frm.set_value("custom_discount_", r.message.custom_discount_);
+        // Instant client-side proportional distribution
+        items.forEach(row => {
+            let selling = flt(row.custom_selling_price) || flt(row.amount) || 0;
+            let qty = flt(row.qty) || 1;
+            let cogs = flt(row.custom_cogs);
 
-                    (r.message.items || []).forEach(it => {
-                        frappe.model.set_value("Quotation Item", it.name, "custom_special_rate", it.custom_special_rate);
-                        frappe.model.set_value("Quotation Item", it.name, "custom_selling_price", it.custom_selling_price);
-                        frappe.model.set_value("Quotation Item", it.name, "custom_margin_value", it.custom_margin_value);
-                        frappe.model.set_value("Quotation Item", it.name, "custom_margin_", it.custom_margin_);
-                        frappe.model.set_value("Quotation Item", it.name, "rate", it.custom_special_rate);
-                        frappe.model.set_value("Quotation Item", it.name, "amount", it.custom_selling_price);
-                        frappe.model.set_value("Quotation Item", it.name, "custom_total_", it.custom_selling_price);
-                        frappe.model.set_value("Quotation Item", it.name, "custom_discount_amount_value", it.custom_discount_amount_value);
-                        frappe.model.set_value("Quotation Item", it.name, "custom_discount_amount_qty", it.custom_discount_amount_qty);
-                    });
+            let share = total_selling ? (selling / total_selling) : 0;
+            let item_discount = flt(discount_amount * share, 4);
 
-                    frm.refresh_field("items");
-                    frm.trigger("calculate_taxes_and_totals");
+            let new_selling = Math.max(selling - item_discount, 0);
+            let new_rate = flt(new_selling / qty, 4);
+            let new_margin_val = flt(new_selling - cogs, 4);
+            let new_margin_pct = new_selling ? flt((new_margin_val / new_selling) * 100, 4) : 0;
 
-                    // Mark discount as applied and hide button
-                    frm._discount_applied = true;
-                    toggle_apply_discount_button(frm);
-
-                    frappe.show_alert({message: __("Discount applied successfully"), indicator: "green"});
-                }
-            }
+            row.custom_discount_amount_value = flt(item_discount / qty, 4);
+            row.custom_discount_amount_qty   = flt(item_discount, 4);
+            row.custom_special_rate          = new_rate;
+            row.custom_selling_price         = new_selling;
+            row.custom_total_                = new_selling;
+            row.rate                         = new_rate;
+            row.amount                       = new_selling;
+            row.custom_margin_value          = new_margin_val;
+            row.custom_margin_               = new_margin_pct;
         });
+
+        frm.refresh_field("items");
+        update_doc_totals_preview(frm);
+
+        // Mark discount as applied and hide button
+        frm._discount_applied = true;
+        toggle_apply_discount_button(frm);
+
+        frm.dirty();
+        frappe.show_alert({message: __("Discount applied"), indicator: "green"});
     },
 
     // ── Incentive Type Selection ─────────────────────────────
@@ -228,18 +248,29 @@ frappe.ui.form.on('Quotation', {
         let incentive_type = frm.doc.custom_incentive_type || "Percentage";
         let incentive_amount = 0;
 
-        // Calculate total for incentive distribution
-        let total_cost = 0;
-        (frm.doc.items || []).forEach(row => {
-            total_cost += flt(row.custom_special_price) * (flt(row.qty) || 1);
+        let items = frm.doc.items || [];
+        if (!items.length) {
+            frappe.msgprint(__("No items available to apply incentive"));
+            return;
+        }
+
+        // Calculate total SP * qty
+        let total_sp = 0;
+        items.forEach(row => {
+            total_sp += flt(row.custom_special_price) * (flt(row.qty) || 1);
         });
+
+        if (!total_sp) {
+            frappe.msgprint(__("Items have no Special Price set"));
+            return;
+        }
 
         if (incentive_type === "Percentage") {
             if (frm.doc.custom_incentive_ == null || frm.doc.custom_incentive_ === "") {
                 frappe.msgprint(__("Please enter incentive percentage"));
                 return;
             }
-            incentive_amount = (total_cost * flt(frm.doc.custom_incentive_)) / 100;
+            incentive_amount = (total_sp * flt(frm.doc.custom_incentive_)) / 100;
             frm.set_value("custom_incentive_amount", incentive_amount);
         } else {
             if (frm.doc.custom_incentive_amount == null || frm.doc.custom_incentive_amount === "") {
@@ -247,22 +278,44 @@ frappe.ui.form.on('Quotation', {
                 return;
             }
             incentive_amount = flt(frm.doc.custom_incentive_amount);
-            // Calculate and set percentage
-            if (total_cost > 0) {
-                let percent = (incentive_amount / total_cost) * 100;
-                frm.set_value("custom_incentive_", percent);
+            if (total_sp > 0) {
+                frm.set_value("custom_incentive_", (incentive_amount / total_sp) * 100);
             }
         }
+
+        // Instant client-side distribution across items
+        let mode = frm.doc.custom_distribute_incentive_based_on || "Amount";
+        items.forEach((row, idx) => {
+            let qty = flt(row.qty) || 1;
+            let sp = flt(row.custom_special_price);
+            let row_incentive = 0;
+
+            if (mode === "Distributed Equally") {
+                row_incentive = flt(incentive_amount / items.length, 4);
+            } else if (mode === "Distributed Manually") {
+                return;  // skip — user sets item-level values
+            } else {
+                // "Amount" — proportional to sp * qty
+                row_incentive = total_sp ? flt((sp * qty / total_sp) * incentive_amount, 4) : 0;
+            }
+
+            // Set item-level incentive % so calculate_all_preview picks it up
+            let item_incentive_pct = (sp * qty) ? flt(row_incentive / (sp * qty) * 100, 4) : 0;
+            frappe.model.set_value(row.doctype, row.name, "custom_incentive_", item_incentive_pct);
+        });
+
+        // Recalculate all items preview
+        items.forEach(row => {
+            calculate_all_preview(frm, row.doctype, row.name);
+        });
+        update_doc_totals_preview(frm);
 
         // Mark incentive as applied and hide button
         frm._incentive_applied = true;
         toggle_apply_incentive_button(frm);
 
-        // Server pipeline handles distribution on save
         frm.dirty();
-        frm.save().then(() => {
-            frappe.show_alert({message: __("Incentive applied successfully"), indicator: "green"});
-        });
+        frappe.show_alert({message: __("Incentive applied"), indicator: "green"});
     },
 
     // ── Refresh / Onload ────────────────────────────────────
@@ -417,6 +470,7 @@ frappe.ui.form.on('Quotation Item', {
     // ── Price / percentage field changes → preview ──────────
     custom_special_price(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
         let row = locals[cdt][cdn];
         if (row.parentfield === 'custom_service_items') {
             handle_qty_or_rate_change(frm, cdt, cdn);
@@ -426,6 +480,7 @@ frappe.ui.form.on('Quotation Item', {
 
     qty(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
         let row = locals[cdt][cdn];
         if (row.parentfield === 'custom_service_items') {
             handle_qty_or_rate_change(frm, cdt, cdn);
@@ -435,6 +490,7 @@ frappe.ui.form.on('Quotation Item', {
 
     shipping_per(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
         let row = locals[cdt][cdn];
         if (row.parentfield === 'custom_service_items') {
             handle_qty_or_rate_change(frm, cdt, cdn);
@@ -444,10 +500,12 @@ frappe.ui.form.on('Quotation Item', {
 
     reward_per(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
     },
 
     custom_incentive_(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
         let row = locals[cdt][cdn];
         if (row.parentfield === 'custom_service_items') {
             handle_qty_or_rate_change(frm, cdt, cdn);
@@ -457,6 +515,7 @@ frappe.ui.form.on('Quotation Item', {
 
     custom_markup_(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
         sync_shipment_margin_percent(frm, cdt, cdn);
         let row = locals[cdt][cdn];
         if (row.parentfield === 'custom_service_items') {
@@ -467,6 +526,7 @@ frappe.ui.form.on('Quotation Item', {
 
     custom_customs_(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
         let row = locals[cdt][cdn];
         if (row.custom_customs_) {
             let final_rate = (row.custom_customs_ / 100) * row.valuation_rate;
@@ -482,10 +542,12 @@ frappe.ui.form.on('Quotation Item', {
 
     custom_finance_(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
     },
 
     custom_transport_(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
     },
 
     custom_margin_(frm, cdt, cdn) {
@@ -599,6 +661,61 @@ function calculate_all_preview(frm, cdt, cdn) {
 
 
 /**
+ * Instant parent-level totals recalculation (mirrors server recalc_doc_totals).
+ * Call after modifying multiple item rows to update summary fields.
+ */
+function update_doc_totals_preview(frm) {
+    let totals = { shipping: 0, finance: 0, transport: 0, reward: 0,
+                   incentive: 0, customs: 0, cost: 0, selling: 0, buying: 0 };
+
+    (frm.doc.items || []).forEach(row => {
+        totals.shipping  += flt(row.shipping);
+        totals.finance   += flt(row.custom_finance_value);
+        totals.transport += flt(row.custom_transport_value);
+        totals.reward    += flt(row.reward);
+        totals.incentive += flt(row.custom_incentive_value);
+        totals.customs   += flt(row.custom_customs_value);
+        totals.cost      += flt(row.custom_cogs);
+        totals.selling   += flt(row.custom_selling_price);
+        totals.buying    += flt(row.custom_special_price) * (flt(row.qty) || 1);
+    });
+
+    let margin = totals.selling - totals.cost;
+    let margin_pct = totals.selling ? (margin / totals.selling) * 100 : 0;
+
+    frm.doc.custom_total_shipping_new       = flt(totals.shipping, 4);
+    frm.doc.custom_total_finance_new        = flt(totals.finance, 4);
+    frm.doc.custom_total_transport_new      = flt(totals.transport, 4);
+    frm.doc.custom_total_reward_new         = flt(totals.reward, 4);
+    frm.doc.custom_total_incentive_new      = flt(totals.incentive, 4);
+    frm.doc.custom_total_customs_new        = flt(totals.customs, 4);
+    frm.doc.custom_total_margin_new         = flt(margin, 4);
+    frm.doc.custom_total_margin_percent_new = flt(margin_pct, 4);
+    frm.doc.custom_total_cost_new           = flt(totals.cost, 4);
+    frm.doc.custom_total_selling_new        = flt(totals.selling, 4);
+    frm.doc.custom_total_buying_price       = flt(totals.buying, 4);
+
+    // Standard ERPNext total fields (below items table)
+    let total_qty = 0;
+    (frm.doc.items || []).forEach(row => {
+        total_qty += flt(row.qty);
+    });
+    let conversion_rate = flt(frm.doc.conversion_rate) || 1;
+    frm.doc.total_qty    = flt(total_qty, 4);
+    frm.doc.total        = flt(totals.selling, 4);
+    frm.doc.net_total    = flt(totals.selling, 4);
+    frm.doc.base_total   = flt(totals.selling * conversion_rate, 4);
+    frm.doc.base_net_total = flt(totals.selling * conversion_rate, 4);
+    frm.doc.grand_total  = flt(totals.selling, 4);
+    frm.doc.base_grand_total = flt(totals.selling * conversion_rate, 4);
+    frm.doc.rounded_total = flt(Math.round(totals.selling), 4);
+    frm.doc.base_rounded_total = flt(Math.round(totals.selling * conversion_rate), 4);
+
+    frm.refresh_fields();
+}
+
+
+/**
  * Single server call to load all item defaults when item_code is selected.
  * Replaces the old rate_calculation + update_rates nested async calls.
  */
@@ -646,6 +763,7 @@ function load_item_defaults(frm, cdt, cdn) {
 
             // Run preview after defaults are loaded
             calculate_all_preview(frm, cdt, cdn);
+            update_doc_totals_preview(frm);
         }
     });
 }
