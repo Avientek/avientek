@@ -328,6 +328,24 @@ frappe.ui.form.on('Quotation', {
 
     // ── Refresh / Onload ────────────────────────────────────
     refresh(frm) {
+        // Override ERPNext's calculate_taxes_and_totals to prevent it from
+        // overwriting our custom selling price calculations.
+        // ERPNext calls this after get_item_details, qty changes, etc.
+        // and recomputes totals from its cached price_list_rate (= Item Price),
+        // ignoring our calculated selling price.  By overriding, we ensure
+        // our values always win.
+        if (!frm._calc_override_applied) {
+            frm.cscript.calculate_taxes_and_totals = function() {
+                (frm.doc.items || []).forEach(row => {
+                    if (row.custom_special_price) {
+                        calculate_all_preview(frm, row.doctype, row.name);
+                    }
+                });
+                update_doc_totals_preview(frm);
+            };
+            frm._calc_override_applied = true;
+        }
+
         update_custom_service_totals(frm);
 
         frm.set_query("selling_price_list", function () {
