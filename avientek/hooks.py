@@ -155,6 +155,8 @@ fixtures = [
 					"Asset-custom_asset_capitalization",
 					"Asset Capitalization-custom_demo_unit_request",
 					"Purchase Order-custom_demo_unit_request",
+					"Mode of Payment-custom_is_tr",
+					"Mode of Payment-custom_is_lc",
      ),
 			]
 		],
