@@ -198,13 +198,21 @@ frappe.ui.form.on('Quotation', {
             let new_margin_val = flt(new_selling - cogs, 4);
             let new_margin_pct = new_selling ? flt((new_margin_val / new_selling) * 100, 4) : 0;
 
+            let conversion_rate = flt(frm.doc.conversion_rate) || 1;
             row.custom_discount_amount_value = flt(item_discount / qty, 4);
             row.custom_discount_amount_qty   = flt(item_discount, 4);
             row.custom_special_rate          = new_rate;
             row.custom_selling_price         = new_selling;
             row.custom_total_                = new_selling;
+            row.price_list_rate              = new_rate;
+            row.base_price_list_rate         = flt(new_rate * conversion_rate);
             row.rate                         = new_rate;
+            row.base_rate                    = flt(new_rate * conversion_rate);
+            row.net_rate                     = new_rate;
             row.amount                       = new_selling;
+            row.base_amount                  = flt(new_selling * conversion_rate);
+            row.net_amount                   = new_selling;
+            row.base_net_amount              = flt(new_selling * conversion_rate);
             row.custom_margin_value          = new_margin_val;
             row.custom_margin_               = new_margin_pct;
         });
@@ -321,27 +329,6 @@ frappe.ui.form.on('Quotation', {
     // ── Refresh / Onload ────────────────────────────────────
     refresh(frm) {
         update_custom_service_totals(frm);
-
-        // Override ERPNext's standard calculate_taxes_and_totals so our
-        // custom selling-price totals are always re-applied after it runs.
-        if (frm.cscript && !frm.cscript._avientek_patched) {
-            let orig = frm.cscript.calculate_taxes_and_totals;
-            if (orig) {
-                frm.cscript.calculate_taxes_and_totals = function() {
-                    // First recalculate all item previews so row.rate/amount are correct
-                    (frm.doc.items || []).forEach(row => {
-                        if (row.custom_special_price) {
-                            calculate_all_preview(frm, row.doctype, row.name);
-                        }
-                    });
-                    // Let ERPNext run its standard calculation (uses our updated rate/amount)
-                    orig.apply(this, arguments);
-                    // Re-apply our totals in case ERPNext overwrote them
-                    update_doc_totals_preview(frm);
-                };
-                frm.cscript._avientek_patched = true;
-            }
-        }
 
         frm.set_query("selling_price_list", function () {
             return { filters: { currency: frm.doc.currency } };
@@ -660,6 +647,8 @@ function calculate_all_preview(frm, cdt, cdn) {
 
     let per_unit_selling = selling_price / qty;
 
+    let conversion_rate = flt(frm.doc.conversion_rate) || 1;
+
     // Write directly to row (no frappe.model.set_value to avoid cascading)
     row.shipping              = shipping;
     row.custom_finance_value  = finance;
@@ -674,8 +663,20 @@ function calculate_all_preview(frm, cdt, cdn) {
     row.custom_margin_        = margin_percent;
     row.custom_margin_value   = margin_value;
     row.custom_special_rate   = per_unit_selling;
+
+    // Set ALL standard ERPNext rate/amount fields so that when ERPNext's
+    // standard calculate_taxes_and_totals runs, it uses our selling price
+    // instead of resetting to the original price_list_rate.
+    row.price_list_rate       = per_unit_selling;
+    row.base_price_list_rate  = flt(per_unit_selling * conversion_rate);
     row.rate                  = per_unit_selling;
+    row.base_rate             = flt(per_unit_selling * conversion_rate);
+    row.net_rate              = per_unit_selling;
+    row.base_net_rate         = flt(per_unit_selling * conversion_rate);
     row.amount                = selling_price;
+    row.base_amount           = flt(selling_price * conversion_rate);
+    row.net_amount            = selling_price;
+    row.base_net_amount       = flt(selling_price * conversion_rate);
 
     frm.refresh_field("items");
 }
@@ -785,15 +786,6 @@ function load_item_defaults(frm, cdt, cdn) {
             // Run preview after defaults are loaded
             calculate_all_preview(frm, cdt, cdn);
             update_doc_totals_preview(frm);
-
-            // ERPNext standard controller also fetches item details async and
-            // overwrites rate/amount/grand_total with price_list_rate.
-            // Re-apply after standard handler finishes (backup for initial load
-            // where the monkey-patch may not yet catch the first standard calc).
-            setTimeout(() => {
-                calculate_all_preview(frm, cdt, cdn);
-                update_doc_totals_preview(frm);
-            }, 800);
         }
     });
 }
