@@ -764,6 +764,14 @@ function load_item_defaults(frm, cdt, cdn) {
             // Run preview after defaults are loaded
             calculate_all_preview(frm, cdt, cdn);
             update_doc_totals_preview(frm);
+
+            // ERPNext standard controller also fetches item details async and
+            // overwrites rate/amount/grand_total with price_list_rate.
+            // Re-apply our calculated values after the standard handler finishes.
+            setTimeout(() => {
+                calculate_all_preview(frm, cdt, cdn);
+                update_doc_totals_preview(frm);
+            }, 500);
         }
     });
 }
