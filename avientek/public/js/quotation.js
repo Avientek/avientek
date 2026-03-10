@@ -786,6 +786,16 @@ function load_item_defaults(frm, cdt, cdn) {
             // Run preview after defaults are loaded
             calculate_all_preview(frm, cdt, cdn);
             update_doc_totals_preview(frm);
+
+            // ERPNext's standard item_code handler also makes an async call
+            // (get_item_details) that returns AFTER ours and resets
+            // price_list_rate/rate/amount/grand_total to the raw Item Price.
+            // frappe.after_ajax waits for ALL pending ajax calls to finish,
+            // then we re-apply our calculated selling price values.
+            frappe.after_ajax(() => {
+                calculate_all_preview(frm, cdt, cdn);
+                update_doc_totals_preview(frm);
+            });
         }
     });
 }
