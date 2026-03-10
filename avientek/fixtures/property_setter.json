@@ -55,7 +55,7 @@
   "doctype_or_field": "DocType",
   "field_name": null,
   "is_system_generated": 1,
-  "modified": "2026-03-02 09:37:40.888048",
+  "modified": "2026-03-09 09:12:23.310203",
   "module": null,
   "name": "Item-main-search_fields",
   "property": "search_fields",

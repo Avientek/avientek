@@ -148,6 +148,8 @@ fixtures = [
                     "Item Price-custom_section_break_wquw3","Item Price-custom_recommended_products","Item Price-custom_must_quote","Item Price-custom_charges_and_percentage","Item Price-custom_shipping__air_","Item Price-custom_shipping__sea_",
                     "Item Price-custom_processing_","Item Price-custom_column_break_wnn4s","Item Price-custom_min_finance_charge_","Item Price-custom_min_margin_","Item Price-custom_customs_","Item Price-custom_gst__vat_","Item Price-custom_markup_",
 					"Workflow-custom_enable_confirmation",
+					"Mode of Payment-custom_is_tr",
+					"Mode of Payment-custom_is_lc",
      ),
 			]
 		],
