@@ -18,7 +18,8 @@ class WarrantyList(frappe.model.document.Document):
 			self.status = "Under Warranty"
 
 	def on_update_after_submit(self):
-		self.update_days_remaining()
+		if self.warranty_end_date:
+			self.db_set("days_remaining", date_diff(self.warranty_end_date, today()))
 
 	def on_cancel(self):
 		self.db_set("status", "Cancelled")
