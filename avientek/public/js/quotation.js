@@ -559,6 +559,8 @@ frappe.ui.form.on('Quotation Item', {
             handle_qty_or_rate_change(frm, cdt, cdn);
             update_custom_service_totals(frm);
         }
+        // When "Distributed Manually", sync parent incentive fields from item totals
+        sync_parent_incentive_from_items(frm);
     },
 
     custom_markup_(frm, cdt, cdn) {
@@ -1108,6 +1110,30 @@ function reapply_discount_preview(frm, discount_amount) {
     });
 
     frm.refresh_field("items");
+}
+
+/**
+ * When distribution mode is "Distributed Manually", sync parent-level
+ * incentive % and amount from the sum of item-level incentive values.
+ */
+function sync_parent_incentive_from_items(frm) {
+    let mode = frm.doc.custom_distribute_incentive_based_on || "Amount";
+    if (mode !== "Distributed Manually") return;
+
+    let total_incentive = 0;
+    let total_sp = 0;
+    (frm.doc.items || []).forEach(row => {
+        total_incentive += flt(row.custom_incentive_value);
+        total_sp += flt(row.custom_special_price) * (flt(row.qty) || 1);
+    });
+
+    let pct = total_sp ? flt(total_incentive / total_sp * 100, 4) : 0;
+
+    // Use direct assignment + refresh to avoid triggering normalize loop
+    frm.doc.custom_incentive_amount = flt(total_incentive, 4);
+    frm.doc.custom_incentive_ = pct;
+    frm.refresh_field("custom_incentive_amount");
+    frm.refresh_field("custom_incentive_");
 }
 
 
