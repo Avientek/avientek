@@ -322,6 +322,27 @@ frappe.ui.form.on('Quotation', {
     refresh(frm) {
         update_custom_service_totals(frm);
 
+        // Override ERPNext's standard calculate_taxes_and_totals so our
+        // custom selling-price totals are always re-applied after it runs.
+        if (frm.cscript && !frm.cscript._avientek_patched) {
+            let orig = frm.cscript.calculate_taxes_and_totals;
+            if (orig) {
+                frm.cscript.calculate_taxes_and_totals = function() {
+                    // First recalculate all item previews so row.rate/amount are correct
+                    (frm.doc.items || []).forEach(row => {
+                        if (row.custom_special_price) {
+                            calculate_all_preview(frm, row.doctype, row.name);
+                        }
+                    });
+                    // Let ERPNext run its standard calculation (uses our updated rate/amount)
+                    orig.apply(this, arguments);
+                    // Re-apply our totals in case ERPNext overwrote them
+                    update_doc_totals_preview(frm);
+                };
+                frm.cscript._avientek_patched = true;
+            }
+        }
+
         frm.set_query("selling_price_list", function () {
             return { filters: { currency: frm.doc.currency } };
         });
@@ -767,11 +788,12 @@ function load_item_defaults(frm, cdt, cdn) {
 
             // ERPNext standard controller also fetches item details async and
             // overwrites rate/amount/grand_total with price_list_rate.
-            // Re-apply our calculated values after the standard handler finishes.
+            // Re-apply after standard handler finishes (backup for initial load
+            // where the monkey-patch may not yet catch the first standard calc).
             setTimeout(() => {
                 calculate_all_preview(frm, cdt, cdn);
                 update_doc_totals_preview(frm);
-            }, 500);
+            }, 800);
         }
     });
 }
