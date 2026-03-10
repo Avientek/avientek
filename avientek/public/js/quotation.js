@@ -236,6 +236,10 @@ frappe.ui.form.on('Quotation', {
         toggle_apply_incentive_button(frm);
     },
 
+    custom_distribute_incentive_based_on(frm) {
+        toggle_incentive_readonly(frm);
+    },
+
     custom_incentive_(frm) {
         if (frm.__normalizing_incentive) return;
         normalize_incentive_percent(frm, "percent");
@@ -307,15 +311,23 @@ frappe.ui.form.on('Quotation', {
                 row_incentive = total_sp ? flt((sp * qty / total_sp) * incentive_amount, 4) : 0;
             }
 
-            // Set item-level incentive % so calculate_all_preview picks it up
+            // Set item-level incentive % directly on the row object (NOT async set_value)
+            // so that calculate_all_preview picks it up immediately
             let item_incentive_pct = (sp * qty) ? flt(row_incentive / (sp * qty) * 100, 4) : 0;
-            frappe.model.set_value(row.doctype, row.name, "custom_incentive_", item_incentive_pct);
+            row.custom_incentive_ = item_incentive_pct;
         });
 
-        // Recalculate all items preview
+        // Recalculate all items preview (incentive % is already set synchronously above)
         items.forEach(row => {
             calculate_all_preview(frm, row.doctype, row.name);
         });
+
+        // Re-apply discount on top if one exists
+        let discount_amount = flt(frm.doc.custom_discount_amount_value);
+        if (discount_amount > 0) {
+            reapply_discount_preview(frm, discount_amount);
+        }
+
         update_doc_totals_preview(frm);
 
         // Mark incentive as applied and hide button
@@ -368,6 +380,10 @@ frappe.ui.form.on('Quotation', {
         // Toggle incentive fields based on type selection
         toggle_incentive_fields(frm);
         toggle_apply_incentive_button(frm);
+        toggle_incentive_readonly(frm);
+
+        // Show Apply Incentive button instantly on input (not just on blur)
+        setup_incentive_input_listener(frm);
 
         // Hide old tables (replaced by HTML section)
         frm.set_df_property("custom_history", "hidden", 1);
@@ -391,7 +407,7 @@ frappe.ui.form.on('Quotation', {
             "custom_finance_value",
             "custom_transport_value",
             "reward",
-            "custom_incentive_",        // controlled at parent level
+            // custom_incentive_ is toggled dynamically by toggle_incentive_readonly()
             "custom_incentive_value",
             "custom_markup_value",
             "custom_cogs",
@@ -459,12 +475,18 @@ frappe.ui.form.on('Quotation', {
 
 frappe.ui.form.on('Quotation Item', {
 
-    items_add(frm) {
-        // no-op — server recalculates on save
+    items_add(frm, cdt, cdn) {
+        // When a row is duplicated, all fields are copied but totals aren't updated.
+        // Recalculate the new row and update doc totals.
+        let row = locals[cdt][cdn];
+        if (row.custom_special_price) {
+            calculate_all_preview(frm, cdt, cdn);
+        }
+        update_doc_totals_preview(frm);
     },
 
     items_remove(frm) {
-        // no-op — server recalculates on save
+        update_doc_totals_preview(frm);
     },
 
     // ── Item code selected ──────────────────────────────────
@@ -1004,6 +1026,88 @@ function toggle_apply_incentive_button(frm) {
         // No value entered yet, show button but it will show error on click
         frm.set_df_property("custom_apply_incentive", "hidden", 0);
     }
+}
+
+/**
+ * Toggle item-level incentive field editability based on distribution mode.
+ * "Distributed Manually" → editable; all other modes → read-only.
+ */
+function toggle_incentive_readonly(frm) {
+    let mode = frm.doc.custom_distribute_incentive_based_on || "Amount";
+    let read_only = (mode === "Distributed Manually") ? 0 : 1;
+    frm.fields_dict.items.grid.update_docfield_property("custom_incentive_", "read_only", read_only);
+    frm.refresh_field("items");
+}
+
+/**
+ * Setup real-time input listener on incentive fields so the Apply Incentive
+ * button appears immediately as the user types, not just on blur.
+ */
+function setup_incentive_input_listener(frm) {
+    if (frm._incentive_input_listener_set) return;
+    frm._incentive_input_listener_set = true;
+
+    // Listen for input events on the incentive percentage and amount fields
+    ["custom_incentive_", "custom_incentive_amount"].forEach(fieldname => {
+        let field = frm.fields_dict[fieldname];
+        if (field && field.$input) {
+            field.$input.on("input", function() {
+                frm._incentive_applied = false;
+                frm.set_df_property("custom_apply_incentive", "hidden", 0);
+            });
+        }
+    });
+}
+
+/**
+ * Re-apply discount proportionally across items after incentive recalculation.
+ * This preserves the discount when incentive is applied/changed.
+ */
+function reapply_discount_preview(frm, discount_amount) {
+    let items = frm.doc.items || [];
+    if (!items.length || !discount_amount) return;
+
+    // Read fresh total selling (after incentive recalc, before discount)
+    let total_selling = 0;
+    items.forEach(row => {
+        total_selling += flt(row.custom_selling_price);
+    });
+
+    if (total_selling <= 0) return;
+
+    items.forEach(row => {
+        let selling = flt(row.custom_selling_price);
+        let qty = flt(row.qty) || 1;
+        let cogs = flt(row.custom_cogs);
+        let conversion_rate = flt(frm.doc.conversion_rate) || 1;
+
+        let share = total_selling ? (selling / total_selling) : 0;
+        let item_discount = flt(discount_amount * share, 4);
+
+        let new_selling = Math.max(selling - item_discount, 0);
+        let new_rate = flt(new_selling / qty, 4);
+        let new_margin_val = flt(new_selling - cogs, 4);
+        let new_margin_pct = new_selling ? flt((new_margin_val / new_selling) * 100, 4) : 0;
+
+        row.custom_discount_amount_value = flt(item_discount / qty, 4);
+        row.custom_discount_amount_qty   = flt(item_discount, 4);
+        row.custom_special_rate          = new_rate;
+        row.custom_selling_price         = new_selling;
+        row.custom_total_                = new_selling;
+        row.price_list_rate              = new_rate;
+        row.base_price_list_rate         = flt(new_rate * conversion_rate);
+        row.rate                         = new_rate;
+        row.base_rate                    = flt(new_rate * conversion_rate);
+        row.net_rate                     = new_rate;
+        row.amount                       = new_selling;
+        row.base_amount                  = flt(new_selling * conversion_rate);
+        row.net_amount                   = new_selling;
+        row.base_net_amount              = flt(new_selling * conversion_rate);
+        row.custom_margin_value          = new_margin_val;
+        row.custom_margin_               = new_margin_pct;
+    });
+
+    frm.refresh_field("items");
 }
 
 
