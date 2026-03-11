@@ -1402,6 +1402,34 @@ def get_payment_voucher_context(docname):
         for row in (doc.payment_references or [])
     )
 
+    # Pre-fetch ALL attachment images in one batch (avoids per-row frappe.call in Jinja)
+    ref_label_map = {
+        "Purchase Invoice": "Supplier Invoice", "Debit Note": "Debit Note",
+        "Credit Note": "Credit Note", "Sales Invoice": "Sales Invoice",
+        "Expense Claim": "Expense Claim", "Payment Entry": "Payment Entry",
+        "Journal Entry": "Journal Entry", "Purchase Order": "Purchase Order"
+    }
+    row_attachments = []
+    for row in (doc.payment_references or []):
+        row_data = {"ref_images": [], "po_images": [], "costing_images": [], "ref_label": "", "ref_name": "", "linked_po": ""}
+        if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
+            row_data["ref_label"] = ref_label_map.get(row.reference_doctype, row.reference_doctype)
+            row_data["ref_name"] = row.reference_name
+            row_data["ref_images"] = get_reference_attachment_images(row.reference_doctype, row.reference_name, max_pages=3) or []
+
+            # Linked PO (supplier only)
+            if doc.party_type == "Supplier" and row.reference_doctype in ("Purchase Invoice", "Debit Note"):
+                linked_po = get_linked_po_for_invoice(row.reference_name)
+                if linked_po:
+                    row_data["linked_po"] = linked_po
+                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
+
+                # Costing sheet
+                if row.costing_sheet_attachment:
+                    row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
+
+        row_attachments.append(row_data)
+
     return {
         "company_currency": company_currency,
         "issued_bank_details": issued_bank_details,
@@ -1422,6 +1450,7 @@ def get_payment_voucher_context(docname):
         "cheque_date_fmt": formatdate(doc.cheque_date, "d-M-yyyy") if doc.cheque_date else "",
         "issued_amount_fmt": fmt_money(flt(doc.issued_amount or 0), currency=doc.issued_currency or company_currency),
         "receiving_amount_fmt": fmt_money(flt(doc.receiving_amount or 0), currency=doc.receiving_currency or company_currency),
+        "row_attachments": row_attachments,
     }
 
 
