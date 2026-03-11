@@ -481,6 +481,23 @@ def recalc_doc_totals(doc):
     doc.custom_total_selling_new        = flt(effective_selling, 4)
     doc.custom_total_buying_price       = flt(totals["buying_price"], 4)
 
+    # Sync standard ERPNext total fields from our pipeline's rate/amount.
+    # ERPNext's calculate_taxes_and_totals runs in validate (before our
+    # before_save pipeline), so standard totals are stale at this point.
+    conversion_rate = flt(doc.conversion_rate) or 1
+    total_qty = sum(max(cint(it.qty), 1) for it in doc.items)
+    item_amount_sum = sum(flt(it.amount) for it in doc.items)
+
+    doc.total_qty      = flt(total_qty, 4)
+    doc.total          = flt(item_amount_sum, 4)
+    doc.net_total      = flt(item_amount_sum, 4)
+    doc.base_total     = flt(item_amount_sum * conversion_rate, 4)
+    doc.base_net_total = flt(item_amount_sum * conversion_rate, 4)
+    doc.grand_total    = flt(item_amount_sum - addl_discount, 4)
+    doc.base_grand_total = flt((item_amount_sum - addl_discount) * conversion_rate, 4)
+    doc.rounded_total  = round(doc.grand_total)
+    doc.base_rounded_total = round(doc.base_grand_total)
+
 
 # ──────────────────────────────────────────────────────────────
 # 4)  DISTRIBUTE INCENTIVE  (server-side — replaces JS distribute_incentive)
