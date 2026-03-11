@@ -455,8 +455,19 @@ def recalc_doc_totals(doc):
 
     ts = totals["selling"]
     tc = totals["cost"]
-    margin = flt(ts - tc, 4)
-    margin_pct = flt(margin / ts * 100, 4) if ts else 0
+
+    # Account for ERPNext's Additional Discount when calculating margin.
+    # The additional discount reduces the effective selling price.
+    addl_discount = 0
+    if flt(doc.discount_amount) > 0:
+        addl_discount = flt(doc.discount_amount)
+    elif flt(doc.additional_discount_percentage) > 0:
+        base = ts  # our selling total = net_total before additional discount
+        addl_discount = flt(base * flt(doc.additional_discount_percentage) / 100, 4)
+
+    effective_selling = flt(ts - addl_discount, 4)
+    margin = flt(effective_selling - tc, 4)
+    margin_pct = flt(margin / effective_selling * 100, 4) if effective_selling else 0
 
     doc.custom_total_shipping_new       = flt(totals["shipping"], 4)
     doc.custom_total_finance_new        = flt(totals["finance"], 4)
@@ -467,7 +478,7 @@ def recalc_doc_totals(doc):
     doc.custom_total_margin_new         = margin
     doc.custom_total_margin_percent_new = margin_pct
     doc.custom_total_cost_new           = flt(tc, 4)
-    doc.custom_total_selling_new        = flt(ts, 4)
+    doc.custom_total_selling_new        = flt(effective_selling, 4)
     doc.custom_total_buying_price       = flt(totals["buying_price"], 4)
 
 

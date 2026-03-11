@@ -379,7 +379,6 @@ doc_events = {
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
             "avientek.events.quotation.validate_total_discount",
-            "avientek.events.quotation.calculate_additional_discount_percentage",
         ]
     },
     "Purchase Receipt": {

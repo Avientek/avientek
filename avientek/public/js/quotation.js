@@ -119,6 +119,33 @@ frappe.ui.form.on('Quotation', {
         });
     },
 
+    // ── ERPNext Additional Discount fields ─────────────────
+    discount_amount(frm) {
+        // Sync percentage from amount when amount changes
+        let net = flt(frm.doc.net_total);
+        if (net > 0 && flt(frm.doc.discount_amount) > 0) {
+            frm.doc.additional_discount_percentage = flt(flt(frm.doc.discount_amount) / net * 100, 4);
+            frm.refresh_field("additional_discount_percentage");
+        } else if (!flt(frm.doc.discount_amount)) {
+            frm.doc.additional_discount_percentage = 0;
+            frm.refresh_field("additional_discount_percentage");
+        }
+        update_doc_totals_preview(frm);
+    },
+
+    additional_discount_percentage(frm) {
+        // Sync amount from percentage when percentage changes
+        let net = flt(frm.doc.net_total);
+        if (net > 0 && flt(frm.doc.additional_discount_percentage) > 0) {
+            frm.doc.discount_amount = flt(net * flt(frm.doc.additional_discount_percentage) / 100, 4);
+            frm.refresh_field("discount_amount");
+        } else if (!flt(frm.doc.additional_discount_percentage)) {
+            frm.doc.discount_amount = 0;
+            frm.refresh_field("discount_amount");
+        }
+        update_doc_totals_preview(frm);
+    },
+
     // ── Discount Type Selection ─────────────────────────────
     custom_discount_type(frm) {
         toggle_discount_fields(frm);
@@ -744,8 +771,17 @@ function update_doc_totals_preview(frm) {
         totals.buying    += flt(row.custom_special_price) * (flt(row.qty) || 1);
     });
 
-    let margin = totals.selling - totals.cost;
-    let margin_pct = totals.selling ? (margin / totals.selling) * 100 : 0;
+    // Account for ERPNext's Additional Discount in margin and grand_total
+    let addl_discount = 0;
+    if (flt(frm.doc.discount_amount) > 0) {
+        addl_discount = flt(frm.doc.discount_amount);
+    } else if (flt(frm.doc.additional_discount_percentage) > 0) {
+        addl_discount = flt(totals.selling * flt(frm.doc.additional_discount_percentage) / 100, 4);
+    }
+
+    let effective_selling = flt(totals.selling - addl_discount, 4);
+    let margin = effective_selling - totals.cost;
+    let margin_pct = effective_selling ? (margin / effective_selling) * 100 : 0;
 
     frm.doc.custom_total_shipping_new       = flt(totals.shipping, 4);
     frm.doc.custom_total_finance_new        = flt(totals.finance, 4);
@@ -756,7 +792,7 @@ function update_doc_totals_preview(frm) {
     frm.doc.custom_total_margin_new         = flt(margin, 4);
     frm.doc.custom_total_margin_percent_new = flt(margin_pct, 4);
     frm.doc.custom_total_cost_new           = flt(totals.cost, 4);
-    frm.doc.custom_total_selling_new        = flt(totals.selling, 4);
+    frm.doc.custom_total_selling_new        = flt(effective_selling, 4);
     frm.doc.custom_total_buying_price       = flt(totals.buying, 4);
 
     // Standard ERPNext total fields (below items table)
@@ -770,10 +806,10 @@ function update_doc_totals_preview(frm) {
     frm.doc.net_total    = flt(totals.selling, 4);
     frm.doc.base_total   = flt(totals.selling * conversion_rate, 4);
     frm.doc.base_net_total = flt(totals.selling * conversion_rate, 4);
-    frm.doc.grand_total  = flt(totals.selling, 4);
-    frm.doc.base_grand_total = flt(totals.selling * conversion_rate, 4);
-    frm.doc.rounded_total = flt(Math.round(totals.selling), 4);
-    frm.doc.base_rounded_total = flt(Math.round(totals.selling * conversion_rate), 4);
+    frm.doc.grand_total  = flt(effective_selling, 4);
+    frm.doc.base_grand_total = flt(effective_selling * conversion_rate, 4);
+    frm.doc.rounded_total = flt(Math.round(effective_selling), 4);
+    frm.doc.base_rounded_total = flt(Math.round(effective_selling * conversion_rate), 4);
 
     frm.refresh_fields();
 }
