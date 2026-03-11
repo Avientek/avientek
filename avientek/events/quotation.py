@@ -457,13 +457,15 @@ def recalc_doc_totals(doc):
     tc = totals["cost"]
 
     # Account for ERPNext's Additional Discount when calculating margin.
-    # The additional discount reduces the effective selling price.
+    # Always derive from percentage when set (ERPNext's discount_amount may
+    # be stale since validate runs before our before_save pipeline).
     addl_discount = 0
-    if flt(doc.discount_amount) > 0:
+    if flt(doc.additional_discount_percentage) > 0:
+        addl_discount = flt(ts * flt(doc.additional_discount_percentage) / 100, 4)
+        # Sync discount_amount so ERPNext fields stay consistent
+        doc.discount_amount = addl_discount
+    elif flt(doc.discount_amount) > 0:
         addl_discount = flt(doc.discount_amount)
-    elif flt(doc.additional_discount_percentage) > 0:
-        base = ts  # our selling total = net_total before additional discount
-        addl_discount = flt(base * flt(doc.additional_discount_percentage) / 100, 4)
 
     effective_selling = flt(ts - addl_discount, 4)
     margin = flt(effective_selling - tc, 4)

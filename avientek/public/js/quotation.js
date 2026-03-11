@@ -12,8 +12,8 @@ frappe.ui.form.on('Quotation', {
     },
 
     after_save(frm) {
-        // Reload document to sync with server-calculated values
-        frm.reload_doc();
+        // Server pipeline syncs all totals in before_save.
+        // No reload needed — avoids field flickering.
     },
 
     // ── Shipping mode (parent-level) ────────────────────────
@@ -757,12 +757,13 @@ function update_doc_totals_preview(frm) {
         totals.buying    += flt(row.custom_special_price) * (flt(row.qty) || 1);
     });
 
-    // Account for ERPNext's Additional Discount in margin and grand_total
+    // Account for ERPNext's Additional Discount in margin and grand_total.
+    // Derive from percentage first (amount may be stale from ERPNext validate).
     let addl_discount = 0;
-    if (flt(frm.doc.discount_amount) > 0) {
-        addl_discount = flt(frm.doc.discount_amount);
-    } else if (flt(frm.doc.additional_discount_percentage) > 0) {
+    if (flt(frm.doc.additional_discount_percentage) > 0) {
         addl_discount = flt(totals.selling * flt(frm.doc.additional_discount_percentage) / 100, 4);
+    } else if (flt(frm.doc.discount_amount) > 0) {
+        addl_discount = flt(frm.doc.discount_amount);
     }
 
     let effective_selling = flt(totals.selling - addl_discount, 4);
