@@ -121,28 +121,14 @@ frappe.ui.form.on('Quotation', {
 
     // ── ERPNext Additional Discount fields ─────────────────
     discount_amount(frm) {
-        // Sync percentage from amount when amount changes
-        let net = flt(frm.doc.net_total);
-        if (net > 0 && flt(frm.doc.discount_amount) > 0) {
-            frm.doc.additional_discount_percentage = flt(flt(frm.doc.discount_amount) / net * 100, 4);
-            frm.refresh_field("additional_discount_percentage");
-        } else if (!flt(frm.doc.discount_amount)) {
-            frm.doc.additional_discount_percentage = 0;
-            frm.refresh_field("additional_discount_percentage");
-        }
+        // Let ERPNext handle the percentage ↔ amount sync.
+        // Only update our custom totals preview.
         update_doc_totals_preview(frm);
     },
 
     additional_discount_percentage(frm) {
-        // Sync amount from percentage when percentage changes
-        let net = flt(frm.doc.net_total);
-        if (net > 0 && flt(frm.doc.additional_discount_percentage) > 0) {
-            frm.doc.discount_amount = flt(net * flt(frm.doc.additional_discount_percentage) / 100, 4);
-            frm.refresh_field("discount_amount");
-        } else if (!flt(frm.doc.additional_discount_percentage)) {
-            frm.doc.discount_amount = 0;
-            frm.refresh_field("discount_amount");
-        }
+        // Let ERPNext handle the percentage ↔ amount sync.
+        // Only update our custom totals preview.
         update_doc_totals_preview(frm);
     },
 
