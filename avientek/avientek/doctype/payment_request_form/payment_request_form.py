@@ -1324,6 +1324,107 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
     return payment_history
 
 
+# ──────────────────────────── FAST PRINT CONTEXT ────────────────────────────
+@frappe.whitelist()
+def get_payment_voucher_context(docname):
+    """
+    Single batch call to pre-fetch ALL data needed by the Payment Voucher print format.
+    Replaces multiple frappe.db.get_value() calls in the Jinja template.
+    Returns a flat dict that the template can use directly.
+    """
+    from frappe.utils import flt, fmt_money, formatdate
+
+    doc = frappe.get_doc("Payment Request Form", docname)
+    company_currency = frappe.db.get_value("Company", doc.company, "default_currency") or "AED"
+
+    # Issued bank details
+    issued_bank_details = {}
+    if doc.issued_bank:
+        issued_bank_details = frappe.db.get_value(
+            "Bank Account", doc.issued_bank,
+            ["bank", "bank_account_no", "iban"], as_dict=True
+        ) or {}
+
+    # Receiving bank details (internal transfer only)
+    receiving_bank_details = {}
+    if doc.payment_type == "Internal Transfer" and doc.receiving_bank:
+        receiving_bank_details = frappe.db.get_value(
+            "Bank Account", doc.receiving_bank,
+            ["bank", "bank_account_no", "iban"], as_dict=True
+        ) or {}
+
+    # Supplier/party bank details
+    supplier_bank = {}
+    supplier_swift = ""
+    if doc.payment_type != "Internal Transfer" and doc.party and doc.party_type:
+        supplier_bank = frappe.db.get_value(
+            "Bank Account",
+            {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
+            ["name", "bank", "bank_account_no", "iban", "branch_code"],
+            as_dict=True
+        ) or {}
+        if supplier_bank and supplier_bank.get("bank"):
+            supplier_swift = frappe.db.get_value("Bank", supplier_bank["bank"], "swift_number") or ""
+
+    # Pre-compute currency totals and base total from payment references
+    currency_totals = {}
+    total_base = 0
+    rows_data = []
+    for row in (doc.payment_references or []):
+        amount_fc = flt(row.outstanding_amount or row.grand_total or 0)
+        amount_base = flt(row.base_outstanding_amount or row.base_grand_total or 0)
+        curr = row.currency or company_currency
+
+        if curr not in currency_totals:
+            currency_totals[curr] = 0
+        currency_totals[curr] += amount_fc
+        total_base += amount_base
+
+        rows_data.append({
+            "idx": row.idx,
+            "reference_doctype": row.reference_doctype or "",
+            "reference_name": row.reference_name or "",
+            "invoice_date": formatdate(row.invoice_date, "dd-MM-yy") if row.invoice_date else "",
+            "currency": curr,
+            "amount_fc": fmt_money(amount_fc, currency=curr),
+            "amount_base": fmt_money(amount_base, currency=company_currency),
+            "document_reference": row.document_reference or row.remarks or "",
+        })
+
+    # Format currency totals
+    formatted_currency_totals = []
+    for curr, amount in currency_totals.items():
+        formatted_currency_totals.append(fmt_money(amount, currency=curr))
+
+    # TR/LC total
+    tr_total = sum(
+        flt(row.outstanding_amount or row.grand_total or 0)
+        for row in (doc.payment_references or [])
+    )
+
+    return {
+        "company_currency": company_currency,
+        "issued_bank_details": issued_bank_details,
+        "receiving_bank_details": receiving_bank_details,
+        "supplier_bank": supplier_bank,
+        "supplier_swift": supplier_swift,
+        "issued_bank_currency": doc.issued_currency or company_currency,
+        "receiving_bank_currency": doc.receiving_currency or company_currency,
+        "party_name": doc.party_name or doc.party or "",
+        "party_label": doc.party_type or "Party",
+        "party_address": doc.address_display or "",
+        "rows_data": rows_data,
+        "formatted_currency_totals": formatted_currency_totals,
+        "total_base_formatted": fmt_money(total_base, currency=company_currency),
+        "tr_total_formatted": "{:,.2f}".format(tr_total),
+        "tr_currency": doc.currency or company_currency,
+        "posting_date_fmt": formatdate(doc.posting_date, "d-M-yyyy") if doc.posting_date else "",
+        "cheque_date_fmt": formatdate(doc.cheque_date, "d-M-yyyy") if doc.cheque_date else "",
+        "issued_amount_fmt": fmt_money(flt(doc.issued_amount or 0), currency=doc.issued_currency or company_currency),
+        "receiving_amount_fmt": fmt_money(flt(doc.receiving_amount or 0), currency=doc.receiving_currency or company_currency),
+    }
+
+
 # ──────────────────────────── OPTIMIZED PDF CONVERSION HELPERS ────────────────────────────
 import hashlib
 

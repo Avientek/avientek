@@ -32,7 +32,8 @@ fixtures = [
 				"name",
 				"in",
 				[
-					"Payment Voucher Professional"
+					"Payment Voucher Professional",
+					"Payment Voucher Fast"
 				]
 			]
 		]
