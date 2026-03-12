@@ -58,6 +58,35 @@ def _create_asset_dam_fields():
 			"insert_after": "custom_dam_status",
 			"depends_on": "eval:doc.custom_is_demo_asset",
 		},
+		{
+			"dt": "Asset",
+			"fieldname": "custom_serial_no",
+			"fieldtype": "Data",
+			"label": "Serial No",
+			"insert_after": "custom_dam_customer",
+		},
+		{
+			"dt": "Asset",
+			"fieldname": "custom_part_no",
+			"fieldtype": "Data",
+			"label": "Part No",
+			"insert_after": "custom_serial_no",
+		},
+		{
+			"dt": "Asset",
+			"fieldname": "custom_dam_country",
+			"fieldtype": "Select",
+			"label": "Country",
+			"insert_after": "custom_owned_by",
+			"options": "",
+		},
+		{
+			"dt": "Asset",
+			"fieldname": "custom_dam_notes",
+			"fieldtype": "Small Text",
+			"label": "Notes",
+			"insert_after": "custom_dam_country",
+		},
 	]
 
 	for f in fields:
