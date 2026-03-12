@@ -121,15 +121,14 @@ frappe.ui.form.on('Quotation', {
 
     // ── ERPNext Additional Discount fields ─────────────────
     discount_amount(frm) {
-        // Let ERPNext handle the percentage ↔ amount sync.
-        // Only update our custom totals preview.
-        update_doc_totals_preview(frm);
+        // ERPNext's handler also fires and calls calculate_taxes_and_totals(),
+        // which overwrites grand_total with ERPNext's own calculation.
+        // Use setTimeout(0) so our preview runs AFTER ERPNext's handler finishes.
+        setTimeout(() => update_doc_totals_preview(frm), 0);
     },
 
     additional_discount_percentage(frm) {
-        // Let ERPNext handle the percentage ↔ amount sync.
-        // Only update our custom totals preview.
-        update_doc_totals_preview(frm);
+        setTimeout(() => update_doc_totals_preview(frm), 0);
     },
 
     // ── Discount Type Selection ─────────────────────────────
@@ -797,6 +796,11 @@ function update_doc_totals_preview(frm) {
     frm.doc.base_grand_total = flt(effective_selling * conversion_rate, 4);
     frm.doc.rounded_total = flt(Math.round(effective_selling), 4);
     frm.doc.base_rounded_total = flt(Math.round(effective_selling * conversion_rate), 4);
+
+    // Sync Additional Discount Amount so ERPNext's calculate_taxes_and_totals
+    // doesn't overwrite grand_total with stale values
+    frm.doc.discount_amount = flt(addl_discount, 4);
+    frm.doc.base_discount_amount = flt(addl_discount * conversion_rate, 4);
 
     // Sync item-level net_rate / net_amount / base_* fields
     let item_amount_sum = flt(totals.selling);
