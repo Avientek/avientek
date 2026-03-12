@@ -798,6 +798,25 @@ function update_doc_totals_preview(frm) {
     frm.doc.rounded_total = flt(Math.round(effective_selling), 4);
     frm.doc.base_rounded_total = flt(Math.round(effective_selling * conversion_rate), 4);
 
+    // Sync item-level net_rate / net_amount / base_* fields
+    let item_amount_sum = flt(totals.selling);
+    (frm.doc.items || []).forEach(row => {
+        let qty = flt(row.qty) || 1;
+        let rate = flt(row.rate);
+        let amount = flt(row.amount);
+        let item_addl_disc = (addl_discount && item_amount_sum)
+            ? flt(addl_discount * amount / item_amount_sum, 4) : 0;
+        let net_amount_val = flt(amount - item_addl_disc, 4);
+        let net_rate_val = qty ? flt(net_amount_val / qty, 4) : 0;
+
+        row.net_rate       = net_rate_val;
+        row.net_amount     = net_amount_val;
+        row.base_rate      = flt(rate * conversion_rate, 4);
+        row.base_amount    = flt(amount * conversion_rate, 4);
+        row.base_net_rate  = flt(net_rate_val * conversion_rate, 4);
+        row.base_net_amount = flt(net_amount_val * conversion_rate, 4);
+    });
+
     frm.refresh_fields();
 }
 

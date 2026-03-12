@@ -10,6 +10,7 @@ def after_migrate():
 	)
 	_create_asset_dam_fields()
 	_deactivate_old_quotation_workflows()
+	_fix_quotation_item_calc_layout()
 
 
 def _create_asset_dam_fields():
@@ -69,6 +70,118 @@ def _create_asset_dam_fields():
 			# Patch specific properties that may have been added after initial creation
 			if f.get("allow_on_submit"):
 				frappe.db.set_value("Custom Field", cf_name, "allow_on_submit", f["allow_on_submit"])
+
+
+def _fix_quotation_item_calc_layout():
+	"""Ensure correct field ordering for Quotation Item expanded form.
+
+	Runs after fixture sync so idx values aren't overwritten.
+	Fixes:
+	  - Pre-calc section (Standard Price, Special Price, Shipping Mode)
+	  - 4-column calculation section with correct idx ordering
+	  - Hides legacy fields and stale column breaks
+	"""
+	dt = "Quotation Item"
+
+	# ── Create missing column breaks if needed ──
+	for cb in [
+		{"fieldname": "custom_column_break_calc_3", "insert_after": "custom_transport_value"},
+		{"fieldname": "custom_column_break_calc_4", "insert_after": "custom_discount_amount_qty"},
+	]:
+		if not frappe.db.exists("Custom Field", {"dt": dt, "fieldname": cb["fieldname"]}):
+			doc = frappe.new_doc("Custom Field")
+			doc.dt = dt
+			doc.fieldname = cb["fieldname"]
+			doc.fieldtype = "Column Break"
+			doc.insert_after = cb["insert_after"]
+			doc.hidden = 0
+			doc.insert()
+
+	# ── Hide legacy fields and stale column breaks ──
+	legacy = [
+		"levee_per", "levee", "total_levee", "base_levee",
+		"processing_charges_per", "processing_charges",
+		"total_processing_charges", "base_processing_charges",
+		"std_margin_per", "std_margin", "total_std_margin", "base_std_margin",
+		"total_shipping", "total_reward", "base_shipping", "base_reward",
+		"column_break_37", "column_break_38", "column_break_44",
+	]
+	for fn in legacy:
+		cf = frappe.db.get_value("Custom Field", {"dt": dt, "fieldname": fn}, "name")
+		if cf:
+			frappe.db.set_value("Custom Field", cf, "hidden", 1)
+
+	# ── Full field chain: pre-calc section + 4-column calc section ──
+	#
+	# IMPORTANT: Standard Quotation Item fields have section/column breaks
+	# at idx 35, 41, 51, 53, 55, 58, 60, 65, 68, 70, 73, 75.
+	# If our custom fields use idx values in that range, standard breaks
+	# interleave and create extra columns/sections in the layout.
+	# Solution: start ALL custom fields at idx 100+, safely after all
+	# standard fields (which end at idx ~75).
+	#
+	chain = [
+		# Pre-calc section (Standard Price, Special Price, etc.)
+		("custom_section_break_dkbzh", "usd_price_list_rate_with_margin"),
+		("custom_standard_price_", "custom_section_break_dkbzh"),
+		("custom_special_price", "custom_standard_price_"),
+		("custom_special_price_note", "custom_special_price"),
+		("custom_shipping_mode", "custom_special_price_note"),
+		# Calc section: Col 1 — percentages
+		("section_break_26", "custom_shipping_mode"),
+		("shipping_per", "section_break_26"),
+		("reward_per", "shipping_per"),
+		("custom_finance_", "reward_per"),
+		("custom_transport_", "custom_finance_"),
+		# Calc section: Col 2 — values
+		("column_break_32", "custom_transport_"),
+		("shipping", "column_break_32"),
+		("reward", "shipping"),
+		("custom_finance_value", "reward"),
+		("custom_transport_value", "custom_finance_value"),
+		# Calc section: Col 3 — calculation percentages
+		("custom_column_break_calc_3", "custom_transport_value"),
+		("custom_incentive_", "custom_column_break_calc_3"),
+		("custom_customs_", "custom_incentive_"),
+		("custom_markup_", "custom_customs_"),
+		("custom_margin_", "custom_markup_"),
+		("custom_special_rate", "custom_margin_"),
+		("custom_discount_amount_value", "custom_special_rate"),
+		("custom_discount_amount_qty", "custom_discount_amount_value"),
+		# Calc section: Col 4 — calculation values
+		("custom_column_break_calc_4", "custom_discount_amount_qty"),
+		("custom_incentive_value", "custom_column_break_calc_4"),
+		("custom_customs_value", "custom_incentive_value"),
+		("custom_markup_value", "custom_customs_value"),
+		("custom_margin_value", "custom_markup_value"),
+		("custom_selling_price", "custom_margin_value"),
+		("custom_total_", "custom_selling_price"),
+		("custom_cogs", "custom_total_"),
+	]
+
+	# Start at idx 100 — safely after ALL standard Quotation Item fields
+	# (standard fields end at idx ~75)
+	start_idx = 100
+
+	for i, (fieldname, after) in enumerate(chain):
+		cf = frappe.db.get_value("Custom Field", {"dt": dt, "fieldname": fieldname}, "name")
+		if cf:
+			frappe.db.set_value("Custom Field", cf, {"idx": start_idx + i, "insert_after": after})
+
+	# Also move hidden legacy fields to idx 200+ so they don't interfere
+	legacy_start = 200
+	legacy_fields = frappe.db.get_all(
+		"Custom Field",
+		filters={"dt": dt, "hidden": 1, "fieldname": ["not in", [
+			"usd_price_list_rate_with_margin", "tax_rate", "tax_amount", "total_amount",
+		]]},
+		fields=["name", "fieldname"],
+		order_by="idx",
+	)
+	for j, lf in enumerate(legacy_fields):
+		frappe.db.set_value("Custom Field", lf["name"], "idx", legacy_start + j)
+
+	frappe.db.commit()
 
 
 def _deactivate_old_quotation_workflows():

@@ -500,6 +500,30 @@ def recalc_doc_totals(doc):
     doc.rounded_total  = round(doc.grand_total)
     doc.base_rounded_total = round(doc.base_grand_total)
 
+    # ── Sync item-level ERPNext fields (net_rate, net_amount, base_*) ──
+    # ERPNext's validate already set these from the OLD rate before our
+    # pipeline changed it, so they are stale.  Recompute from our rate.
+    for it in doc.items:
+        qty = max(cint(it.qty), 1)
+        rate = flt(it.rate)
+        amount = flt(it.amount)
+
+        # Distribute additional discount to item level
+        if addl_discount and item_amount_sum:
+            item_addl_disc = flt(addl_discount * amount / item_amount_sum, 4)
+        else:
+            item_addl_disc = 0
+
+        net_amount = flt(amount - item_addl_disc, 4)
+        net_rate   = flt(net_amount / qty, 4) if qty else 0
+
+        it.net_rate       = net_rate
+        it.net_amount     = net_amount
+        it.base_rate      = flt(rate * conversion_rate, 4)
+        it.base_amount    = flt(amount * conversion_rate, 4)
+        it.base_net_rate  = flt(net_rate * conversion_rate, 4)
+        it.base_net_amount = flt(net_amount * conversion_rate, 4)
+
 
 # ──────────────────────────────────────────────────────────────
 # 4)  DISTRIBUTE INCENTIVE  (server-side — replaces JS distribute_incentive)
