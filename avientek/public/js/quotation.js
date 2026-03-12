@@ -409,13 +409,12 @@ frappe.ui.form.on('Quotation', {
         // Fields fetched from Price List (not manually editable)
         const readonly_fields = [
             "custom_standard_price_",   // from price_list_rate
-            "shipping_per",             // from Item Price (air/sea)
             "custom_finance_",          // from Item Price / Brand
             "custom_transport_",        // from Item Price (processing)
             "custom_customs_",          // from Item Price
             "std_margin_per",           // from Item Price
             // Calculated value fields
-            "shipping",
+            "shipping",                 // calculated from shipping_per
             "custom_finance_value",
             "custom_transport_value",
             "reward",
@@ -549,9 +548,29 @@ frappe.ui.form.on('Quotation Item', {
     },
 
     shipping_per(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+
+        // Enforce minimum shipping % from Item Price (air/sea)
+        if (frm.doc.custom_shipment_and_margin && frm.doc.custom_shipment_and_margin.length) {
+            const ship_row = frm.doc.custom_shipment_and_margin[0];
+            const mode = row.custom_shipping_mode || frm.doc.custom_shipping_mode;
+            let min_shipping = 0;
+            if (mode === "Air") min_shipping = flt(ship_row.ship_air);
+            else if (mode === "Sea") min_shipping = flt(ship_row.ship_sea);
+
+            if (min_shipping && flt(row.shipping_per) < min_shipping) {
+                frappe.msgprint({
+                    title: __('Minimum Shipping %'),
+                    message: __('Shipping (%) cannot be less than {0}% (from Item Price). Resetting to minimum.', [min_shipping]),
+                    indicator: 'orange'
+                });
+                frappe.model.set_value(cdt, cdn, "shipping_per", min_shipping);
+                return;
+            }
+        }
+
         calculate_all_preview(frm, cdt, cdn);
         update_doc_totals_preview(frm);
-        let row = locals[cdt][cdn];
         if (row.parentfield === 'custom_service_items') {
             handle_qty_or_rate_change(frm, cdt, cdn);
             update_custom_service_totals(frm);
