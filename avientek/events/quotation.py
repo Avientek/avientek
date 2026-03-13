@@ -495,8 +495,40 @@ def recalc_doc_totals(doc):
     doc.net_total      = flt(item_amount_sum, 4)
     doc.base_total     = flt(item_amount_sum * conversion_rate, 4)
     doc.base_net_total = flt(item_amount_sum * conversion_rate, 4)
-    doc.grand_total    = flt(item_amount_sum - addl_discount, 4)
-    doc.base_grand_total = flt((item_amount_sum - addl_discount) * conversion_rate, 4)
+
+    # ── Recalculate taxes from the Taxes table ──
+    # ERPNext's calculate_taxes_and_totals ran during validate with stale
+    # item amounts.  Recompute each tax row based on our updated net_total.
+    net_after_discount = flt(item_amount_sum - addl_discount, 4)
+    total_taxes = 0
+    for tax_row in (doc.get("taxes") or []):
+        if tax_row.charge_type == "On Net Total":
+            tax_row.tax_amount = flt(flt(tax_row.rate) * net_after_discount / 100, 4)
+        elif tax_row.charge_type == "On Previous Row Total" and tax_row.row_id:
+            prev_idx = cint(tax_row.row_id) - 1
+            prev_rows = doc.get("taxes") or []
+            if 0 <= prev_idx < len(prev_rows):
+                prev_total = flt(prev_rows[prev_idx].total)
+                tax_row.tax_amount = flt(flt(tax_row.rate) * prev_total / 100, 4)
+        elif tax_row.charge_type == "On Previous Row Amount" and tax_row.row_id:
+            prev_idx = cint(tax_row.row_id) - 1
+            prev_rows = doc.get("taxes") or []
+            if 0 <= prev_idx < len(prev_rows):
+                tax_row.tax_amount = flt(flt(tax_row.rate) * flt(prev_rows[prev_idx].tax_amount) / 100, 4)
+        # "Actual" charge_type: tax_amount is a fixed value, keep as-is
+
+        tax_row.base_tax_amount = flt(tax_row.tax_amount * conversion_rate, 4)
+        tax_row.total = flt(net_after_discount + sum(
+            flt(t.tax_amount) for t in (doc.get("taxes") or [])[:doc.taxes.index(tax_row) + 1]
+        ), 4)
+        tax_row.base_total = flt(tax_row.total * conversion_rate, 4)
+        total_taxes += flt(tax_row.tax_amount)
+
+    doc.total_taxes_and_charges = flt(total_taxes, 4)
+    doc.base_total_taxes_and_charges = flt(total_taxes * conversion_rate, 4)
+
+    doc.grand_total    = flt(net_after_discount + total_taxes, 4)
+    doc.base_grand_total = flt(doc.grand_total * conversion_rate, 4)
     doc.rounded_total  = round(doc.grand_total)
     doc.base_rounded_total = round(doc.base_grand_total)
 
