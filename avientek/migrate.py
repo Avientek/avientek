@@ -75,10 +75,10 @@ def _create_asset_dam_fields():
 		{
 			"dt": "Asset",
 			"fieldname": "custom_dam_country",
-			"fieldtype": "Select",
+			"fieldtype": "Link",
 			"label": "Country",
+			"options": "Country",
 			"insert_after": "custom_owned_by",
-			"options": "",
 		},
 		{
 			"dt": "Asset",
@@ -96,9 +96,17 @@ def _create_asset_dam_fields():
 		if not frappe.db.exists("Custom Field", cf_name):
 			create_custom_field(dt, f)
 		else:
-			# Patch specific properties that may have been added after initial creation
+			# Patch properties that may have changed after initial creation
+			update_vals = {}
 			if f.get("allow_on_submit"):
-				frappe.db.set_value("Custom Field", cf_name, "allow_on_submit", f["allow_on_submit"])
+				update_vals["allow_on_submit"] = f["allow_on_submit"]
+			# Ensure fieldtype and options stay in sync (e.g. Select → Link)
+			if f.get("fieldtype"):
+				update_vals["fieldtype"] = f["fieldtype"]
+			if "options" in f:
+				update_vals["options"] = f["options"]
+			if update_vals:
+				frappe.db.set_value("Custom Field", cf_name, update_vals)
 
 
 def _fix_quotation_item_calc_layout():
