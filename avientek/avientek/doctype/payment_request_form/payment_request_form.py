@@ -1596,23 +1596,43 @@ def get_pdf_as_images(doctype, docname, max_pages=2):
             continue
 
         try:
-            # Get the file path
+            images = []
+
+            # Try file path first
             file_url = attachment.get("file_url", "")
             file_path = _get_file_path_from_url(file_url)
 
-            if not file_path:
+            if not file_path or not os.path.exists(file_path):
                 # Try to get from File doc
                 file_doc = frappe.get_doc("File", attachment.get("name"))
                 file_path = file_doc.get_full_path()
 
-            # Use optimized conversion (zoom=1.0, jpeg_quality=60)
-            images = _convert_pdf_to_images_optimized(
-                file_path,
-                max_pages=max_pages,
-                zoom=1.0,
-                jpeg_quality=60,
-                is_bytes=False
-            )
+            if file_path and os.path.exists(file_path):
+                images = _convert_pdf_to_images_optimized(
+                    file_path,
+                    max_pages=max_pages,
+                    zoom=1.0,
+                    jpeg_quality=60,
+                    is_bytes=False
+                )
+
+            # Fallback: read file content as bytes via Frappe File doc
+            if not images:
+                try:
+                    file_doc = frappe.get_doc("File", attachment.get("name"))
+                    content = file_doc.get_content()
+                    if content:
+                        if isinstance(content, str):
+                            content = content.encode("latin-1")
+                        images = _convert_pdf_to_images_optimized(
+                            content,
+                            max_pages=max_pages,
+                            zoom=1.0,
+                            jpeg_quality=60,
+                            is_bytes=True
+                        )
+                except Exception:
+                    pass
 
             if images:
                 result.append({
@@ -1672,6 +1692,70 @@ REFERENCE_DOCTYPE_MAP = {
     "Journal Entry": "Journal Entry",
     "Purchase Order": "Purchase Order",
 }
+
+
+@frappe.whitelist()
+def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3):
+    """Return attachment images, file list, and print preview separately for the hover popup."""
+    if not reference_doctype or not reference_name:
+        return {"attachment_images": [], "file_list": [], "print_images": []}
+
+    actual_doctype = REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
+    max_pages = int(max_pages) if max_pages else 3
+
+    # 1) Get all file attachments
+    attachments = frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": actual_doctype,
+            "attached_to_name": reference_name,
+        },
+        fields=["file_name", "file_url", "is_private"],
+    )
+
+    # 2) Convert PDF attachments to images
+    att_images = []
+    pdf_data = get_pdf_as_images(actual_doctype, reference_name, max_pages)
+    for pdf in pdf_data:
+        att_images.extend(pdf.get("images", []))
+
+    # 3) Direct image attachments
+    IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp"}
+    for att in attachments:
+        file_name = att.get("file_name") or ""
+        ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+        if ext not in IMAGE_EXTS:
+            continue
+        try:
+            img_bytes = None
+            file_path = _get_file_path_from_url(att.get("file_url", ""))
+            if file_path and os.path.exists(file_path):
+                with open(file_path, "rb") as f:
+                    img_bytes = f.read()
+            else:
+                # Fallback: read via Frappe File doc
+                file_doc = frappe.get_doc("File", {"file_url": att.file_url, "attached_to_doctype": actual_doctype, "attached_to_name": reference_name})
+                content = file_doc.get_content()
+                if content:
+                    img_bytes = content if isinstance(content, bytes) else content.encode("latin-1")
+            if img_bytes:
+                mime = f"image/{ext}" if ext != "jpg" else "image/jpeg"
+                img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+                att_images.append(f"data:{mime};base64,{img_b64}")
+        except Exception:
+            pass
+
+    # 4) File list (all attachments for download links)
+    file_list = [{"file_name": a.file_name, "file_url": a.file_url} for a in attachments if a.file_url]
+
+    # 5) Print format preview (always generate)
+    print_images = get_print_format_as_images(actual_doctype, reference_name, max_pages=max_pages) or []
+
+    return {
+        "attachment_images": att_images,
+        "file_list": file_list,
+        "print_images": print_images,
+    }
 
 
 @frappe.whitelist()

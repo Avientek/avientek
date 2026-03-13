@@ -33,6 +33,135 @@ if (!document.getElementById('payment-ref-styles')) {
     $(row_styles).attr('id', 'payment-ref-styles').appendTo('head');
 }
 
+// Invoice attachment preview popup styles
+if (!document.getElementById('inv-preview-styles')) {
+    $(`<style id="inv-preview-styles">
+        .inv-att-preview {
+            position: fixed;
+            width: 680px;
+            height: 720px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.22);
+            z-index: 1100;
+            overflow: hidden;
+            border: 1px solid #d1d8dd;
+            display: flex;
+            flex-direction: column;
+            resize: both;
+            min-width: 320px;
+            min-height: 250px;
+        }
+        .inv-att-preview.maximized {
+            top: 20px !important;
+            left: 20px !important;
+            width: calc(100vw - 40px) !important;
+            height: calc(100vh - 40px) !important;
+            border-radius: 12px;
+        }
+        .inv-att-hdr {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            border-bottom: 1px solid #eee;
+            background: #f8f9fa;
+            cursor: move;
+            flex-shrink: 0;
+            user-select: none;
+        }
+        .inv-att-hdr .inv-att-title {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-color);
+        }
+        .inv-att-hdr .inv-att-btns {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .inv-att-hdr .inv-att-btn {
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            color: #8d99a6;
+            background: none;
+            border: none;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+        .inv-att-hdr .inv-att-btn:hover { color: #36414C; background: #eee; }
+        .inv-att-hdr .inv-att-close {
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+            color: #8d99a6;
+            background: none;
+            border: none;
+            padding: 0 4px;
+            border-radius: 4px;
+        }
+        .inv-att-hdr .inv-att-close:hover { color: #e74c3c; background: #fdecea; }
+        .inv-att-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        .inv-att-body img {
+            width: 100%;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: block;
+        }
+        .inv-att-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #8d99a6;
+            font-size: 13px;
+            gap: 8px;
+        }
+        .inv-att-empty {
+            padding: 40px 20px;
+            text-align: center;
+            color: #8d99a6;
+            font-size: 13px;
+        }
+        .inv-att-section-title {
+            font-weight: 600;
+            font-size: 12px;
+            color: #36414C;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 6px 0;
+            margin-bottom: 8px;
+            border-bottom: 2px solid #2490EF;
+        }
+        .inv-att-no-files {
+            padding: 12px;
+            text-align: center;
+            color: #8d99a6;
+            font-size: 12px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+        .inv-att-file-link {
+            display: block;
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            background: #f5f7fa;
+            border-radius: 4px;
+            color: #2490EF;
+            text-decoration: none;
+            font-size: 13px;
+        }
+        .inv-att-file-link:hover { background: #eef1f6; text-decoration: underline; }
+    </style>`).appendTo('head');
+}
+
 frappe.ui.form.on('Payment Request Form', {
 	onload: function(frm) {
         // Fetch supplier details only if party exists and details are missing
@@ -95,6 +224,9 @@ frappe.ui.form.on('Payment Request Form', {
     refresh: function(frm) {
         // Apply debit note row styling
         frm.events.apply_debit_note_styling(frm);
+
+        // Setup invoice attachment preview on hover
+        frm.events.setup_invoice_attachment_preview(frm);
 
         // Update Type options based on party_type
         frm.events.update_reference_type_options(frm);
@@ -354,6 +486,231 @@ frappe.ui.form.on('Payment Request Form', {
 			}
 		});
 	},
+
+    // Invoice attachment preview on hover over invoice cells in child table
+    setup_invoice_attachment_preview: function(frm) {
+        if (frm._inv_preview_bound) return;
+        frm._inv_preview_bound = true;
+
+        let timer = null;
+        let $popup = null;
+        let active_key = null;
+        const cache = {};
+
+        function hide() {
+            clearTimeout(timer);
+            timer = null;
+            if ($popup) {
+                $(document).off("mousemove.inv_drag mouseup.inv_drag");
+                $popup.remove();
+                $popup = null;
+                active_key = null;
+            }
+        }
+
+        // Broad selector covering all Frappe grid cell rendering variants:
+        //  - .grid-static-col[data-fieldname] — v15 editable grid collapsed rows
+        //  - [data-field] — older Frappe grid layout
+        const CELL_SELECTOR = [
+            ".grid-static-col[data-fieldname='reference_name'] .static-area",
+            ".grid-static-col[data-fieldname='reference_name'] .like-disabled-input",
+            ".grid-static-col[data-fieldname='reference_name'] .field-area",
+            "[data-field='reference_name'] .static-area",
+            "[data-field='reference_name'] .like-disabled-input",
+        ].join(", ");
+
+        frm.fields_dict.payment_references.$wrapper.on(
+            "mouseenter",
+            CELL_SELECTOR,
+            function () {
+                const $el = $(this);
+                // Walk up to the grid-row to get data-idx
+                const $grid_row = $el.closest(".grid-row, [data-idx]");
+                if (!$grid_row.length) return;
+
+                const idx = cint($grid_row.attr("data-idx") || $grid_row.data("idx"));
+                const refs = frm.doc.payment_references || [];
+                if (idx < 1 || idx > refs.length) return;
+
+                const row = refs[idx - 1];
+                if (!row.reference_name || row.reference_doctype === "Manual") return;
+
+                const key = row.reference_doctype + ":" + row.reference_name;
+                if (key === active_key) return;
+
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    hide();
+                    active_key = key;
+                    show_preview($el, row.reference_doctype, row.reference_name, key);
+                }, 500);
+            }
+        );
+
+        frm.fields_dict.payment_references.$wrapper.on(
+            "mouseleave",
+            CELL_SELECTOR,
+            function () {
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    if ($popup && !$popup.is(":hover")) hide();
+                }, 250);
+            }
+        );
+
+        // Hide on scroll or route change
+        $(window).on("scroll.inv_preview", hide);
+        frappe.router.on("change", hide);
+
+        function show_preview($el, ref_doctype, ref_name, key) {
+            $popup = $(`
+                <div class="inv-att-preview">
+                    <div class="inv-att-hdr">
+                        <span class="inv-att-title">${frappe.utils.escape_html(ref_name)}</span>
+                        <div class="inv-att-btns">
+                            <button class="inv-att-btn inv-att-max" title="Maximize">&#x26F6;</button>
+                            <button class="inv-att-close" title="Close">&times;</button>
+                        </div>
+                    </div>
+                    <div class="inv-att-body">
+                        <div class="inv-att-loading">
+                            <span class="spinner-border spinner-border-sm"></span> Loading attachments&hellip;
+                        </div>
+                    </div>
+                </div>
+            `);
+
+            // Position near the hovered element
+            const rect = $el[0].getBoundingClientRect();
+            let top = rect.bottom + 8;
+            let left = Math.max(10, rect.left - 100);
+            if (top + 720 > window.innerHeight) top = Math.max(10, rect.top - 728);
+            if (left + 680 > window.innerWidth) left = Math.max(10, window.innerWidth - 690);
+            $popup.css({ top, left });
+
+            $("body").append($popup);
+
+            // Disable auto-hide once user interacts (maximize, drag, resize)
+            let pinned = false;
+            $popup.on("mouseleave", () => {
+                if (pinned) return;
+                timer = setTimeout(() => {
+                    if ($popup && !$popup.is(":hover")) hide();
+                }, 200);
+            });
+            $popup.find(".inv-att-close").on("click", hide);
+
+            // Maximize / restore toggle
+            let prev_style = null;
+            $popup.find(".inv-att-max").on("click", function () {
+                pinned = true;
+                if ($popup.hasClass("maximized")) {
+                    $popup.removeClass("maximized");
+                    if (prev_style) $popup.css(prev_style);
+                    $(this).html("&#x26F6;").attr("title", "Maximize");
+                } else {
+                    prev_style = {
+                        top: $popup.css("top"),
+                        left: $popup.css("left"),
+                        width: $popup.css("width"),
+                        height: $popup.css("height"),
+                    };
+                    $popup.addClass("maximized");
+                    $(this).html("&#x2750;").attr("title", "Restore");
+                }
+            });
+
+            // Drag by header
+            let dragging = false, dx = 0, dy = 0;
+            $popup.find(".inv-att-hdr").on("mousedown", function (e) {
+                if ($(e.target).closest(".inv-att-btn, .inv-att-close").length) return;
+                if ($popup.hasClass("maximized")) return;
+                pinned = true;
+                dragging = true;
+                dx = e.clientX - $popup[0].offsetLeft;
+                dy = e.clientY - $popup[0].offsetTop;
+                e.preventDefault();
+            });
+            $(document).on("mousemove.inv_drag", function (e) {
+                if (!dragging) return;
+                $popup.css({
+                    left: Math.max(0, e.clientX - dx),
+                    top: Math.max(0, e.clientY - dy),
+                });
+            });
+            $(document).on("mouseup.inv_drag", function () {
+                dragging = false;
+            });
+
+            // Pin on manual resize (CSS resize handle)
+            const ro = new ResizeObserver(() => { pinned = true; });
+            ro.observe($popup[0]);
+
+            // Use cache if available
+            if (cache[key]) {
+                render_preview($popup, cache[key], ref_name, ref_doctype);
+                return;
+            }
+
+            frappe.xcall(
+                "avientek.avientek.doctype.payment_request_form.payment_request_form.get_invoice_preview_data",
+                { reference_doctype: ref_doctype, reference_name: ref_name, max_pages: 3 }
+            ).then((data) => {
+                if (!$popup) return;
+                cache[key] = data || {};
+                render_preview($popup, cache[key], ref_name, ref_doctype);
+            }).catch(() => {
+                if ($popup) {
+                    $popup.find(".inv-att-body").html(
+                        '<div class="inv-att-empty">Could not load preview</div>'
+                    );
+                }
+            });
+        }
+
+        function render_preview($popup, data, ref_name, ref_doctype) {
+            const $body = $popup.find(".inv-att-body");
+            let html = "";
+            const doc_label = ref_doctype || "Document";
+
+            // Section 1: File attachments (uploaded PDFs/images)
+            const att_images = data.attachment_images || [];
+            const file_list = data.file_list || [];
+            if (att_images.length) {
+                html += '<div class="inv-att-section-title">Attached Documents</div>';
+                for (const img of att_images) {
+                    html += `<img src="${img}" loading="lazy" />`;
+                }
+            } else if (file_list.length) {
+                // Render PDFs as embedded viewers, images inline, others as links
+                html += '<div class="inv-att-section-title">Attached Documents</div>';
+                for (const f of file_list) {
+                    const name = (f.file_name || "").toLowerCase();
+                    const url = f.file_url || "";
+                    if (name.endsWith(".pdf")) {
+                        html += `<iframe src="${url}#toolbar=0&navpanes=0" style="width:100%;height:700px;border:1px solid #eee;border-radius:4px;margin-bottom:10px;" loading="lazy"></iframe>`;
+                    } else if (/\.(jpe?g|png|gif|webp)$/i.test(name)) {
+                        html += `<img src="${url}" loading="lazy" />`;
+                    } else {
+                        html += `<a href="${url}" target="_blank" class="inv-att-file-link">${frappe.utils.escape_html(f.file_name)}</a>`;
+                    }
+                }
+            } else {
+                html += `<div class="inv-att-no-files">No file attachments on this ${frappe.utils.escape_html(doc_label)}</div>`;
+            }
+
+            // Section 2: Print format preview
+            const print_images = data.print_images || [];
+            if (print_images.length) {
+                html += `<div class="inv-att-section-title" style="margin-top:16px;">${frappe.utils.escape_html(doc_label)} Print Preview</div>`;
+                for (const img of print_images) {
+                    html += `<img src="${img}" loading="lazy" />`;
+                }
+            }
+
+            $body.html(html || `<div class="inv-att-empty">No data found for this ${frappe.utils.escape_html(doc_label)}</div>`);
+        }
+    },
 
     // Apply visual styling to rows (debit note = pink, manual = blue)
     apply_debit_note_styling: function(frm) {
