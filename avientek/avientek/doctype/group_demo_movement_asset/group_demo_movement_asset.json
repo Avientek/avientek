@@ -1,0 +1,96 @@
+{
+ "actions": [],
+ "allow_auto_repeat": 0,
+ "creation": "2026-03-13 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "asset",
+  "asset_name",
+  "brand",
+  "serial_number",
+  "asset_status",
+  "demo_movement",
+  "item_code",
+  "company"
+ ],
+ "fields": [
+  {
+   "bold": 1,
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Asset",
+   "options": "Asset",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "asset.asset_name",
+   "fieldname": "asset_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Asset Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "brand",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Brand",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "asset.custom_serial_no",
+   "fieldname": "serial_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Serial Number"
+  },
+  {
+   "fieldname": "asset_status",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Current Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "demo_movement",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Demo Movement",
+   "options": "Demo Movement",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "asset.item_code",
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "asset.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-03-13 09:35:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Group Demo Movement Asset",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": []
+}

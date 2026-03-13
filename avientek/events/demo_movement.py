@@ -12,6 +12,8 @@ def on_submit(doc, method=None):
 	elif doc.movement_type == "Internal Transfer":
 		_set_asset_status(doc.asset, "Free", "")
 
+	_sync_group_status(doc)
+
 
 def on_cancel(doc, method=None):
 	"""Revert Asset custom DAM status when a Demo Movement is cancelled."""
@@ -20,6 +22,8 @@ def on_cancel(doc, method=None):
 	elif doc.movement_type == "Return":
 		_set_asset_status(doc.asset, "On Demo", doc.customer or "")
 		_reopen_previous_movement(doc)
+
+	_sync_group_status(doc)
 
 
 def _set_asset_status(asset, status, customer):
@@ -62,6 +66,62 @@ def _reopen_previous_movement(doc):
 			"status": "Overdue" if is_overdue else "Open",
 			"actual_return_date": None,
 		})
+
+
+def _sync_group_status(doc):
+	"""Update parent Group Demo Movement status when a child Demo Movement changes."""
+	# Find if this Demo Movement belongs to a Group — check by demo_movement link OR by asset
+	group_row = frappe.db.get_value(
+		"Group Demo Movement Asset",
+		{"demo_movement": doc.name},
+		["parent"],
+		as_dict=True,
+	)
+	if not group_row:
+		# Also check by asset — handles individual returns for group-created Move Outs
+		group_row = frappe.db.get_value(
+			"Group Demo Movement Asset",
+			{"asset": doc.asset, "parenttype": "Group Demo Movement"},
+			["parent"],
+			as_dict=True,
+		)
+	if not group_row:
+		return
+
+	gdm_name = group_row.parent
+	gdm = frappe.get_doc("Group Demo Movement", gdm_name)
+
+	if gdm.docstatus != 1 or gdm.status == "Cancelled":
+		return
+
+	# Check status of all linked Move Out Demo Movements
+	total = 0
+	closed = 0
+	for row in gdm.assets:
+		if not row.demo_movement:
+			continue
+		total += 1
+		dm_status, dm_docstatus = frappe.db.get_value(
+			"Demo Movement", row.demo_movement, ["status", "docstatus"]
+		) or ("Open", 1)
+
+		if dm_docstatus == 2:  # cancelled
+			closed += 1
+		elif dm_status in ("Returned", "Completed"):
+			closed += 1
+
+	if total == 0:
+		return
+
+	if closed == total:
+		new_status = "Returned"
+	elif closed > 0:
+		new_status = "Partially Returned"
+	else:
+		new_status = "Open"
+
+	if gdm.status != new_status:
+		frappe.db.set_value("Group Demo Movement", gdm_name, "status", new_status)
 
 
 def send_return_reminders():

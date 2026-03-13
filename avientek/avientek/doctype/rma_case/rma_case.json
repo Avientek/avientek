@@ -436,7 +436,7 @@
   }
  ],
  "row_format": "Dynamic",
- "search_fields": "customer,item_code,asset_serial_number,item_description",
+ "search_fields": "customer,item_code,asset_serial_number",
  "show_title_field_in_link": 1,
  "sort_field": "rma_date",
  "sort_order": "DESC",

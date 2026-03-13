@@ -520,4 +520,124 @@
 	.dam-stat-card {
 		min-width: 130px;
 	}
+	.dam-analytics-chart-row {
+		flex-direction: column !important;
+	}
+	.dam-chart-card {
+		min-width: 100% !important;
+	}
+	.dam-analytics-filter-row {
+		flex-wrap: wrap !important;
+	}
+}
+
+/* ── Analytics View ── */
+.dam-analytics-filters {
+	margin-bottom: 20px;
+}
+
+.dam-analytics-filter-row {
+	display: flex;
+	gap: 12px;
+	align-items: flex-end;
+	flex-wrap: wrap;
+}
+
+.dam-analytics-filter {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 160px;
+}
+
+.dam-analytics-filter label {
+	font-size: 0.72rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.dam-analytics-select {
+	padding: 6px 10px;
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius-md);
+	background: var(--card-bg);
+	color: var(--text-color);
+	font-size: 0.82rem;
+	min-width: 160px;
+}
+
+.dam-analytics-select:focus {
+	outline: none;
+	border-color: #0EA5C9;
+	box-shadow: 0 0 0 2px rgba(14, 165, 201, 0.15);
+}
+
+.dam-analytics-apply {
+	padding: 6px 18px !important;
+	font-size: 0.82rem !important;
+}
+
+.dam-analytics-reset {
+	padding: 6px 14px !important;
+}
+
+.dam-analytics-summary {
+	margin-bottom: 16px;
+}
+
+.dam-analytics-status-row {
+	margin-bottom: 20px;
+}
+
+.dam-stat-card-sm {
+	min-width: 120px;
+}
+
+.dam-stat-sub {
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	margin-top: 4px;
+}
+
+.dam-analytics-charts {
+	display: flex;
+	flex-direction: column;
+	gap: 20px;
+}
+
+.dam-analytics-chart-row {
+	display: flex;
+	gap: 20px;
+}
+
+.dam-chart-card {
+	flex: 1;
+	min-width: 0;
+	background: var(--card-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 12px;
+	overflow: hidden;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+}
+
+.dam-chart-title {
+	padding: 14px 20px;
+	font-weight: 600;
+	font-size: 0.92rem;
+	color: var(--heading-color);
+	border-bottom: 1px solid var(--border-color);
+}
+
+.dam-chart-area {
+	padding: 12px 16px;
+}
+
+.dam-chart-table {
+	border-top: 1px solid var(--border-color);
+}
+
+.dam-chart-table .dam-table {
+	margin: 0;
 }

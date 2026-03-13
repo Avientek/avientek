@@ -1,6 +1,7 @@
 frappe.ui.form.on("Demo Movement", {
 	refresh(frm) {
 		frm.trigger("set_status_color");
+		frm.trigger("movement_type");
 		if (frm.doc.docstatus === 1 && frm.doc.movement_type === "Move Out" && frm.doc.status !== "Returned") {
 			frm.add_custom_button(__("Record Return"), () => {
 				frappe.new_doc("Demo Movement", {
@@ -24,11 +25,40 @@ frappe.ui.form.on("Demo Movement", {
 				});
 			}, __("Print"));
 		}
+	},
 
-		// Restrict asset field to demo assets only (exclude cancelled)
-		frm.set_query("asset", () => ({
-			filters: { custom_is_demo_asset: 1, docstatus: ["!=", 2] },
-		}));
+	movement_type(frm) {
+		// Toggle required fields based on movement type
+		const is_out = frm.doc.movement_type === "Move Out";
+		frm.toggle_reqd("customer", is_out);
+		frm.toggle_reqd("contact_person", is_out);
+		frm.toggle_reqd("expected_return_date", is_out);
+
+		// Relabel Movement Date for Return
+		if (frm.doc.movement_type === "Return") {
+			frm.fields_dict.movement_date.set_label(__("Return Date"));
+		} else {
+			frm.fields_dict.movement_date.set_label(__("Movement Date"));
+		}
+
+		// Update asset query based on movement type
+		if (frm.doc.movement_type === "Return") {
+			frm.set_query("asset", () => ({
+				filters: {
+					custom_is_demo_asset: 1,
+					custom_dam_status: ["in", ["On Demo", "Issued as Standby"]],
+					docstatus: ["!=", 2],
+				},
+			}));
+		} else {
+			frm.set_query("asset", () => ({
+				filters: {
+					custom_is_demo_asset: 1,
+					custom_dam_status: "Free",
+					docstatus: ["!=", 2],
+				},
+			}));
+		}
 	},
 
 	asset(frm) {
@@ -48,14 +78,6 @@ frappe.ui.form.on("Demo Movement", {
 				});
 			}
 		});
-	},
-
-	movement_type(frm) {
-		// Toggle required fields based on movement type
-		const is_out = frm.doc.movement_type === "Move Out";
-		frm.toggle_reqd("customer", is_out);
-		frm.toggle_reqd("contact_person", is_out);
-		frm.toggle_reqd("expected_return_date", is_out);
 	},
 
 	set_status_color(frm) {

@@ -63,10 +63,13 @@ class DamDashboard {
 			{ id: "dashboard", label: __("Dashboard"), icon: "\u2B21" },
 			{ id: "demo-assets", label: __("Demo Assets"), icon: "\u25C8" },
 			{ id: "items-out", label: __("Items Out for Demo"), icon: "\u2197" },
+			{ id: "analytics", label: __("Analytics"), icon: "\u2261" },
 			{ id: "divider1", type: "divider" },
 			{ id: "new-movement", label: __("New Movement"), icon: "\u21C4", action: () => frappe.new_doc("Demo Movement") },
+			{ id: "new-group-movement", label: __("Group Movement"), icon: "\u21C6", action: () => frappe.new_doc("Group Demo Movement") },
 			{ id: "divider2", type: "divider" },
 			{ id: "ack", label: __("Acknowledgement"), icon: "\u2726", action: () => frappe.set_route("List", "Demo Movement", { docstatus: 1 }) },
+			{ id: "group-list", label: __("Group Movements"), icon: "\u2630", action: () => frappe.set_route("List", "Group Demo Movement") },
 		];
 
 		let html = `
@@ -119,6 +122,7 @@ class DamDashboard {
 			case "dashboard": this.refresh_dashboard(); break;
 			case "demo-assets": this.refresh_demo_assets(); break;
 			case "items-out": this.refresh_items_out(); break;
+			case "analytics": this.refresh_analytics(); break;
 		}
 	}
 
@@ -453,6 +457,209 @@ class DamDashboard {
 				</tr></thead>
 				<tbody>${rows}</tbody>
 			</table>`);
+	}
+
+	// ─── Analytics View ───
+
+	refresh_analytics() {
+		this.analytics_filters = this.analytics_filters || {};
+		const company = this.company || null;
+
+		this.$content.html(`
+			<div class="dam-view-header">
+				<div class="dam-view-title">
+					<h2>${__("Analytical Dashboards")}</h2>
+					<p>${__("Demo inventory quantity & value analysis")}</p>
+				</div>
+			</div>
+			<div class="dam-analytics-filters" id="dam-analytics-filters">
+				<div class="dam-empty">${__("Loading filters...")}</div>
+			</div>
+			<div class="dam-analytics-summary" id="dam-analytics-summary"></div>
+			<div class="dam-analytics-status-row" id="dam-analytics-status"></div>
+			<div class="dam-analytics-charts">
+				<div class="dam-analytics-chart-row">
+					<div class="dam-chart-card" id="dam-chart-brand"></div>
+					<div class="dam-chart-card" id="dam-chart-customer"></div>
+				</div>
+				<div class="dam-analytics-chart-row">
+					<div class="dam-chart-card" id="dam-chart-salesperson"></div>
+					<div class="dam-chart-card" id="dam-chart-country"></div>
+				</div>
+			</div>`);
+
+		// Load filter options then data
+		frappe.call({
+			method: `${DAM_API}.get_analytics_filters`,
+		}).then(r => {
+			this.render_analytics_filters(r.message || {});
+			this.load_analytics_data();
+		});
+	}
+
+	render_analytics_filters(options) {
+		const filters = this.analytics_filters;
+		const make_select = (id, label, values, key) => {
+			const opts = values.map(v =>
+				`<option value="${frappe.utils.escape_html(v)}" ${filters[key] === v ? "selected" : ""}>${frappe.utils.escape_html(v)}</option>`
+			).join("");
+			return `
+				<div class="dam-analytics-filter">
+					<label>${__(label)}</label>
+					<select id="${id}" class="dam-analytics-select">
+						<option value="">${__("All")}</option>
+						${opts}
+					</select>
+				</div>`;
+		};
+
+		const html = `
+			<div class="dam-analytics-filter-row">
+				${make_select("dam-f-brand", "Brand", options.brands || [], "brand")}
+				${make_select("dam-f-customer", "Customer", options.customers || [], "customer")}
+				${make_select("dam-f-salesperson", "Salesperson", options.salespersons || [], "salesperson")}
+				${make_select("dam-f-country", "Country", options.countries || [], "country")}
+				<div class="dam-analytics-filter">
+					<label>&nbsp;</label>
+					<button class="dam-btn-primary dam-analytics-apply" id="dam-apply-filters">${__("Apply")}</button>
+				</div>
+				<div class="dam-analytics-filter">
+					<label>&nbsp;</label>
+					<button class="dam-btn-view dam-analytics-reset" id="dam-reset-filters">${__("Reset")}</button>
+				</div>
+			</div>`;
+
+		this.$content.find("#dam-analytics-filters").html(html);
+
+		this.$content.find("#dam-apply-filters").on("click", () => {
+			this.analytics_filters = {
+				brand: this.$content.find("#dam-f-brand").val() || null,
+				customer: this.$content.find("#dam-f-customer").val() || null,
+				salesperson: this.$content.find("#dam-f-salesperson").val() || null,
+				country: this.$content.find("#dam-f-country").val() || null,
+			};
+			this.load_analytics_data();
+		});
+
+		this.$content.find("#dam-reset-filters").on("click", () => {
+			this.analytics_filters = {};
+			this.$content.find(".dam-analytics-select").val("");
+			this.load_analytics_data();
+		});
+	}
+
+	load_analytics_data() {
+		const f = this.analytics_filters || {};
+		frappe.call({
+			method: `${DAM_API}.get_analytics_data`,
+			args: {
+				company: this.company || null,
+				brand: f.brand || null,
+				customer: f.customer || null,
+				salesperson: f.salesperson || null,
+				country: f.country || null,
+			},
+		}).then(r => {
+			const data = r.message || {};
+			this.render_analytics_summary(data.summary || {});
+			this.render_analytics_status(data.by_status || []);
+			this.render_analytics_chart("dam-chart-brand", __("By Brand"), data.by_brand || []);
+			this.render_analytics_chart("dam-chart-customer", __("By Customer"), data.by_customer || []);
+			this.render_analytics_chart("dam-chart-salesperson", __("By Salesperson"), data.by_salesperson || []);
+			this.render_analytics_chart("dam-chart-country", __("By Country"), data.by_country || []);
+		});
+	}
+
+	render_analytics_summary(summary) {
+		const fmt_value = frappe.format(summary.total_value || 0, { fieldtype: "Currency" });
+		this.$content.find("#dam-analytics-summary").html(`
+			<div class="dam-stat-row">
+				<div class="dam-stat-card" style="border-top: 3px solid #2563EB">
+					<div class="dam-stat-value" style="color:#2563EB">${summary.total_qty || 0}</div>
+					<div class="dam-stat-label">${__("Demo Units (Qty)")}</div>
+				</div>
+				<div class="dam-stat-card" style="border-top: 3px solid #059669">
+					<div class="dam-stat-value" style="color:#059669; font-size:1.6rem">${fmt_value}</div>
+					<div class="dam-stat-label">${__("Inventory Value")}</div>
+				</div>
+			</div>`);
+	}
+
+	render_analytics_status(by_status) {
+		if (!by_status.length) {
+			this.$content.find("#dam-analytics-status").html("");
+			return;
+		}
+		const color_map = { "Free": "#059669", "On Demo": "#EA580C", "Issued as Standby": "#2563EB" };
+		const cards = by_status.map(s => {
+			const color = color_map[s.status] || "#6B7280";
+			const fmt_val = frappe.format(s.value || 0, { fieldtype: "Currency" });
+			return `
+				<div class="dam-stat-card dam-stat-card-sm" style="border-top: 3px solid ${color}">
+					<div class="dam-stat-value" style="color:${color}; font-size:1.5rem">${s.qty}</div>
+					<div class="dam-stat-label">${__(s.status)}</div>
+					<div class="dam-stat-sub">${fmt_val}</div>
+				</div>`;
+		}).join("");
+		this.$content.find("#dam-analytics-status").html(`<div class="dam-stat-row">${cards}</div>`);
+	}
+
+	render_analytics_chart(container_id, title, data) {
+		const $container = this.$content.find(`#${container_id}`);
+		if (!data.length) {
+			$container.html(`
+				<div class="dam-chart-title">${title}</div>
+				<div class="dam-empty" style="padding:20px">${__("No data")}</div>`);
+			return;
+		}
+
+		const labels = data.map(d => d.label);
+		const qty_values = data.map(d => d.qty);
+		const value_values = data.map(d => d.value);
+
+		$container.html(`
+			<div class="dam-chart-title">${title}</div>
+			<div class="dam-chart-area" id="${container_id}-chart"></div>
+			<div class="dam-chart-table">
+				<table class="dam-table">
+					<thead><tr>
+						<th>${__("Name")}</th>
+						<th style="text-align:right">${__("Qty")}</th>
+						<th style="text-align:right">${__("Value")}</th>
+					</tr></thead>
+					<tbody>
+						${data.map(d => `
+							<tr>
+								<td>${frappe.utils.escape_html(d.label)}</td>
+								<td style="text-align:right; font-weight:600">${d.qty}</td>
+								<td style="text-align:right">${frappe.format(d.value || 0, { fieldtype: "Currency" })}</td>
+							</tr>
+						`).join("")}
+					</tbody>
+				</table>
+			</div>`);
+
+		// Render chart using frappe.Chart
+		try {
+			new frappe.Chart(`#${container_id}-chart`, {
+				data: {
+					labels: labels,
+					datasets: [
+						{ name: __("Quantity"), values: qty_values, chartType: "bar" },
+					],
+				},
+				type: "bar",
+				height: 200,
+				colors: ["#0EA5C9"],
+				barOptions: { spaceRatio: 0.4 },
+				axisOptions: { xIsSeries: false },
+				tooltipOptions: {
+					formatTooltipY: d => d + " units",
+				},
+			});
+		} catch (e) {
+			// frappe.Chart not available — table fallback is enough
+		}
 	}
 
 }
