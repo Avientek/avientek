@@ -38,8 +38,8 @@ if (!document.getElementById('inv-preview-styles')) {
     $(`<style id="inv-preview-styles">
         .inv-att-preview {
             position: fixed;
-            width: 680px;
-            height: 720px;
+            width: 780px;
+            height: 820px;
             background: #fff;
             border-radius: 8px;
             box-shadow: 0 12px 40px rgba(0,0,0,0.22);
@@ -584,8 +584,8 @@ frappe.ui.form.on('Payment Request Form', {
             const rect = $el[0].getBoundingClientRect();
             let top = rect.bottom + 8;
             let left = Math.max(10, rect.left - 100);
-            if (top + 720 > window.innerHeight) top = Math.max(10, rect.top - 728);
-            if (left + 680 > window.innerWidth) left = Math.max(10, window.innerWidth - 690);
+            if (top + 820 > window.innerHeight) top = Math.max(10, rect.top - 828);
+            if (left + 780 > window.innerWidth) left = Math.max(10, window.innerWidth - 790);
             $popup.css({ top, left });
 
             $("body").append($popup);
@@ -688,7 +688,7 @@ frappe.ui.form.on('Payment Request Form', {
                     const name = (f.file_name || "").toLowerCase();
                     const url = f.file_url || "";
                     if (name.endsWith(".pdf")) {
-                        html += `<iframe src="${url}#toolbar=0&navpanes=0" style="width:100%;height:700px;border:1px solid #eee;border-radius:4px;margin-bottom:10px;" loading="lazy"></iframe>`;
+                        html += `<iframe src="${url}#toolbar=0&navpanes=0" style="width:100%;height:800px;border:1px solid #eee;border-radius:4px;margin-bottom:10px;" loading="lazy"></iframe>`;
                     } else if (/\.(jpe?g|png|gif|webp)$/i.test(name)) {
                         html += `<img src="${url}" loading="lazy" />`;
                     } else {

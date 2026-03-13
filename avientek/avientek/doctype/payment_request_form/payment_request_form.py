@@ -1611,8 +1611,8 @@ def get_pdf_as_images(doctype, docname, max_pages=2):
                 images = _convert_pdf_to_images_optimized(
                     file_path,
                     max_pages=max_pages,
-                    zoom=1.0,
-                    jpeg_quality=60,
+                    zoom=2.5,
+                    jpeg_quality=85,
                     is_bytes=False
                 )
 
@@ -1627,8 +1627,8 @@ def get_pdf_as_images(doctype, docname, max_pages=2):
                         images = _convert_pdf_to_images_optimized(
                             content,
                             max_pages=max_pages,
-                            zoom=1.0,
-                            jpeg_quality=60,
+                            zoom=2.5,
+                            jpeg_quality=85,
                             is_bytes=True
                         )
                 except Exception:
@@ -1869,12 +1869,12 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=2)
         if not pdf_content:
             return []
 
-        # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+        # Convert PDF pages to images (zoom=2.5 for crisp text, jpeg_quality=85)
         images = _convert_pdf_to_images_optimized(
             pdf_content,
             max_pages=max_pages,
-            zoom=1.0,
-            jpeg_quality=60,
+            zoom=2.5,
+            jpeg_quality=85,
             is_bytes=True
         )
 
@@ -2027,12 +2027,12 @@ def get_attachment_as_images(file_url, max_pages=2):
             frappe.log_error(f"Attachment file not found: {file_url}", "Attachment to Image Conversion")
             return []
 
-        # Use optimized conversion (zoom=1.0, jpeg_quality=60)
+        # Convert PDF to images (zoom=2.5 for crisp text, jpeg_quality=85)
         images = _convert_pdf_to_images_optimized(
             file_path,
             max_pages=max_pages,
-            zoom=1.0,
-            jpeg_quality=60,
+            zoom=2.5,
+            jpeg_quality=85,
             is_bytes=False
         )
 
