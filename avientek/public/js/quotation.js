@@ -8,7 +8,7 @@ frappe.ui.form.on('Quotation', {
 
     // ── Save lifecycle ──────────────────────────────────────
     before_save(frm) {
-        // Server pipeline (run_calculation_pipeline) handles all calcs
+        run_full_calculation_preview(frm);
     },
 
     after_save(frm) {
@@ -119,17 +119,8 @@ frappe.ui.form.on('Quotation', {
         });
     },
 
-    // ── ERPNext Additional Discount fields ─────────────────
-    discount_amount(frm) {
-        // ERPNext's handler also fires and calls calculate_taxes_and_totals(),
-        // which overwrites grand_total with ERPNext's own calculation.
-        // Use setTimeout(0) so our preview runs AFTER ERPNext's handler finishes.
-        setTimeout(() => update_doc_totals_preview(frm), 0);
-    },
-
-    additional_discount_percentage(frm) {
-        setTimeout(() => update_doc_totals_preview(frm), 0);
-    },
+    // Discount handlers are managed via calculate_taxes_and_totals override
+    // in the main refresh() handler below.
 
     // ── Discount Type Selection ─────────────────────────────
     custom_discount_type(frm) {
@@ -360,12 +351,7 @@ frappe.ui.form.on('Quotation', {
         // our values always win.
         if (!frm._calc_override_applied) {
             frm.cscript.calculate_taxes_and_totals = function() {
-                (frm.doc.items || []).forEach(row => {
-                    if (row.custom_special_price) {
-                        calculate_all_preview(frm, row.doctype, row.name);
-                    }
-                });
-                update_doc_totals_preview(frm);
+                run_full_calculation_preview(frm);
             };
             frm._calc_override_applied = true;
         }
@@ -776,7 +762,8 @@ function update_doc_totals_preview(frm) {
     });
 
     // Account for ERPNext's Additional Discount in margin and grand_total.
-    // Derive from percentage first (amount may be stale from ERPNext validate).
+    // Use percentage as primary (server always derives from percentage).
+    // Fall back to amount if only amount is set.
     let addl_discount = 0;
     if (flt(frm.doc.additional_discount_percentage) > 0) {
         addl_discount = flt(totals.selling * flt(frm.doc.additional_discount_percentage) / 100, 4);
@@ -811,15 +798,45 @@ function update_doc_totals_preview(frm) {
     frm.doc.net_total    = flt(totals.selling, 4);
     frm.doc.base_total   = flt(totals.selling * conversion_rate, 4);
     frm.doc.base_net_total = flt(totals.selling * conversion_rate, 4);
-    frm.doc.grand_total  = flt(effective_selling, 4);
-    frm.doc.base_grand_total = flt(effective_selling * conversion_rate, 4);
-    frm.doc.rounded_total = flt(Math.round(effective_selling), 4);
-    frm.doc.base_rounded_total = flt(Math.round(effective_selling * conversion_rate), 4);
+    // Recalculate taxes from the Taxes table (mirror server-side logic)
+    let net_after_discount = flt(effective_selling, 4);
+    let total_taxes = 0;
+    let taxes = frm.doc.taxes || [];
+    for (let i = 0; i < taxes.length; i++) {
+        let tax_row = taxes[i];
+        if (tax_row.charge_type === "On Net Total") {
+            tax_row.tax_amount = flt(flt(tax_row.rate) * net_after_discount / 100, 4);
+        } else if (tax_row.charge_type === "On Previous Row Total" && tax_row.row_id) {
+            let prev_idx = cint(tax_row.row_id) - 1;
+            if (prev_idx >= 0 && prev_idx < taxes.length) {
+                tax_row.tax_amount = flt(flt(tax_row.rate) * flt(taxes[prev_idx].total) / 100, 4);
+            }
+        } else if (tax_row.charge_type === "On Previous Row Amount" && tax_row.row_id) {
+            let prev_idx = cint(tax_row.row_id) - 1;
+            if (prev_idx >= 0 && prev_idx < taxes.length) {
+                tax_row.tax_amount = flt(flt(tax_row.rate) * flt(taxes[prev_idx].tax_amount) / 100, 4);
+            }
+        }
+        // "Actual" charge_type: keep tax_amount as-is
+        tax_row.base_tax_amount = flt(tax_row.tax_amount * conversion_rate, 4);
+        let running_tax_sum = 0;
+        for (let j = 0; j <= i; j++) { running_tax_sum += flt(taxes[j].tax_amount); }
+        tax_row.total = flt(net_after_discount + running_tax_sum, 4);
+        tax_row.base_total = flt(tax_row.total * conversion_rate, 4);
+        total_taxes += flt(tax_row.tax_amount);
+    }
+    frm.doc.total_taxes_and_charges = flt(total_taxes, 4);
+    frm.doc.base_total_taxes_and_charges = flt(total_taxes * conversion_rate, 4);
+
+    frm.doc.grand_total  = flt(net_after_discount + total_taxes, 4);
+    frm.doc.base_grand_total = flt(frm.doc.grand_total * conversion_rate, 4);
+    frm.doc.rounded_total = Math.round(frm.doc.grand_total);
+    frm.doc.base_rounded_total = Math.round(frm.doc.base_grand_total);
 
     // Sync Additional Discount Amount so ERPNext's calculate_taxes_and_totals
-    // doesn't overwrite grand_total with stale values
+    // doesn't overwrite grand_total with stale values.
     frm.doc.discount_amount = flt(addl_discount, 4);
-    frm.doc.base_discount_amount = flt(addl_discount * conversion_rate, 4);
+    frm.doc.base_discount_amount = flt(flt(frm.doc.discount_amount) * conversion_rate, 4);
 
     // Sync item-level net_rate / net_amount / base_* fields
     let item_amount_sum = flt(totals.selling);
@@ -905,6 +922,78 @@ function load_item_defaults(frm, cdt, cdn) {
             });
         }
     });
+}
+
+
+/**
+ * Full calculation pipeline that mirrors server's run_calculation_pipeline.
+ * Used by both before_save and calculate_taxes_and_totals override to
+ * ensure live preview always matches server output.
+ */
+function run_full_calculation_preview(frm) {
+    // 1) Recalculate all items from scratch (like server calc_item_totals)
+    (frm.doc.items || []).forEach(row => {
+        if (row.custom_special_price) {
+            calculate_all_preview(frm, row.doctype, row.name);
+        }
+    });
+
+    // 2) Distribute custom discount (like server distribute_discount_server)
+    let custom_disc = flt(frm.doc.custom_discount_amount_value);
+    if (custom_disc > 0) {
+        let total_selling = 0;
+        (frm.doc.items || []).forEach(row => {
+            total_selling += flt(row.custom_selling_price);
+        });
+        if (total_selling > 0) {
+            let conversion_rate = flt(frm.doc.conversion_rate) || 1;
+            (frm.doc.items || []).forEach(row => {
+                let selling = flt(row.custom_selling_price);
+                let qty = flt(row.qty) || 1;
+                let cogs = flt(row.custom_cogs);
+                let share = selling / total_selling;
+                let item_discount = flt(custom_disc * share, 4);
+                let new_selling = Math.max(flt(selling - item_discount, 4), 0);
+                let new_rate = flt(new_selling / qty, 4);
+                let margin_val = Math.max(flt(new_selling - cogs, 4), 0);
+                let margin_pct = new_selling ? flt(margin_val / new_selling * 100, 4) : 0;
+
+                row.custom_discount_amount_value = flt(item_discount / qty, 4);
+                row.custom_discount_amount_qty = item_discount;
+                row.custom_selling_price = new_selling;
+                row.custom_total_ = new_selling;
+                row.custom_special_rate = new_rate;
+                row.rate = new_rate;
+                row.amount = new_selling;
+                row.base_rate = flt(new_rate * conversion_rate);
+                row.base_amount = flt(new_selling * conversion_rate);
+                row.net_rate = new_rate;
+                row.net_amount = new_selling;
+                row.base_net_rate = flt(new_rate * conversion_rate);
+                row.base_net_amount = flt(new_selling * conversion_rate);
+                row.price_list_rate = new_rate;
+                row.base_price_list_rate = flt(new_rate * conversion_rate);
+                row.custom_margin_value = margin_val;
+                row.custom_margin_ = margin_pct;
+            });
+        }
+    }
+
+    // 3) ERPNext's discount_amount handler sets percentage=0 before calling
+    //    calculate_taxes_and_totals. Back-calculate percentage from amount.
+    let ts = 0;
+    (frm.doc.items || []).forEach(row => {
+        ts += flt(row.custom_selling_price);
+    });
+    if (flt(frm.doc.additional_discount_percentage) === 0
+        && flt(frm.doc.discount_amount) > 0 && ts) {
+        frm.doc.additional_discount_percentage = flt(
+            flt(frm.doc.discount_amount) / ts * 100, 4
+        );
+    }
+
+    // 4) Update totals (like server recalc_doc_totals)
+    update_doc_totals_preview(frm);
 }
 
 

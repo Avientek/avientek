@@ -457,15 +457,18 @@ def recalc_doc_totals(doc):
     tc = totals["cost"]
 
     # Account for ERPNext's Additional Discount when calculating margin.
-    # Always derive from percentage when set (ERPNext's discount_amount may
-    # be stale since validate runs before our before_save pipeline).
+    # MUST use percentage as source of truth on server side because ERPNext's
+    # set_discount_amount() in validate always overwrites discount_amount from
+    # percentage using ERPNext's own grand_total (which differs from ours).
+    # We derive discount_amount from percentage using our own ts.
     addl_discount = 0
     if flt(doc.additional_discount_percentage) > 0:
         addl_discount = flt(ts * flt(doc.additional_discount_percentage) / 100, 4)
-        # Sync discount_amount so ERPNext fields stay consistent
         doc.discount_amount = addl_discount
     elif flt(doc.discount_amount) > 0:
         addl_discount = flt(doc.discount_amount)
+        if ts:
+            doc.additional_discount_percentage = flt(addl_discount / ts * 100, 4)
 
     effective_selling = flt(ts - addl_discount, 4)
     margin = flt(effective_selling - tc, 4)
@@ -531,6 +534,7 @@ def recalc_doc_totals(doc):
     doc.base_grand_total = flt(doc.grand_total * conversion_rate, 4)
     doc.rounded_total  = round(doc.grand_total)
     doc.base_rounded_total = round(doc.base_grand_total)
+
 
     # ── Sync item-level ERPNext fields (net_rate, net_amount, base_*) ──
     # ERPNext's validate already set these from the OLD rate before our
