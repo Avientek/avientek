@@ -249,6 +249,7 @@ doctype_js = {
 	"Sales Invoice": "public/js/sales_invoice.js",
 	"Asset": "public/js/asset_extension.js",
 	"Asset Capitalization": "public/js/asset_capitalization.js",
+	"User": "public/js/user.js",
 }
 doctype_list_js = {
 	"Sales Order": "public/js/sales_order_list.js",
@@ -414,6 +415,9 @@ doc_events = {
             "avientek.events.asset_capitalization.on_cancel",
             "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
         ],
+    },
+    "User Permission": {
+        "before_delete": "avientek.avientek.doctype.user_permission_manager.user_permission_manager.prevent_managed_permission_deletion"
     },
 }
 
