@@ -17,10 +17,12 @@ BRAND_DOCTYPES = {
 	"Supplier Quotation": "Supplier Quotation Item",
 	"Request for Quotation": "Request for Quotation Item",
 	"Opportunity": "Opportunity Item",
+	"Avientek Proforma Invoice": "Proforma Invoice Item",
+	"Existing Quotation": "Existing Quotation Item",
 }
 
 # Parent-level doctypes where brand is directly on the parent
-BRAND_PARENT_DOCTYPES = ["Item", "Serial No", "Item Price"]
+BRAND_PARENT_DOCTYPES = ["Item", "Serial No", "Item Price", "Demo Unit Request"]
 
 
 def _get_user_brands(user=None):
@@ -247,3 +249,25 @@ def serial_no_permission_query(user):
 
 def item_price_permission_query(user):
 	return _brand_parent_permission_query(user, "Item Price")
+
+# Avientek custom doctypes
+def demo_unit_request_permission_query(user):
+	return _brand_parent_permission_query(user, "Demo Unit Request")
+
+def proforma_invoice_permission_query(user):
+	return _brand_permission_query(user, "Avientek Proforma Invoice", "Proforma Invoice Item")
+
+def existing_quotation_permission_query(user):
+	return _brand_permission_query(user, "Existing Quotation", "Existing Quotation Item")
+
+
+@frappe.whitelist()
+def get_permitted_brands():
+	"""Return the list of permitted brands for the current user.
+	Used by client-side to auto-filter Brand dropdowns in reports.
+	"""
+	user = frappe.session.user
+	if user == "Administrator":
+		return []
+	brands = _get_user_brands(user)
+	return brands

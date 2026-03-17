@@ -365,6 +365,9 @@ permission_query_conditions = {
     "Item": "avientek.api.quotation_access.item_permission_query",
     "Serial No": "avientek.api.quotation_access.serial_no_permission_query",
     "Item Price": "avientek.api.quotation_access.item_price_permission_query",
+    "Demo Unit Request": "avientek.api.quotation_access.demo_unit_request_permission_query",
+    "Avientek Proforma Invoice": "avientek.api.quotation_access.proforma_invoice_permission_query",
+    "Existing Quotation": "avientek.api.quotation_access.existing_quotation_permission_query",
 }
 
 # has_permission = {

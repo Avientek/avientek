@@ -1,17 +1,15 @@
 /**
  * Brand-restricted access handler.
  *
- * For users with Brand User Permissions, intercepts navigation to documents
- * that contain items from restricted brands and shows a filtered preview popup.
+ * For users with Brand User Permissions:
+ * 1. Intercepts navigation to documents with mixed-brand child items → shows filtered popup
+ * 2. Auto-filters Brand dropdown in Script Reports to only permitted brands
  *
- * Loaded globally via app_include_js so it works across all doctypes.
+ * Loaded globally via app_include_js.
  */
 
 (function () {
-	// Only intercept doctypes with brand on CHILD item table
-	// (where a document can have items from mixed brands, some restricted)
-	// Parent-level brand doctypes (Item, Serial No, Item Price) are already
-	// filtered at the list level by permission_query_conditions — no intercept needed.
+	// Doctypes with brand on CHILD item table (mixed brands possible)
 	const BRAND_CHILD_DOCTYPES = [
 		"Quotation",
 		"Sales Order",
@@ -25,6 +23,8 @@
 		"Supplier Quotation",
 		"Request for Quotation",
 		"Opportunity",
+		"Avientek Proforma Invoice",
+		"Existing Quotation",
 	];
 
 	// URL slug → DocType mapping
@@ -33,9 +33,10 @@
 		SLUG_MAP[frappe.router.slug(dt)] = dt;
 	});
 
-	// Check brand restriction once per session
+	// Cache
 	let _checked = false;
 	let _restricted = false;
+	let _permitted_brands = null;
 
 	function check_restriction(callback) {
 		if (_checked) {
@@ -59,7 +60,23 @@
 		});
 	}
 
-	// ── Override frappe.set_route to intercept form navigation ──
+	function get_permitted_brands(callback) {
+		if (_permitted_brands !== null) {
+			callback(_permitted_brands);
+			return;
+		}
+		frappe.call({
+			method: "avientek.api.quotation_access.get_permitted_brands",
+			async: false,
+			callback: function (r) {
+				_permitted_brands = r.message || [];
+				callback(_permitted_brands);
+			},
+		});
+	}
+
+	// ── 1. Route intercept for child-item brand doctypes ──
+
 	var _original_set_route = null;
 
 	function setup_route_intercept() {
@@ -73,7 +90,6 @@
 			// frappe.set_route("Form", "Quotation", "QN-xxx")
 			if (args[0] === "Form" && args[2] && BRAND_CHILD_DOCTYPES.includes(args[1])) {
 				let name = args[2];
-				// Allow new document creation
 				if (name.startsWith("new-")) {
 					return _original_set_route.apply(frappe, arguments);
 				}
@@ -100,7 +116,8 @@
 		};
 	}
 
-	// ── Show permitted items popup ──
+	// ── 2. Show permitted items popup ──
+
 	function show_brand_preview(doctype, docname) {
 		frappe.call({
 			method: "avientek.api.quotation_access.get_permitted_doc_preview",
@@ -112,12 +129,10 @@
 				let data = r.message;
 
 				if (data.full_access) {
-					// No restriction — navigate using original (unpatched) set_route
-					_original_set_route("Form", doctype, docname);
+					_original_set_route.call(frappe, "Form", doctype, docname);
 					return;
 				}
 
-				// Parent-level brand restriction (Item, Serial No)
 				if (data.restricted) {
 					frappe.msgprint({
 						title: __("Access Restricted"),
@@ -127,7 +142,6 @@
 					return;
 				}
 
-				// Child-item level — show filtered preview
 				let items = data.permitted_items || [];
 				let currency = data.currency || "USD";
 
@@ -201,14 +215,65 @@
 		});
 	}
 
-	// ── Initialize on page ready ──
+	// ── 3. Auto-filter Brand dropdown in Script Reports ──
+
+	function setup_report_brand_filter() {
+		// Watch for route changes to detect report pages
+		$(document).on("page-change", apply_report_brand_filter);
+		// Also run on initial load
+		setTimeout(apply_report_brand_filter, 1000);
+	}
+
+	function apply_report_brand_filter() {
+		let route = frappe.get_route();
+		// Check if on a query-report page: ["query-report", "Report Name"]
+		if (!route || route[0] !== "query-report") return;
+
+		// Wait for report page to initialize
+		setTimeout(function () {
+			let page = frappe.pages["query-report"];
+			if (!page || !page.page) return;
+
+			let qr = frappe.query_report;
+			if (!qr || !qr.filters) return;
+
+			// Find the Brand filter
+			let brand_filter = qr.filters.find(function (f) {
+				return f.df && f.df.fieldname === "brand" &&
+					f.df.fieldtype === "Link" &&
+					f.df.options === "Brand";
+			});
+
+			if (!brand_filter) return;
+
+			get_permitted_brands(function (brands) {
+				if (!brands || !brands.length) return;
+
+				// Restrict the Brand filter to only show permitted brands
+				brand_filter.df.get_query = function () {
+					return {
+						filters: { name: ["in", brands] },
+					};
+				};
+
+				// If only one permitted brand, auto-set it
+				if (brands.length === 1 && !brand_filter.get_value()) {
+					brand_filter.set_value(brands[0]);
+				}
+			});
+		}, 500);
+	}
+
+	// ── Initialize ──
+
 	$(document).ready(function () {
 		check_restriction(function (is_restricted) {
 			if (!is_restricted) return;
 			setup_route_intercept();
+			setup_report_brand_filter();
 		});
 	});
 
-	// Make show_brand_preview available globally for list view handlers
+	// Global access for list view handlers
 	window.show_brand_preview = show_brand_preview;
 })();
