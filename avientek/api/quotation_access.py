@@ -98,7 +98,8 @@ def get_permitted_doc_preview(doctype, docname):
 	restricted_count = 0
 	for item in child_items:
 		item_brand = item.get("brand") or ""
-		if item_brand in brand_perms:
+		# Items with no brand or brand in user's permitted list are accessible
+		if not item_brand or item_brand in brand_perms:
 			permitted_items.append({
 				"idx": item.idx,
 				"item_code": item.get("item_code") or "",
@@ -111,6 +112,10 @@ def get_permitted_doc_preview(doctype, docname):
 			})
 		else:
 			restricted_count += 1
+
+	# If ALL items are from permitted brands (or no brand), allow full document access
+	if restricted_count == 0:
+		return {"full_access": True}
 
 	permitted_amount = sum(flt(i["amount"]) for i in permitted_items)
 
