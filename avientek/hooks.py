@@ -219,7 +219,10 @@ fixtures = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/avientek/css/avientek.css"
-app_include_js = "/assets/avientek/js/workflow_confirm.js?v=5"
+app_include_js = [
+    "/assets/avientek/js/workflow_confirm.js?v=5",
+    "/assets/avientek/js/brand_access.js?v=2",
+]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/avientek/css/avientek.css"
@@ -348,6 +351,20 @@ override_doctype_dashboards = {
 # }
 permission_query_conditions = {
     "Quotation": "avientek.api.quotation_access.quotation_permission_query",
+    "Sales Order": "avientek.api.quotation_access.sales_order_permission_query",
+    "Sales Invoice": "avientek.api.quotation_access.sales_invoice_permission_query",
+    "Delivery Note": "avientek.api.quotation_access.delivery_note_permission_query",
+    "POS Invoice": "avientek.api.quotation_access.pos_invoice_permission_query",
+    "Purchase Order": "avientek.api.quotation_access.purchase_order_permission_query",
+    "Purchase Receipt": "avientek.api.quotation_access.purchase_receipt_permission_query",
+    "Purchase Invoice": "avientek.api.quotation_access.purchase_invoice_permission_query",
+    "Material Request": "avientek.api.quotation_access.material_request_permission_query",
+    "Supplier Quotation": "avientek.api.quotation_access.supplier_quotation_permission_query",
+    "Request for Quotation": "avientek.api.quotation_access.request_for_quotation_permission_query",
+    "Opportunity": "avientek.api.quotation_access.opportunity_permission_query",
+    "Item": "avientek.api.quotation_access.item_permission_query",
+    "Serial No": "avientek.api.quotation_access.serial_no_permission_query",
+    "Item Price": "avientek.api.quotation_access.item_price_permission_query",
 }
 
 # has_permission = {
