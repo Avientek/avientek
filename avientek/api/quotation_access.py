@@ -45,6 +45,18 @@ ITEM_GROUP_DOCTYPES = {
 # Parent-level doctypes where item_group is directly on the parent
 ITEM_GROUP_PARENT_DOCTYPES = ["Item"]
 
+# Doctypes with customer_group on the parent document
+CUSTOMER_GROUP_PARENT_DOCTYPES = [
+	"Quotation", "Sales Order", "Sales Invoice", "Delivery Note",
+	"POS Invoice", "Opportunity",
+]
+
+# Doctypes with supplier_group on the parent document
+SUPPLIER_GROUP_PARENT_DOCTYPES = ["Purchase Invoice"]
+
+# Doctypes with Sales Team child table (sales_person field)
+SALES_PERSON_DOCTYPES = ["Sales Order", "Sales Invoice", "Delivery Note", "POS Invoice"]
+
 
 def _get_user_brands(user=None):
 	"""Get list of permitted brands for a user. Returns empty list if no restriction."""
@@ -70,6 +82,42 @@ def _get_user_item_groups(user=None):
 	)
 
 
+def _get_user_customer_groups(user=None):
+	"""Get list of permitted customer groups for a user. Returns empty list if no restriction."""
+	user = user or frappe.session.user
+	if user == "Administrator":
+		return []
+	return frappe.get_all(
+		"User Permission",
+		filters={"user": user, "allow": "Customer Group"},
+		pluck="for_value",
+	)
+
+
+def _get_user_supplier_groups(user=None):
+	"""Get list of permitted supplier groups for a user. Returns empty list if no restriction."""
+	user = user or frappe.session.user
+	if user == "Administrator":
+		return []
+	return frappe.get_all(
+		"User Permission",
+		filters={"user": user, "allow": "Supplier Group"},
+		pluck="for_value",
+	)
+
+
+def _get_user_sales_persons(user=None):
+	"""Get list of permitted sales persons for a user. Returns empty list if no restriction."""
+	user = user or frappe.session.user
+	if user == "Administrator":
+		return []
+	return frappe.get_all(
+		"User Permission",
+		filters={"user": user, "allow": "Sales Person"},
+		pluck="for_value",
+	)
+
+
 @frappe.whitelist()
 def check_user_has_item_group_restriction():
 	"""Quick check: does the current user have any Item Group User Permissions?"""
@@ -89,10 +137,37 @@ def check_user_has_brand_restriction():
 
 
 @frappe.whitelist()
-def get_permitted_doc_preview(doctype, docname):
-	"""Return document data filtered to only items the current user has Brand/Item Group permission for.
+def check_user_has_customer_group_restriction():
+	"""Quick check: does the current user have any Customer Group User Permissions?"""
+	user = frappe.session.user
+	if user == "Administrator":
+		return False
+	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Customer Group"}))
 
-	Works for any doctype that has a child item table with brand or item_group fields.
+
+@frappe.whitelist()
+def check_user_has_supplier_group_restriction():
+	"""Quick check: does the current user have any Supplier Group User Permissions?"""
+	user = frappe.session.user
+	if user == "Administrator":
+		return False
+	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Supplier Group"}))
+
+
+@frappe.whitelist()
+def check_user_has_sales_person_restriction():
+	"""Quick check: does the current user have any Sales Person User Permissions?"""
+	user = frappe.session.user
+	if user == "Administrator":
+		return False
+	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Sales Person"}))
+
+
+@frappe.whitelist()
+def get_permitted_doc_preview(doctype, docname):
+	"""Return document data filtered to only items the current user has permission for.
+
+	Checks Brand, Item Group, Customer Group, Supplier Group, and Sales Person restrictions.
 	"""
 	user = frappe.session.user
 	if user == "Administrator":
@@ -100,33 +175,43 @@ def get_permitted_doc_preview(doctype, docname):
 
 	brand_perms = _get_user_brands(user)
 	item_group_perms = _get_user_item_groups(user)
+	cg_perms = _get_user_customer_groups(user)
+	sg_perms = _get_user_supplier_groups(user)
+	sp_perms = _get_user_sales_persons(user)
 
 	# No restrictions at all
-	if not brand_perms and not item_group_perms:
+	if not brand_perms and not item_group_perms and not cg_perms and not sg_perms and not sp_perms:
 		return {"full_access": True}
 
 	# Validate doctype is one we support
 	child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
 	is_parent_brand = doctype in BRAND_PARENT_DOCTYPES
 	is_parent_item_group = doctype in ITEM_GROUP_PARENT_DOCTYPES
+	has_customer_group = doctype in CUSTOMER_GROUP_PARENT_DOCTYPES
+	has_supplier_group = doctype in SUPPLIER_GROUP_PARENT_DOCTYPES
+	has_sales_team = doctype in SALES_PERSON_DOCTYPES
 
-	if not child_dt and not is_parent_brand and not is_parent_item_group:
+	if not child_dt and not is_parent_brand and not is_parent_item_group and not has_customer_group and not has_supplier_group and not has_sales_team:
 		return {"full_access": True}
 
-	# Handle parent-level doctypes (Item, Serial No, Item Price)
-	if is_parent_brand or is_parent_item_group:
-		doc = frappe.get_doc(doctype, docname)
-		blocked = []
-		if brand_perms and is_parent_brand:
-			doc_brand = doc.get("brand") or ""
-			if doc_brand and doc_brand not in brand_perms:
-				blocked.append(_("Brand '{0}'").format(doc_brand))
-		if item_group_perms and is_parent_item_group:
-			doc_ig = doc.get("item_group") or ""
-			if doc_ig and doc_ig not in item_group_perms:
-				blocked.append(_("Item Group '{0}'").format(doc_ig))
-		if not blocked:
-			return {"full_access": True}
+	doc = frappe.get_doc(doctype, docname)
+
+	# Check document-level restrictions (Customer Group, Supplier Group, Sales Person)
+	blocked = []
+	if cg_perms and has_customer_group:
+		doc_cg = doc.get("customer_group") or ""
+		if doc_cg and doc_cg not in cg_perms:
+			blocked.append(_("Customer Group '{0}'").format(doc_cg))
+	if sg_perms and has_supplier_group:
+		doc_sg = doc.get("supplier_group") or ""
+		if doc_sg and doc_sg not in sg_perms:
+			blocked.append(_("Supplier Group '{0}'").format(doc_sg))
+	if sp_perms and has_sales_team:
+		sales_team = [st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person]
+		if sales_team and not set(sales_team) & set(sp_perms):
+			blocked.append(_("Sales Person"))
+
+	if blocked:
 		return {
 			"full_access": False,
 			"doc_name": doc.name,
@@ -135,8 +220,31 @@ def get_permitted_doc_preview(doctype, docname):
 			"message": _("You do not have permission to access {0}").format(", ".join(blocked)),
 		}
 
-	# Handle child-item doctypes
-	doc = frappe.get_doc(doctype, docname)
+	# Handle parent-level doctypes (Item, Serial No, Item Price)
+	if is_parent_brand or is_parent_item_group:
+		parent_blocked = []
+		if brand_perms and is_parent_brand:
+			doc_brand = doc.get("brand") or ""
+			if doc_brand and doc_brand not in brand_perms:
+				parent_blocked.append(_("Brand '{0}'").format(doc_brand))
+		if item_group_perms and is_parent_item_group:
+			doc_ig = doc.get("item_group") or ""
+			if doc_ig and doc_ig not in item_group_perms:
+				parent_blocked.append(_("Item Group '{0}'").format(doc_ig))
+		if parent_blocked:
+			return {
+				"full_access": False,
+				"doc_name": doc.name,
+				"doctype": doctype,
+				"restricted": True,
+				"message": _("You do not have permission to access {0}").format(", ".join(parent_blocked)),
+			}
+		if not child_dt:
+			return {"full_access": True}
+
+	# Handle child-item doctypes (skip if no child table)
+	if not child_dt:
+		return {"full_access": True}
 
 	# Find child table fieldname
 	items_field = "items"
@@ -340,10 +448,80 @@ def _item_group_parent_permission_query(user, parent_dt):
 	)
 
 
+# ── Customer Group permission query generators ──
+
+def _customer_group_permission_query(user, parent_dt):
+	"""Permission query for doctypes where customer_group is on the parent."""
+	if user == "Administrator":
+		return ""
+
+	cg_perms = _get_user_customer_groups(user)
+	if not cg_perms:
+		return ""
+
+	cgs_sql = ", ".join(frappe.db.escape(cg) for cg in cg_perms)
+	parent_table = "`tab{}`".format(parent_dt)
+
+	return "({parent}.`customer_group` IN ({cgs}) OR IFNULL({parent}.`customer_group`, '') = '')".format(
+		parent=parent_table, cgs=cgs_sql
+	)
+
+
+# ── Supplier Group permission query generators ──
+
+def _supplier_group_permission_query(user, parent_dt):
+	"""Permission query for doctypes where supplier_group is on the parent."""
+	if user == "Administrator":
+		return ""
+
+	sg_perms = _get_user_supplier_groups(user)
+	if not sg_perms:
+		return ""
+
+	sgs_sql = ", ".join(frappe.db.escape(sg) for sg in sg_perms)
+	parent_table = "`tab{}`".format(parent_dt)
+
+	return "({parent}.`supplier_group` IN ({sgs}) OR IFNULL({parent}.`supplier_group`, '') = '')".format(
+		parent=parent_table, sgs=sgs_sql
+	)
+
+
+# ── Sales Person permission query generators ──
+
+def _sales_person_permission_query(user, parent_dt):
+	"""Permission query for doctypes with Sales Team child table."""
+	if user == "Administrator":
+		return ""
+
+	sp_perms = _get_user_sales_persons(user)
+	if not sp_perms:
+		return ""
+
+	sps_sql = ", ".join(frappe.db.escape(sp) for sp in sp_perms)
+	parent_table = "`tab{}`".format(parent_dt)
+
+	# Show documents that have at least one matching sales person,
+	# OR documents with no Sales Team entries (empty = visible, like brand pattern)
+	return (
+		"("
+		"EXISTS ("
+		"SELECT 1 FROM `tabSales Team` st "
+		"WHERE st.parent = {parent}.name "
+		"AND st.parenttype = '{parent_dt}' "
+		"AND st.sales_person IN ({sps})"
+		") OR NOT EXISTS ("
+		"SELECT 1 FROM `tabSales Team` st2 "
+		"WHERE st2.parent = {parent}.name "
+		"AND st2.parenttype = '{parent_dt}'"
+		")"
+		")"
+	).format(parent=parent_table, parent_dt=parent_dt, sps=sps_sql)
+
+
 # ── Combined permission query (brand + item group) for each doctype ──
 
 def _combined_permission_query(user, parent_dt, child_dt):
-	"""Combine brand and item group permission queries for a child-item doctype."""
+	"""Combine all permission queries for a child-item doctype."""
 	parts = []
 	brand_cond = _brand_permission_query(user, parent_dt, child_dt)
 	if brand_cond:
@@ -351,11 +529,26 @@ def _combined_permission_query(user, parent_dt, child_dt):
 	ig_cond = _item_group_permission_query(user, parent_dt, child_dt)
 	if ig_cond:
 		parts.append(ig_cond)
+	# Customer Group (parent-level field)
+	if parent_dt in CUSTOMER_GROUP_PARENT_DOCTYPES:
+		cg_cond = _customer_group_permission_query(user, parent_dt)
+		if cg_cond:
+			parts.append(cg_cond)
+	# Supplier Group (parent-level field)
+	if parent_dt in SUPPLIER_GROUP_PARENT_DOCTYPES:
+		sg_cond = _supplier_group_permission_query(user, parent_dt)
+		if sg_cond:
+			parts.append(sg_cond)
+	# Sales Person (Sales Team child table)
+	if parent_dt in SALES_PERSON_DOCTYPES:
+		sp_cond = _sales_person_permission_query(user, parent_dt)
+		if sp_cond:
+			parts.append(sp_cond)
 	return " AND ".join(parts)
 
 
 def _combined_parent_permission_query(user, parent_dt):
-	"""Combine brand and item group permission queries for a parent-level doctype."""
+	"""Combine all permission queries for a parent-level doctype."""
 	parts = []
 	if parent_dt in BRAND_PARENT_DOCTYPES:
 		brand_cond = _brand_parent_permission_query(user, parent_dt)
@@ -365,6 +558,18 @@ def _combined_parent_permission_query(user, parent_dt):
 		ig_cond = _item_group_parent_permission_query(user, parent_dt)
 		if ig_cond:
 			parts.append(ig_cond)
+	if parent_dt in CUSTOMER_GROUP_PARENT_DOCTYPES:
+		cg_cond = _customer_group_permission_query(user, parent_dt)
+		if cg_cond:
+			parts.append(cg_cond)
+	if parent_dt in SUPPLIER_GROUP_PARENT_DOCTYPES:
+		sg_cond = _supplier_group_permission_query(user, parent_dt)
+		if sg_cond:
+			parts.append(sg_cond)
+	if parent_dt in SALES_PERSON_DOCTYPES:
+		sp_cond = _sales_person_permission_query(user, parent_dt)
+		if sp_cond:
+			parts.append(sp_cond)
 	return " AND ".join(parts)
 
 
@@ -442,3 +647,30 @@ def get_permitted_item_groups():
 	if user == "Administrator":
 		return []
 	return _get_user_item_groups(user)
+
+
+@frappe.whitelist()
+def get_permitted_customer_groups():
+	"""Return the list of permitted customer groups for the current user."""
+	user = frappe.session.user
+	if user == "Administrator":
+		return []
+	return _get_user_customer_groups(user)
+
+
+@frappe.whitelist()
+def get_permitted_supplier_groups():
+	"""Return the list of permitted supplier groups for the current user."""
+	user = frappe.session.user
+	if user == "Administrator":
+		return []
+	return _get_user_supplier_groups(user)
+
+
+@frappe.whitelist()
+def get_permitted_sales_persons():
+	"""Return the list of permitted sales persons for the current user."""
+	user = frappe.session.user
+	if user == "Administrator":
+		return []
+	return _get_user_sales_persons(user)

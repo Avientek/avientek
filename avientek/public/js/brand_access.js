@@ -1,9 +1,9 @@
 /**
- * Brand & Item Group restricted access handler.
+ * Brand, Item Group, Customer Group, Supplier Group & Sales Person restricted access handler.
  *
- * For users with Brand or Item Group User Permissions:
- * 1. Intercepts navigation to documents with mixed-brand/item-group child items → shows filtered popup
- * 2. Auto-filters Brand and Item Group dropdowns in Script Reports to only permitted values
+ * For users with these User Permissions:
+ * 1. Intercepts navigation to documents with restricted data → shows filtered popup or blocks access
+ * 2. Auto-filters dropdowns in Script Reports to only permitted values
  *
  * Loaded globally via app_include_js.
  */
@@ -41,6 +41,18 @@
 	let _ig_checked = false;
 	let _ig_restricted = false;
 	let _permitted_item_groups = null;
+
+	let _cg_checked = false;
+	let _cg_restricted = false;
+	let _permitted_customer_groups = null;
+
+	let _sg_checked = false;
+	let _sg_restricted = false;
+	let _permitted_supplier_groups = null;
+
+	let _sp_checked = false;
+	let _sp_restricted = false;
+	let _permitted_sales_persons = null;
 
 	function check_brand_restriction(callback) {
 		if (_brand_checked) {
@@ -112,6 +124,117 @@
 			callback: function (r) {
 				_permitted_item_groups = r.message || [];
 				callback(_permitted_item_groups);
+			},
+		});
+	}
+
+	function check_customer_group_restriction(callback) {
+		if (_cg_checked) {
+			callback(_cg_restricted);
+			return;
+		}
+		if (frappe.session.user === "Administrator") {
+			_cg_checked = true;
+			_cg_restricted = false;
+			callback(false);
+			return;
+		}
+		frappe.call({
+			method: "avientek.api.quotation_access.check_user_has_customer_group_restriction",
+			async: false,
+			callback: function (r) {
+				_cg_checked = true;
+				_cg_restricted = r.message ? true : false;
+				callback(_cg_restricted);
+			},
+		});
+	}
+
+	function check_supplier_group_restriction(callback) {
+		if (_sg_checked) {
+			callback(_sg_restricted);
+			return;
+		}
+		if (frappe.session.user === "Administrator") {
+			_sg_checked = true;
+			_sg_restricted = false;
+			callback(false);
+			return;
+		}
+		frappe.call({
+			method: "avientek.api.quotation_access.check_user_has_supplier_group_restriction",
+			async: false,
+			callback: function (r) {
+				_sg_checked = true;
+				_sg_restricted = r.message ? true : false;
+				callback(_sg_restricted);
+			},
+		});
+	}
+
+	function check_sales_person_restriction(callback) {
+		if (_sp_checked) {
+			callback(_sp_restricted);
+			return;
+		}
+		if (frappe.session.user === "Administrator") {
+			_sp_checked = true;
+			_sp_restricted = false;
+			callback(false);
+			return;
+		}
+		frappe.call({
+			method: "avientek.api.quotation_access.check_user_has_sales_person_restriction",
+			async: false,
+			callback: function (r) {
+				_sp_checked = true;
+				_sp_restricted = r.message ? true : false;
+				callback(_sp_restricted);
+			},
+		});
+	}
+
+	function get_permitted_customer_groups(callback) {
+		if (_permitted_customer_groups !== null) {
+			callback(_permitted_customer_groups);
+			return;
+		}
+		frappe.call({
+			method: "avientek.api.quotation_access.get_permitted_customer_groups",
+			async: false,
+			callback: function (r) {
+				_permitted_customer_groups = r.message || [];
+				callback(_permitted_customer_groups);
+			},
+		});
+	}
+
+	function get_permitted_supplier_groups(callback) {
+		if (_permitted_supplier_groups !== null) {
+			callback(_permitted_supplier_groups);
+			return;
+		}
+		frappe.call({
+			method: "avientek.api.quotation_access.get_permitted_supplier_groups",
+			async: false,
+			callback: function (r) {
+				_permitted_supplier_groups = r.message || [];
+				callback(_permitted_supplier_groups);
+			},
+		});
+	}
+
+	function get_permitted_sales_persons(callback) {
+		if (_permitted_sales_persons !== null) {
+			callback(_permitted_sales_persons);
+			return;
+		}
+		frappe.call({
+			method: "avientek.api.quotation_access.get_permitted_sales_persons",
+			async: false,
+			callback: function (r) {
+				_permitted_sales_persons = r.message || [];
+				callback(_permitted_sales_persons);
 			},
 		});
 	}
@@ -313,6 +436,63 @@
 					}
 				});
 			}
+
+			// Filter Customer Group dropdown
+			let cg_filter = qr.filters.find(function (f) {
+				return f.df && f.df.fieldname === "customer_group" &&
+					f.df.fieldtype === "Link" &&
+					f.df.options === "Customer Group";
+			});
+
+			if (cg_filter) {
+				get_permitted_customer_groups(function (customer_groups) {
+					if (!customer_groups || !customer_groups.length) return;
+					cg_filter.df.get_query = function () {
+						return { filters: { name: ["in", customer_groups] } };
+					};
+					if (customer_groups.length === 1 && !cg_filter.get_value()) {
+						cg_filter.set_value(customer_groups[0]);
+					}
+				});
+			}
+
+			// Filter Supplier Group dropdown
+			let sg_filter = qr.filters.find(function (f) {
+				return f.df && f.df.fieldname === "supplier_group" &&
+					f.df.fieldtype === "Link" &&
+					f.df.options === "Supplier Group";
+			});
+
+			if (sg_filter) {
+				get_permitted_supplier_groups(function (supplier_groups) {
+					if (!supplier_groups || !supplier_groups.length) return;
+					sg_filter.df.get_query = function () {
+						return { filters: { name: ["in", supplier_groups] } };
+					};
+					if (supplier_groups.length === 1 && !sg_filter.get_value()) {
+						sg_filter.set_value(supplier_groups[0]);
+					}
+				});
+			}
+
+			// Filter Sales Person dropdown
+			let sp_filter = qr.filters.find(function (f) {
+				return f.df && f.df.fieldname === "sales_person" &&
+					f.df.fieldtype === "Link" &&
+					f.df.options === "Sales Person";
+			});
+
+			if (sp_filter) {
+				get_permitted_sales_persons(function (sales_persons) {
+					if (!sales_persons || !sales_persons.length) return;
+					sp_filter.df.get_query = function () {
+						return { filters: { name: ["in", sales_persons] } };
+					};
+					if (sales_persons.length === 1 && !sp_filter.get_value()) {
+						sp_filter.set_value(sales_persons[0]);
+					}
+				});
+			}
 		}, 500);
 	}
 
@@ -323,6 +503,9 @@
 
 		let has_brand = false;
 		let has_ig = false;
+		let has_cg = false;
+		let has_sg = false;
+		let has_sp = false;
 
 		check_brand_restriction(function (is_restricted) {
 			has_brand = is_restricted;
@@ -332,7 +515,19 @@
 			has_ig = is_restricted;
 		});
 
-		if (has_brand || has_ig) {
+		check_customer_group_restriction(function (is_restricted) {
+			has_cg = is_restricted;
+		});
+
+		check_supplier_group_restriction(function (is_restricted) {
+			has_sg = is_restricted;
+		});
+
+		check_sales_person_restriction(function (is_restricted) {
+			has_sp = is_restricted;
+		});
+
+		if (has_brand || has_ig || has_cg || has_sg || has_sp) {
 			setup_route_intercept();
 			setup_report_filters();
 		}
