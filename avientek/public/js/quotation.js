@@ -48,16 +48,10 @@ frappe.ui.form.on('Quotation', {
             }
 
             frappe.call({
-                method: 'frappe.client.get_list',
-                args: {
-                    doctype: 'Sales Invoice',
-                    filters: { customer: frm.doc.party_name, company: company, docstatus: 1 },
-                    fields: ['outstanding_amount']
-                },
+                method: 'avientek.events.quotation.get_customer_outstanding',
+                args: { customer: frm.doc.party_name, company: company },
                 callback(r) {
-                    let outstanding = 0;
-                    (r.message || []).forEach(inv => { outstanding += flt(inv.outstanding_amount); });
-                    frm.set_value('custom_outstanding', outstanding);
+                    frm.set_value('custom_outstanding', flt(r.message));
                 }
             });
 
@@ -90,16 +84,10 @@ frappe.ui.form.on('Quotation', {
             frm.set_value('credit_limit', credit_limit);
 
             frappe.call({
-                method: 'frappe.client.get_list',
-                args: {
-                    doctype: 'Sales Invoice',
-                    filters: { customer: frm.doc.customer, company: company, docstatus: 1 },
-                    fields: ['outstanding_amount']
-                },
+                method: 'avientek.events.quotation.get_customer_outstanding',
+                args: { customer: frm.doc.customer, company: company },
                 callback(r) {
-                    let outstanding = 0;
-                    (r.message || []).forEach(inv => { outstanding += flt(inv.outstanding_amount); });
-                    frm.set_value('outstanding_credit', outstanding);
+                    frm.set_value('outstanding_credit', flt(r.message));
                 }
             });
 

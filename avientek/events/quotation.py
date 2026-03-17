@@ -7,6 +7,17 @@ from decimal import Decimal, ROUND_HALF_UP
 
 
 @frappe.whitelist()
+def get_customer_outstanding(customer, company):
+    """Get total outstanding from Sales Invoices for a customer (bypasses doctype permission)."""
+    outstanding = frappe.db.sql("""
+        SELECT IFNULL(SUM(outstanding_amount), 0) as total
+        FROM `tabSales Invoice`
+        WHERE customer=%s AND company=%s AND docstatus=1
+    """, (customer, company), as_dict=True)
+    return flt(outstanding[0].total) if outstanding else 0
+
+
+@frappe.whitelist()
 def apply_discount(doc, discount_amount):
     quotation = frappe.parse_json(doc)
 
