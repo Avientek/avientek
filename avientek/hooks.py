@@ -346,10 +346,9 @@ override_doctype_dashboards = {
 # has_permission = {
 # "Event": "frappe.desk.doctype.event.event.has_permission",
 # }
-# permission_query_conditions = {
-#     "Project Quotation": "avientek.events.sales_person_permission.project_quotation_pqc",
-#     "Quotation": "avientek.events.sales_person_permission.quotation_pqc",
-# }
+permission_query_conditions = {
+    "Quotation": "avientek.api.quotation_access.quotation_permission_query",
+}
 
 # has_permission = {
 #     "Project Quotation": "avientek.events.sales_person_permission.project_quotation_has_perm",
