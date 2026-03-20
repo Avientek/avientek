@@ -1162,79 +1162,47 @@ function update_items_shipping_percent(frm) {
  * Shows either Amount field or Percentage field, hides the other.
  */
 /**
- * Mutual exclusion (Option A + C): Discount & Incentive vs Additional Discount.
+ * Discount co-existence handler.
  *
- * Option A: Lock one section when the other is active (read-only + hint).
- * Option C: Auto-clear the OTHER section with a warning when the user enters
- *           a value in the currently-locked section (e.g. if user changes
- *           Discount & Incentive after Additional Discount was set, the
- *           Additional Discount is auto-cleared to 0 with a warning).
+ * Both Discount & Incentive and Additional Discount can work together.
+ * One-directional auto-clear: entering Disc & Inc clears existing Addl Discount
+ * (since item prices change, the old Addl Discount would be stale).
+ * But entering Addl Discount works ON TOP of existing Disc & Inc (no clearing).
  *
  * @param {string} [source] - Which section triggered the call:
  *   "disc_inc" = Discount & Incentive changed
  *   "addl"     = Additional Discount changed
- *   undefined  = refresh / init (no auto-clear, just enforce state)
+ *   undefined  = refresh / init
  */
 function enforce_discount_mutual_exclusion(frm, source) {
     let has_disc_inc = flt(frm.doc.custom_discount_amount_value) > 0 || flt(frm.doc.custom_discount_) > 0;
     let has_addl = flt(frm.doc.additional_discount_percentage) > 0 || flt(frm.doc.discount_amount) > 0;
 
-    // Option C: Auto-clear the other section when user enters a conflicting value
+    // One-directional auto-clear: Disc & Inc changes invalidate Addl Discount
+    // (because item selling prices change, the old addl discount % is stale)
     if (source === "disc_inc" && has_disc_inc && has_addl) {
-        // User changed Discount & Incentive while Additional Discount was set → clear Additional Discount
         frm.doc.additional_discount_percentage = 0;
         frm.doc.discount_amount = 0;
         frm.doc.base_discount_amount = 0;
-        // Reset per-row addl discount
         (frm.doc.items || []).forEach(row => { row.custom_addl_discount_amount = 0; });
         frm.refresh_fields();
         frappe.show_alert({
-            message: __("Additional Discount has been reset because Discount & Incentive was changed"),
+            message: __("Additional Discount has been reset because Discount & Incentive was changed. You can re-enter it after applying the discount."),
             indicator: "orange"
-        }, 5);
-        has_addl = false;
-    } else if (source === "addl" && has_addl && has_disc_inc) {
-        // User changed Additional Discount while Discount & Incentive was set → clear Discount & Incentive
-        frm.doc.custom_discount_amount_value = 0;
-        frm.doc.custom_discount_ = 0;
-        // Reset per-row disc & inc amounts
-        (frm.doc.items || []).forEach(row => {
-            row.custom_discount_amount_value = 0;
-            row.custom_discount_amount_qty = 0;
-        });
-        frm._discount_applied = false;
-        frm.refresh_fields();
-        frappe.show_alert({
-            message: __("Discount & Incentive has been reset because Additional Discount was changed"),
-            indicator: "orange"
-        }, 5);
-        has_disc_inc = false;
-        // Recalculate items from scratch since discount was removed
-        run_full_calculation_preview(frm);
+        }, 7);
     }
 
-    // Option A: Lock the inactive section
-    if (has_disc_inc && !has_addl) {
-        // Discount & Incentive is active → lock Additional Discount
-        frm.set_df_property("additional_discount_percentage", "read_only", 1);
-        frm.set_df_property("discount_amount", "read_only", 1);
+    // Both sections always remain editable — no locking
+    frm.set_df_property("additional_discount_percentage", "read_only", 0);
+    frm.set_df_property("discount_amount", "read_only", 0);
+    frm.set_df_property("additional_discount_percentage", "description", "");
+    frm.set_df_property("custom_discount_amount_value", "description", "");
+    toggle_discount_fields(frm);
+
+    // Show info when both are active
+    if (has_disc_inc && has_addl) {
         frm.set_df_property("additional_discount_percentage", "description",
-            "<span style='color:orange'>Clear Discount &amp; Incentive first, or entering a value will auto-clear it</span>");
-    } else if (has_addl && !has_disc_inc) {
-        // Additional Discount is active → lock Discount & Incentive
-        frm.set_df_property("custom_discount_amount_value", "read_only", 1);
-        frm.set_df_property("custom_discount_", "read_only", 1);
-        frm.set_df_property("custom_apply_discount", "hidden", 1);
-        frm.set_df_property("custom_discount_amount_value", "description",
-            "<span style='color:orange'>Clear Additional Discount first, or entering a value will auto-clear it</span>");
-    } else {
-        // Neither or both cleared — unlock both
-        frm.set_df_property("additional_discount_percentage", "read_only", 0);
-        frm.set_df_property("discount_amount", "read_only", 0);
-        frm.set_df_property("additional_discount_percentage", "description", "");
-        frm.set_df_property("custom_discount_amount_value", "description", "");
-        // Restore discount field editability based on type
-        toggle_discount_fields(frm);
+            "<span style='color:green'>Applied on top of Discount &amp; Incentive</span>");
     }
 }
 
