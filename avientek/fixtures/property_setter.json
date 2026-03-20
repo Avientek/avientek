@@ -215,7 +215,7 @@
   "doctype_or_field": "DocType",
   "field_name": null,
   "is_system_generated": 1,
-  "modified": "2026-03-20 08:30:37.577776",
+  "modified": "2026-03-20 08:40:59.299541",
   "module": null,
   "name": "Item-main-search_fields",
   "property": "search_fields",
