@@ -134,11 +134,23 @@ frappe.ui.form.on('Quotation', {
 
     // When Additional Discount changes, enforce mutual exclusion + instant preview
     additional_discount_percentage(frm) {
+        // If user cleared percentage to 0, also clear amount to break circular dependency
+        if (flt(frm.doc.additional_discount_percentage) === 0) {
+            frm.doc.discount_amount = 0;
+            frm.doc.base_discount_amount = 0;
+            (frm.doc.items || []).forEach(row => { row.custom_addl_discount_amount = 0; });
+        }
         enforce_discount_mutual_exclusion(frm, "addl");
         run_full_calculation_preview(frm);
     },
 
     discount_amount(frm) {
+        // If user cleared amount to 0, also clear percentage to break circular dependency
+        if (flt(frm.doc.discount_amount) === 0) {
+            frm.doc.additional_discount_percentage = 0;
+            frm.doc.base_discount_amount = 0;
+            (frm.doc.items || []).forEach(row => { row.custom_addl_discount_amount = 0; });
+        }
         enforce_discount_mutual_exclusion(frm, "addl");
         run_full_calculation_preview(frm);
     },
