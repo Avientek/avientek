@@ -496,6 +496,46 @@
 		}, 500);
 	}
 
+	// ── 4. Block Export for restricted users on restricted doctypes ──
+
+	function setup_export_block() {
+		// Hide Export from Actions menu on list/report views of restricted doctypes
+		$(document).on("page-change", block_export_on_page);
+		setTimeout(block_export_on_page, 1000);
+	}
+
+	function block_export_on_page() {
+		let route = frappe.get_route();
+		if (!route || route.length < 2) return;
+
+		let slug = route[0] === "List" ? route[1] : route[0];
+		// Check if this is a list/report view for a restricted doctype
+		let dt = null;
+		RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
+			if (frappe.router.slug(d) === slug || d === slug) {
+				dt = d;
+			}
+		});
+		if (!dt) return;
+
+		// Wait for page to render, then hide Export option
+		setTimeout(function () {
+			// List view: hide Export from Actions dropdown
+			$('.list-header-actions .dropdown-menu a:contains("Export")').hide();
+			// Also override the export function to show a warning
+			if (cur_list && cur_list.page) {
+				let orig_export = cur_list.export_report;
+				cur_list.export_report = function () {
+					frappe.msgprint({
+						title: __("Export Restricted"),
+						message: __("You cannot export data from {0} because you have restricted access. Contact your administrator.", [__(dt)]),
+						indicator: "red",
+					});
+				};
+			}
+		}, 500);
+	}
+
 	// ── Initialize ──
 
 	$(document).ready(function () {
@@ -530,6 +570,7 @@
 		if (has_brand || has_ig || has_cg || has_sg || has_sp) {
 			setup_route_intercept();
 			setup_report_filters();
+			setup_export_block();
 		}
 	});
 

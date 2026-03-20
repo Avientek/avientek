@@ -194,7 +194,21 @@ def get_permitted_doc_preview(doctype, docname):
 	if not child_dt and not is_parent_brand and not is_parent_item_group and not has_customer_group and not has_supplier_group and not has_sales_team:
 		return {"full_access": True}
 
-	doc = frappe.get_doc(doctype, docname)
+	# Verify user has basic read permission on the doctype
+	if not frappe.has_permission(doctype, "read"):
+		return {
+			"full_access": False,
+			"restricted": True,
+			"message": _("You do not have read permission for {0}").format(_(doctype)),
+		}
+
+	# Use ignore_permissions to bypass Frappe's built-in child-table permission
+	# checks (Brand/Item Group on child items). We do our own filtering below.
+	try:
+		frappe.flags.ignore_permissions = True
+		doc = frappe.get_doc(doctype, docname)
+	finally:
+		frappe.flags.ignore_permissions = False
 
 	# Check document-level restrictions (Customer Group, Supplier Group, Sales Person)
 	blocked = []
