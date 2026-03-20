@@ -10716,6 +10716,20 @@
   "width": null
  },
  {
+  "doctype": "Custom Field",
+  "dt": "Quotation Item",
+  "fieldname": "custom_addl_discount_amount",
+  "fieldtype": "Currency",
+  "label": "Additional Discount Amount",
+  "insert_after": "custom_discount_amount_qty",
+  "read_only": 1,
+  "print_hide": 0,
+  "bold": 0,
+  "name": "Quotation Item-custom_addl_discount_amount",
+  "module": "Avientek",
+  "no_copy": 1
+ },
+ {
   "allow_in_quick_entry": 0,
   "allow_on_submit": 0,
   "bold": 0,

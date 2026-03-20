@@ -350,14 +350,51 @@ frappe.ui.form.on('Quotation', {
             return { filters: { currency: frm.doc.currency } };
         });
 
-        // Filter customers by the selected company
+        // Filter customers by company + permitted Customer Groups
         frm.set_query('party_name', function () {
-            if (frm.doc.quotation_to === 'Customer' && frm.doc.company) {
-                return {
-                    filters: { company: frm.doc.company }
-                };
+            if (frm.doc.quotation_to !== 'Customer') return;
+            let filters = {};
+            if (frm.doc.company) filters.company = frm.doc.company;
+            if (frm._permitted_customer_groups && frm._permitted_customer_groups.length) {
+                filters.customer_group = ["in", frm._permitted_customer_groups];
+            }
+            return { filters: filters };
+        });
+
+        // Filter items by permitted Brands and Item Groups
+        frm.set_query('item_code', 'items', function () {
+            let filters = {};
+            if (frm._permitted_brands && frm._permitted_brands.length) {
+                filters.brand = ["in", frm._permitted_brands];
+            }
+            if (frm._permitted_item_groups && frm._permitted_item_groups.length) {
+                filters.item_group = ["in", frm._permitted_item_groups];
+            }
+            if (Object.keys(filters).length) return { filters: filters };
+        });
+
+        // Filter Sales Person by permitted values
+        frm.set_query('sales_person', 'sales_team', function () {
+            if (frm._permitted_sales_persons && frm._permitted_sales_persons.length) {
+                return { filters: { name: ["in", frm._permitted_sales_persons] } };
             }
         });
+
+        // Fetch user permission restrictions once (cached in frm)
+        if (!frm._perms_loaded) {
+            frm._perms_loaded = true;
+            frappe.call({
+                method: "avientek.api.quotation_access.get_user_restrictions",
+                async: true,
+                callback: function (r) {
+                    let d = r.message || {};
+                    frm._permitted_brands = d.brands || [];
+                    frm._permitted_item_groups = d.item_groups || [];
+                    frm._permitted_customer_groups = d.customer_groups || [];
+                    frm._permitted_sales_persons = d.sales_persons || [];
+                }
+            });
+        }
 
         // Toggle discount fields based on type selection
         toggle_discount_fields(frm);
@@ -832,8 +869,10 @@ function update_doc_totals_preview(frm) {
         let qty = flt(row.qty) || 1;
         let rate = flt(row.rate);
         let amount = flt(row.amount);
-        let item_addl_disc = (addl_discount && item_amount_sum)
-            ? flt(addl_discount * amount / item_amount_sum, 4) : 0;
+        let selling = flt(row.custom_selling_price);
+        let item_addl_disc = (addl_discount && totals.selling)
+            ? flt(addl_discount * selling / totals.selling, 4) : 0;
+        row.custom_addl_discount_amount = item_addl_disc;
         let net_amount_val = flt(amount - item_addl_disc, 4);
         let net_rate_val = qty ? flt(net_amount_val / qty, 4) : 0;
 

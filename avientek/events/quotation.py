@@ -481,6 +481,16 @@ def recalc_doc_totals(doc):
         if ts:
             doc.additional_discount_percentage = flt(addl_discount / ts * 100, 4)
 
+    # ── Pro-rata distribution of Additional Discount to each item row ──
+    # Allocate based on each item's share of total selling value.
+    for it in doc.items:
+        if addl_discount > 0 and ts > 0:
+            item_selling = _to_flt(it.custom_selling_price)
+            share = item_selling / ts if ts else 0
+            it.custom_addl_discount_amount = flt(addl_discount * share, 4)
+        else:
+            it.custom_addl_discount_amount = 0
+
     effective_selling = flt(ts - addl_discount, 4)
     margin = flt(effective_selling - tc, 4)
     margin_pct = flt(margin / effective_selling * 100, 4) if effective_selling else 0

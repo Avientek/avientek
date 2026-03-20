@@ -674,3 +674,20 @@ def get_permitted_sales_persons():
 	if user == "Administrator":
 		return []
 	return _get_user_sales_persons(user)
+
+
+@frappe.whitelist()
+def get_user_restrictions():
+	"""Return all restriction lists for the current user in a single call.
+	Used by form-level set_query filters to restrict link field options.
+	"""
+	user = frappe.session.user
+	if user == "Administrator":
+		return {}
+	return {
+		"brands": _get_user_brands(user),
+		"item_groups": _get_user_item_groups(user),
+		"customer_groups": _get_user_customer_groups(user),
+		"supplier_groups": _get_user_supplier_groups(user),
+		"sales_persons": _get_user_sales_persons(user),
+	}
