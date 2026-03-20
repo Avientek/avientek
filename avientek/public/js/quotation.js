@@ -350,15 +350,20 @@ frappe.ui.form.on('Quotation', {
             return { filters: { currency: frm.doc.currency } };
         });
 
-        // Filter customers by company + permitted Customer Groups
+        // Filter customers by company + Customer Group + Sales Person
+        // Uses server-side query to filter by Sales Team child table
         frm.set_query('party_name', function () {
             if (frm.doc.quotation_to !== 'Customer') return;
-            let filters = {};
-            if (frm.doc.company) filters.company = frm.doc.company;
-            if (frm._permitted_customer_groups && frm._permitted_customer_groups.length) {
-                filters.customer_group = ["in", frm._permitted_customer_groups];
+            if ((frm._permitted_customer_groups && frm._permitted_customer_groups.length) ||
+                (frm._permitted_sales_persons && frm._permitted_sales_persons.length)) {
+                return {
+                    query: "avientek.api.quotation_access.get_filtered_customers",
+                    filters: { company: frm.doc.company || "" }
+                };
             }
-            return { filters: filters };
+            if (frm.doc.company) {
+                return { filters: { company: frm.doc.company } };
+            }
         });
 
         // Filter items by permitted Brands and Item Groups

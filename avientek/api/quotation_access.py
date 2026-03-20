@@ -691,3 +691,56 @@ def get_user_restrictions():
 		"supplier_groups": _get_user_supplier_groups(user),
 		"sales_persons": _get_user_sales_persons(user),
 	}
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_filtered_customers(doctype, txt, searchfield, start, page_len, filters):
+	"""Return customers filtered by Customer Group + Sales Person restrictions.
+
+	Customers must satisfy BOTH:
+	  - Customer Group in user's permitted groups (if restricted)
+	  - Sales Team child table has at least one permitted Sales Person (if restricted)
+	"""
+	user = frappe.session.user
+	cg_perms = _get_user_customer_groups(user)
+	sp_perms = _get_user_sales_persons(user)
+	company = filters.get("company") if isinstance(filters, dict) else None
+
+	conditions = []
+	values = {}
+
+	if txt:
+		conditions.append(
+			"(c.name LIKE %(txt)s OR c.customer_name LIKE %(txt)s)"
+		)
+		values["txt"] = f"%{txt}%"
+
+	if company:
+		conditions.append("c.company = %(company)s")
+		values["company"] = company
+
+	if cg_perms:
+		cg_list = ", ".join(frappe.db.escape(cg) for cg in cg_perms)
+		conditions.append(f"c.customer_group IN ({cg_list})")
+
+	if sp_perms:
+		sp_list = ", ".join(frappe.db.escape(sp) for sp in sp_perms)
+		conditions.append(
+			f"EXISTS (SELECT 1 FROM `tabSales Team` st "
+			f"WHERE st.parent = c.name AND st.parenttype = 'Customer' "
+			f"AND st.sales_person IN ({sp_list}))"
+		)
+
+	where = " AND ".join(conditions) if conditions else "1=1"
+	values["start"] = int(start)
+	values["page_len"] = int(page_len)
+
+	return frappe.db.sql(
+		f"""SELECT c.name, c.customer_name, c.customer_group
+		FROM `tabCustomer` c
+		WHERE {where} AND c.disabled = 0
+		ORDER BY c.customer_name
+		LIMIT %(start)s, %(page_len)s""",
+		values,
+	)
