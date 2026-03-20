@@ -122,12 +122,25 @@ frappe.ui.form.on('Quotation', {
         // Mark discount as not applied when value changes
         frm._discount_applied = false;
         toggle_apply_discount_button(frm);
+        enforce_discount_mutual_exclusion(frm);
     },
 
     custom_discount_(frm) {
         // Mark discount as not applied when percentage changes
         frm._discount_applied = false;
         toggle_apply_discount_button(frm);
+        enforce_discount_mutual_exclusion(frm);
+    },
+
+    // When Additional Discount changes, enforce mutual exclusion + instant preview
+    additional_discount_percentage(frm) {
+        enforce_discount_mutual_exclusion(frm);
+        run_full_calculation_preview(frm);
+    },
+
+    discount_amount(frm) {
+        enforce_discount_mutual_exclusion(frm);
+        run_full_calculation_preview(frm);
     },
 
     // ── Discount (instant client-side) ─────────────────────
@@ -404,6 +417,9 @@ frappe.ui.form.on('Quotation', {
         // Toggle discount fields based on type selection
         toggle_discount_fields(frm);
         toggle_apply_discount_button(frm);
+
+        // Mutual exclusion: Discount & Incentive vs Additional Discount
+        enforce_discount_mutual_exclusion(frm);
 
         // Toggle incentive fields based on type selection
         toggle_incentive_fields(frm);
@@ -1133,6 +1149,39 @@ function update_items_shipping_percent(frm) {
  * Toggle visibility of discount fields based on discount type selection.
  * Shows either Amount field or Percentage field, hides the other.
  */
+/**
+ * Mutual exclusion: Discount & Incentive vs Additional Discount.
+ * If one has a value, the other is locked (read-only) and shows a hint.
+ * Clearing the active one unlocks the other.
+ */
+function enforce_discount_mutual_exclusion(frm) {
+    let has_disc_inc = flt(frm.doc.custom_discount_amount_value) > 0 || flt(frm.doc.custom_discount_) > 0;
+    let has_addl = flt(frm.doc.additional_discount_percentage) > 0 || flt(frm.doc.discount_amount) > 0;
+
+    if (has_disc_inc && !has_addl) {
+        // Discount & Incentive is active → lock Additional Discount
+        frm.set_df_property("additional_discount_percentage", "read_only", 1);
+        frm.set_df_property("discount_amount", "read_only", 1);
+        frm.set_df_property("additional_discount_percentage", "description",
+            "<span style='color:orange'>Clear Discount &amp; Incentive first to use Additional Discount</span>");
+    } else if (has_addl && !has_disc_inc) {
+        // Additional Discount is active → lock Discount & Incentive
+        frm.set_df_property("custom_discount_amount_value", "read_only", 1);
+        frm.set_df_property("custom_discount_", "read_only", 1);
+        frm.set_df_property("custom_apply_discount", "hidden", 1);
+        frm.set_df_property("custom_discount_amount_value", "description",
+            "<span style='color:orange'>Clear Additional Discount first to use Discount &amp; Incentive</span>");
+    } else {
+        // Neither or both cleared — unlock both
+        frm.set_df_property("additional_discount_percentage", "read_only", 0);
+        frm.set_df_property("discount_amount", "read_only", 0);
+        frm.set_df_property("additional_discount_percentage", "description", "");
+        frm.set_df_property("custom_discount_amount_value", "description", "");
+        // Restore discount field editability based on type
+        toggle_discount_fields(frm);
+    }
+}
+
 function toggle_discount_fields(frm) {
     let discount_type = frm.doc.custom_discount_type || "Amount";
 
