@@ -783,11 +783,20 @@ def restricted_export_query():
 
 
 @frappe.whitelist()
-def restricted_download_template():
+def restricted_download_template(
+	doctype=None, export_fields=None, export_records=None,
+	export_filters=None, file_type="CSV",
+):
 	"""Override frappe.core.doctype.data_import.data_import.download_template.
 
-	Let it through — permission_query_conditions in hooks.py automatically
+	Pass through — permission_query_conditions in hooks.py automatically
 	filters the exported data to only include records the user has access to.
 	"""
 	from frappe.core.doctype.data_import.data_import import download_template as original_download
-	return original_download()
+	return original_download(
+		doctype=doctype,
+		export_fields=export_fields,
+		export_records=export_records,
+		export_filters=export_filters,
+		file_type=file_type,
+	)
