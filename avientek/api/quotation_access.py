@@ -758,3 +758,47 @@ def get_filtered_customers(doctype, txt, searchfield, start, page_len, filters):
 		LIMIT %(start)s, %(page_len)s""",
 		values,
 	)
+
+
+# ── Export restriction ──
+
+# All doctypes where export should be blocked for restricted users
+EXPORT_RESTRICTED_DOCTYPES = set(
+	list(BRAND_DOCTYPES.keys()) + BRAND_PARENT_DOCTYPES +
+	list(ITEM_GROUP_DOCTYPES.keys()) + ITEM_GROUP_PARENT_DOCTYPES +
+	CUSTOMER_GROUP_PARENT_DOCTYPES + SUPPLIER_GROUP_PARENT_DOCTYPES +
+	SALES_PERSON_DOCTYPES
+)
+
+
+@frappe.whitelist()
+def restricted_export_query():
+	"""Override frappe.desk.reportview.export_query to block export
+	for users with Brand/Item Group/Customer Group/Supplier Group/Sales Person
+	restrictions on restricted doctypes.
+	"""
+	from frappe.desk.reportview import export_query as original_export
+
+	user = frappe.session.user
+	if user == "Administrator":
+		return original_export()
+
+	# Get the doctype being exported from form_dict
+	doctype = frappe.form_dict.get("doctype")
+
+	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
+		# Check if user has ANY restriction
+		has_restriction = (
+			_get_user_brands(user)
+			or _get_user_item_groups(user)
+			or _get_user_customer_groups(user)
+			or _get_user_supplier_groups(user)
+			or _get_user_sales_persons(user)
+		)
+		if has_restriction:
+			frappe.throw(
+				_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
+				title=_("Export Restricted"),
+			)
+
+	return original_export()
