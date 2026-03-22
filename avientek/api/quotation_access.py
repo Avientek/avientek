@@ -802,3 +802,33 @@ def restricted_export_query():
 			)
 
 	return original_export()
+
+
+@frappe.whitelist()
+def restricted_download_template():
+	"""Override frappe.core.doctype.data_import.data_import.download_template
+	to block data export for restricted users on restricted doctypes.
+	"""
+	from frappe.core.doctype.data_import.data_import import download_template as original_download
+
+	user = frappe.session.user
+	if user == "Administrator":
+		return original_download()
+
+	doctype = frappe.form_dict.get("doctype")
+
+	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
+		has_restriction = (
+			_get_user_brands(user)
+			or _get_user_item_groups(user)
+			or _get_user_customer_groups(user)
+			or _get_user_supplier_groups(user)
+			or _get_user_sales_persons(user)
+		)
+		if has_restriction:
+			frappe.throw(
+				_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
+				title=_("Export Restricted"),
+			)
+
+	return original_download()
