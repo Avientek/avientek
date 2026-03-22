@@ -119,17 +119,15 @@ frappe.ui.form.on('Quotation', {
     },
 
     custom_discount_amount_value(frm) {
-        // Mark discount as not applied when value changes
+        if (frm._applying_discount) return; // skip during Apply Discount
         frm._discount_applied = false;
         toggle_apply_discount_button(frm);
-        enforce_discount_mutual_exclusion(frm, "disc_inc");
     },
 
     custom_discount_(frm) {
-        // Mark discount as not applied when percentage changes
+        if (frm._applying_discount) return; // skip during Apply Discount
         frm._discount_applied = false;
         toggle_apply_discount_button(frm);
-        enforce_discount_mutual_exclusion(frm, "disc_inc");
     },
 
     // When Additional Discount changes, enforce mutual exclusion + instant preview
@@ -165,6 +163,13 @@ frappe.ui.form.on('Quotation', {
             frappe.msgprint(__("No items available to apply discount"));
             return;
         }
+
+        // Auto-clear Additional Discount when applying Disc & Inc (Option C)
+        enforce_discount_mutual_exclusion(frm, "disc_inc");
+
+        // Guard flag: prevent custom_discount_amount_value handler from
+        // resetting _discount_applied during set_value calls below
+        frm._applying_discount = true;
 
         // Reset all items to pre-discount selling prices first
         items.forEach(row => {
@@ -236,7 +241,8 @@ frappe.ui.form.on('Quotation', {
         frm.refresh_field("items");
         update_doc_totals_preview(frm);
 
-        // Mark discount as applied and hide button
+        // Clear guard flag and mark discount as applied
+        frm._applying_discount = false;
         frm._discount_applied = true;
         toggle_apply_discount_button(frm);
 
