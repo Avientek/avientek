@@ -792,10 +792,13 @@ def restricted_export_query():
 				or _get_user_sales_persons(user)
 			)
 			if has_restriction:
-				frappe.throw(
+				frappe.respond_as_web_page(
+					_("Export Restricted"),
 					_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
-					title=_("Export Restricted"),
+					http_status_code=403,
+					indicator_color="red",
 				)
+				return
 
 	return original_export()
 
@@ -822,10 +825,13 @@ def restricted_download_template(
 			or _get_user_sales_persons(user)
 		)
 		if has_restriction:
-			frappe.throw(
+			frappe.respond_as_web_page(
+				_("Export Restricted"),
 				_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
-				title=_("Export Restricted"),
+				http_status_code=403,
+				indicator_color="red",
 			)
+			return
 
 	return original_download(
 		doctype=doctype,
