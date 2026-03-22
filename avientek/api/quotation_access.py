@@ -773,62 +773,21 @@ EXPORT_RESTRICTED_DOCTYPES = set(
 
 @frappe.whitelist()
 def restricted_export_query():
-	"""Override frappe.desk.reportview.export_query to block export
-	for users with Brand/Item Group/Customer Group/Supplier Group/Sales Person
-	restrictions on restricted doctypes.
+	"""Override frappe.desk.reportview.export_query.
+
+	Let it through — permission_query_conditions in hooks.py automatically
+	filters the exported data to only include records the user has access to.
 	"""
 	from frappe.desk.reportview import export_query as original_export
-
-	user = frappe.session.user
-	if user == "Administrator":
-		return original_export()
-
-	# Get the doctype being exported from form_dict
-	doctype = frappe.form_dict.get("doctype")
-
-	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-		# Check if user has ANY restriction
-		has_restriction = (
-			_get_user_brands(user)
-			or _get_user_item_groups(user)
-			or _get_user_customer_groups(user)
-			or _get_user_supplier_groups(user)
-			or _get_user_sales_persons(user)
-		)
-		if has_restriction:
-			frappe.throw(
-				_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
-				title=_("Export Restricted"),
-			)
-
 	return original_export()
 
 
 @frappe.whitelist()
 def restricted_download_template():
-	"""Override frappe.core.doctype.data_import.data_import.download_template
-	to block data export for restricted users on restricted doctypes.
+	"""Override frappe.core.doctype.data_import.data_import.download_template.
+
+	Let it through — permission_query_conditions in hooks.py automatically
+	filters the exported data to only include records the user has access to.
 	"""
 	from frappe.core.doctype.data_import.data_import import download_template as original_download
-
-	user = frappe.session.user
-	if user == "Administrator":
-		return original_download()
-
-	doctype = frappe.form_dict.get("doctype")
-
-	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-		has_restriction = (
-			_get_user_brands(user)
-			or _get_user_item_groups(user)
-			or _get_user_customer_groups(user)
-			or _get_user_supplier_groups(user)
-			or _get_user_sales_persons(user)
-		)
-		if has_restriction:
-			frappe.throw(
-				_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
-				title=_("Export Restricted"),
-			)
-
 	return original_download()
