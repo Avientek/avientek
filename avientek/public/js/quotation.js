@@ -164,8 +164,12 @@ frappe.ui.form.on('Quotation', {
             return;
         }
 
-        // Auto-clear Additional Discount when applying Disc & Inc (Option C)
-        enforce_discount_mutual_exclusion(frm, "disc_inc");
+        // Auto-clear Additional Discount only when applying a POSITIVE Disc & Inc value
+        // (clearing Disc & Inc to 0 should NOT touch Additional Discount)
+        let has_positive_disc = flt(frm.doc.custom_discount_amount_value) > 0 || flt(frm.doc.custom_discount_) > 0;
+        if (has_positive_disc) {
+            enforce_discount_mutual_exclusion(frm, "disc_inc");
+        }
 
         // Guard flag: prevent custom_discount_amount_value handler from
         // resetting _discount_applied during set_value calls below
@@ -1198,6 +1202,10 @@ function enforce_discount_mutual_exclusion(frm, source) {
         }, 7);
     }
 
+    // Re-read current state (may have been cleared above)
+    has_disc_inc = flt(frm.doc.custom_discount_amount_value) > 0 || flt(frm.doc.custom_discount_) > 0;
+    has_addl = flt(frm.doc.additional_discount_percentage) > 0 || flt(frm.doc.discount_amount) > 0;
+
     // Both sections always remain editable — no locking
     frm.set_df_property("additional_discount_percentage", "read_only", 0);
     frm.set_df_property("discount_amount", "read_only", 0);
@@ -1205,7 +1213,7 @@ function enforce_discount_mutual_exclusion(frm, source) {
     frm.set_df_property("custom_discount_amount_value", "description", "");
     toggle_discount_fields(frm);
 
-    // Show info when both are active
+    // Show hint only when BOTH are actively set
     if (has_disc_inc && has_addl) {
         frm.set_df_property("additional_discount_percentage", "description",
             "<span style='color:green'>Applied on top of Discount &amp; Incentive</span>");
