@@ -775,10 +775,28 @@ EXPORT_RESTRICTED_DOCTYPES = set(
 def restricted_export_query():
 	"""Override frappe.desk.reportview.export_query.
 
-	Let it through — permission_query_conditions in hooks.py automatically
-	filters the exported data to only include records the user has access to.
+	Block export for restricted users on restricted doctypes because Frappe's
+	export includes ALL child rows without child-level filtering.
 	"""
 	from frappe.desk.reportview import export_query as original_export
+
+	user = frappe.session.user
+	if user != "Administrator":
+		doctype = frappe.form_dict.get("doctype")
+		if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
+			has_restriction = (
+				_get_user_brands(user)
+				or _get_user_item_groups(user)
+				or _get_user_customer_groups(user)
+				or _get_user_supplier_groups(user)
+				or _get_user_sales_persons(user)
+			)
+			if has_restriction:
+				frappe.throw(
+					_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
+					title=_("Export Restricted"),
+				)
+
 	return original_export()
 
 
@@ -789,10 +807,26 @@ def restricted_download_template(
 ):
 	"""Override frappe.core.doctype.data_import.data_import.download_template.
 
-	Pass through — permission_query_conditions in hooks.py automatically
-	filters the exported data to only include records the user has access to.
+	Block export for restricted users on restricted doctypes because Frappe's
+	Exporter dumps ALL child rows (e.g. other Sales Persons) without filtering.
 	"""
 	from frappe.core.doctype.data_import.data_import import download_template as original_download
+
+	user = frappe.session.user
+	if user != "Administrator" and doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
+		has_restriction = (
+			_get_user_brands(user)
+			or _get_user_item_groups(user)
+			or _get_user_customer_groups(user)
+			or _get_user_supplier_groups(user)
+			or _get_user_sales_persons(user)
+		)
+		if has_restriction:
+			frappe.throw(
+				_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
+				title=_("Export Restricted"),
+			)
+
 	return original_download(
 		doctype=doctype,
 		export_fields=export_fields,
