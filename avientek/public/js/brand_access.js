@@ -499,9 +499,29 @@
 	// ── 4. Block Export for restricted users on restricted doctypes ──
 
 	function setup_export_block() {
-		// Hide Export from Actions menu on list/report views of restricted doctypes
+		// Override DataExporter to block export before it even calls the server
+		if (frappe.data_import && frappe.data_import.DataExporter) {
+			let OrigExporter = frappe.data_import.DataExporter;
+			frappe.data_import.DataExporter = function (doctype, exporting_for) {
+				if (is_restricted_doctype(doctype)) {
+					frappe.msgprint({
+						title: __("Export Restricted"),
+						message: __("You cannot export {0} data because you have restricted access. Contact your administrator.", [__(doctype)]),
+						indicator: "red",
+					});
+					return { dialog: { show: function () {} } };
+				}
+				return new OrigExporter(doctype, exporting_for);
+			};
+		}
+
+		// Also watch for page changes to hide Export from Actions menu
 		$(document).on("page-change", block_export_on_page);
 		setTimeout(block_export_on_page, 1000);
+	}
+
+	function is_restricted_doctype(doctype) {
+		return RESTRICTED_CHILD_DOCTYPES.includes(doctype);
 	}
 
 	function block_export_on_page() {
@@ -509,7 +529,6 @@
 		if (!route || route.length < 2) return;
 
 		let slug = route[0] === "List" ? route[1] : route[0];
-		// Check if this is a list/report view for a restricted doctype
 		let dt = null;
 		RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
 			if (frappe.router.slug(d) === slug || d === slug) {
@@ -518,21 +537,16 @@
 		});
 		if (!dt) return;
 
-		// Wait for page to render, then hide Export option
+		// Wait for page to render, then hide Export from Actions menu
 		setTimeout(function () {
-			// List view: hide Export from Actions dropdown
-			$('.list-header-actions .dropdown-menu a:contains("Export")').hide();
-			// Also override the export function to show a warning
-			if (cur_list && cur_list.page) {
-				let orig_export = cur_list.export_report;
-				cur_list.export_report = function () {
-					frappe.msgprint({
-						title: __("Export Restricted"),
-						message: __("You cannot export data from {0} because you have restricted access. Contact your administrator.", [__(dt)]),
-						indicator: "red",
-					});
-				};
+			let $menu = cur_list && cur_list.page && cur_list.page.menu;
+			if ($menu) {
+				$menu.find('a:contains("Export")').closest("li").hide();
 			}
+			// Also check dropdown in actions
+			$('.actions-btn-group .dropdown-menu a, .list-header-actions .dropdown-menu a')
+				.filter(function () { return $(this).text().trim() === "Export"; })
+				.closest("li").hide();
 		}, 500);
 	}
 
