@@ -537,14 +537,25 @@
 		});
 		if (!dt) return;
 
+		console.log("[ExportMyData] block_export_on_page called for:", dt);
+
 		let attempts = 0;
 		let interval = setInterval(function () {
 			attempts++;
 			if (attempts > 30) {
+				console.log("[ExportMyData] gave up after 30 attempts");
 				clearInterval(interval);
 				return;
 			}
-			if (typeof cur_list === "undefined" || !cur_list || !cur_list.page) return;
+
+			if (typeof cur_list === "undefined" || !cur_list) {
+				if (attempts <= 3) console.log("[ExportMyData] attempt", attempts, "- cur_list not ready");
+				return;
+			}
+			if (!cur_list.page) {
+				if (attempts <= 3) console.log("[ExportMyData] attempt", attempts, "- cur_list.page not ready");
+				return;
+			}
 
 			// Already added?
 			if (cur_list._my_export_added) {
@@ -552,18 +563,48 @@
 				return;
 			}
 
-			// Use cur_list.page.actions (the jQuery element for the dropdown menu)
+			console.log("[ExportMyData] cur_list.page ready. Checking actions...");
+			console.log("[ExportMyData] page.actions:", cur_list.page.actions);
+			console.log("[ExportMyData] page.actions length:", cur_list.page.actions ? cur_list.page.actions.length : "N/A");
+			console.log("[ExportMyData] actions_btn_group:", cur_list.page.actions_btn_group);
+			console.log("[ExportMyData] actions_btn_group hasClass hide:", cur_list.page.actions_btn_group ? cur_list.page.actions_btn_group.hasClass("hide") : "N/A");
+
+			// Try ALL possible dropdown locations
 			let $menu = cur_list.page.actions;
-			if (!$menu || !$menu.length) return;
+			if (!$menu || !$menu.length) {
+				console.log("[ExportMyData] page.actions is empty, trying DOM query...");
+				$menu = $(".page-actions .actions-btn-group .dropdown-menu");
+				console.log("[ExportMyData] DOM query result:", $menu.length);
+			}
+			if (!$menu || !$menu.length) {
+				$menu = $(".page-head .actions-btn-group .dropdown-menu");
+				console.log("[ExportMyData] page-head query result:", $menu.length);
+			}
+
+			// Log all dropdown menus on page
+			let all_dropdowns = $(".dropdown-menu");
+			console.log("[ExportMyData] total dropdown-menus on page:", all_dropdowns.length);
+			all_dropdowns.each(function (i) {
+				let items = $(this).find("a").map(function () { return $(this).text().trim(); }).get();
+				if (items.length > 0 && items.length < 15) {
+					console.log("[ExportMyData] dropdown", i, "items:", items.join(", "));
+				}
+			});
+
+			if (!$menu || !$menu.length) {
+				console.log("[ExportMyData] no menu found, will retry");
+				return;
+			}
 
 			cur_list._my_export_added = true;
+			console.log("[ExportMyData] INJECTING Export My Data into menu with", $menu.find("li").length, "existing items");
 
 			// Hide standard Export if present
 			$menu.find("a").filter(function () {
 				return $(this).text().trim() === "Export";
 			}).closest("li").hide();
 
-			// Append Export My Data to the actions dropdown
+			// Append Export My Data
 			let $li = $('<li><a class="dropdown-item" href="#">'
 				+ __("Export My Data") + "</a></li>");
 			$li.on("click", function (e) {
@@ -573,8 +614,11 @@
 			$menu.append($li);
 
 			// Make sure the Actions button is visible
-			cur_list.page.actions_btn_group.removeClass("hide");
+			if (cur_list.page.actions_btn_group) {
+				cur_list.page.actions_btn_group.removeClass("hide");
+			}
 
+			console.log("[ExportMyData] SUCCESS - Export My Data added");
 			clearInterval(interval);
 		}, 500);
 	}
