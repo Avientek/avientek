@@ -473,6 +473,7 @@ override_whitelisted_methods = {
 	"erpnext.selling.doctype.sales_order.sales_order.make_inter_company_purchase_order": "avientek.events.purchase_order.make_inter_company_purchase_order",
 	"frappe.desk.reportview.export_query": "avientek.api.quotation_access.restricted_export_query",
 	"frappe.core.doctype.data_import.data_import.download_template": "avientek.api.quotation_access.restricted_download_template",
+	"frappe.desk.query_report.run": "avientek.api.quotation_access.restricted_query_report_run",
 }
 # override_whitelisted_methods = {
 # 	# "frappe.desk.doctype.event.event.get_events": "avientek.event.get_events"

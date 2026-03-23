@@ -911,6 +911,72 @@ def restricted_download_template(
 		file_type=file_type,
 	)
 
+# ── Script Report filter injection ──
+
+# Reports that have brand/item_group filters
+BRAND_FILTER_REPORTS = [
+	"Stock Balance", "Stock Ledger", "Stock Projected Qty", "Stock Analytics",
+	"Stock Ageing", "Warehouse Wise Item Balance Age and Value",
+	"Item Price Stock", "Item Prices", "Itemwise Recommended Reorder Level",
+	"Product Bundle Balance", "Sales Person-wise Transaction Summary",
+	"Sales Partner Transaction Summary", "Gross Profit",
+	"Item-wise Sales Register",
+]
+
+
+@frappe.whitelist()
+def restricted_query_report_run(
+	report_name=None, filters=None, page_length=None, are_default_filters=None,
+	is_custom_report=None, custom_columns=None, user=None,
+):
+	"""Override frappe.desk.query_report.run to inject Brand/Item Group filters
+	for restricted users into Script Reports.
+	"""
+	from frappe.desk.query_report import run as original_run
+	import json
+
+	current_user = frappe.session.user
+	if current_user == "Administrator":
+		return original_run(
+			report_name=report_name, filters=filters, page_length=page_length,
+			are_default_filters=are_default_filters, is_custom_report=is_custom_report,
+			custom_columns=custom_columns, user=user,
+		)
+
+	# Parse filters
+	if isinstance(filters, str):
+		try:
+			filters = json.loads(filters)
+		except Exception:
+			filters = {}
+	if not filters:
+		filters = {}
+
+	# Inject brand filter for restricted users
+	brand_perms = _get_user_brands(current_user)
+	if brand_perms and report_name in BRAND_FILTER_REPORTS:
+		if not filters.get("brand"):
+			if len(brand_perms) == 1:
+				filters["brand"] = brand_perms[0]
+			# For multiple brands, the report only supports single brand filter
+			# Force the first one to ensure filtering
+			else:
+				filters["brand"] = brand_perms[0]
+
+	# Inject item_group filter
+	ig_perms = _get_user_item_groups(current_user)
+	if ig_perms and report_name in BRAND_FILTER_REPORTS:
+		if not filters.get("item_group"):
+			if len(ig_perms) == 1:
+				filters["item_group"] = ig_perms[0]
+
+	return original_run(
+		report_name=report_name, filters=json.dumps(filters), page_length=page_length,
+		are_default_filters=are_default_filters, is_custom_report=is_custom_report,
+		custom_columns=custom_columns, user=user,
+	)
+
+
 # ── Monkey-patch: force permission_query_conditions on shared docs ──
 
 _RESTRICTED_DOCTYPES = set(
