@@ -919,6 +919,15 @@ function update_doc_totals_preview(frm) {
         let net_amount_val = flt(amount - item_addl_disc, 4);
         let net_rate_val = qty ? flt(net_amount_val / qty, 4) : 0;
 
+        // Recalculate per-item margin including additional discount
+        if (item_addl_disc > 0) {
+            let effective_selling = flt(selling - item_addl_disc, 4);
+            let item_cost = flt(row.custom_cogs);
+            row.custom_margin_value = flt(effective_selling - item_cost, 4);
+            row.custom_margin_ = effective_selling
+                ? flt((row.custom_margin_value / effective_selling) * 100, 4) : 0;
+        }
+
         row.net_rate       = net_rate_val;
         row.net_amount     = net_amount_val;
         row.base_rate      = flt(rate * conversion_rate, 4);

@@ -411,12 +411,23 @@ def rebuild_brand_summary(doc):
         bk["total_selling"]      += _to_flt(it.custom_selling_price)
         bk["cnt"]                += 1
 
+    # Get additional discount to distribute to brand summary
+    addl_discount = flt(doc.discount_amount) if flt(doc.additional_discount_percentage) > 0 or flt(doc.discount_amount) > 0 else 0
+    total_selling_all = sum(d["total_selling"] for d in buckets.values())
+
     doc.set("custom_quotation_brand_summary", [])
     for brand, d in buckets.items():
         n = d.pop("cnt") or 1
         ts = d["total_selling"]
         tc = d["total_cost"]
-        brand_margin_pct = flt((ts - tc) / ts * 100, 4) if ts else 0
+
+        # Distribute additional discount pro-rata by brand selling share
+        brand_addl = 0
+        if addl_discount > 0 and total_selling_all > 0:
+            brand_addl = flt(addl_discount * ts / total_selling_all, 4)
+
+        effective_ts = flt(ts - brand_addl, 4)
+        brand_margin_pct = flt((effective_ts - tc) / effective_ts * 100, 4) if effective_ts else 0
 
         doc.append("custom_quotation_brand_summary", {
             "brand":              brand,
@@ -434,8 +445,8 @@ def rebuild_brand_summary(doc):
             "customs":            flt(d["customs"], 4),
             "customs_":           flt(d["customs_percent"] / n, 4),
             "total_cost":         flt(tc, 4),
-            "total_selling":      flt(ts, 4),
-            "margin":             flt(ts - tc, 4),
+            "total_selling":      flt(effective_ts, 4),
+            "margin":             flt(effective_ts - tc, 4),
             "margin_percent":     brand_margin_pct,
         })
 
@@ -483,11 +494,21 @@ def recalc_doc_totals(doc):
 
     # ── Pro-rata distribution of Additional Discount to each item row ──
     # Allocate based on each item's share of total selling value.
+    # Also recalculate per-item margin after addl discount.
     for it in doc.items:
         if addl_discount > 0 and ts > 0:
             item_selling = _to_flt(it.custom_selling_price)
             share = item_selling / ts if ts else 0
-            it.custom_addl_discount_amount = flt(addl_discount * share, 4)
+            item_addl = flt(addl_discount * share, 4)
+            it.custom_addl_discount_amount = item_addl
+
+            # Recalculate item margin including additional discount
+            effective_item_selling = flt(item_selling - item_addl, 4)
+            item_cost = _to_flt(it.custom_cogs)
+            it.custom_margin_value = flt(effective_item_selling - item_cost, 4)
+            it.custom_margin_ = flt(
+                (it.custom_margin_value / effective_item_selling * 100) if effective_item_selling else 0, 4
+            )
         else:
             it.custom_addl_discount_amount = 0
 
