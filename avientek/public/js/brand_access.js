@@ -537,7 +537,6 @@
 		});
 		if (!dt) return;
 
-		// Retry until the Actions dropdown is in the DOM
 		let attempts = 0;
 		let interval = setInterval(function () {
 			attempts++;
@@ -545,29 +544,28 @@
 				clearInterval(interval);
 				return;
 			}
+			if (!cur_list || !cur_list.page) return;
 
-			// Find the Actions dropdown menu in DOM
-			let $dropdown = $(".actions-btn-group .dropdown-menu");
-			if (!$dropdown.length) return;
+			// Already added?
+			if (cur_list._my_export_added) {
+				clearInterval(interval);
+				return;
+			}
 
-			// Already processed?
-			if ($dropdown.data("export-patched")) return;
-			$dropdown.data("export-patched", true);
+			// Hide standard Export from Actions dropdown (if it exists)
+			$(".actions-btn-group .dropdown-menu a").filter(function () {
+				return $(this).text().trim() === "Export";
+			}).closest("li").hide();
 
-			// Find and rename "Export" to "Export My Data"
-			$dropdown.find("a").each(function () {
-				let $a = $(this);
-				if ($a.text().trim() === "Export") {
-					// Replace the Export item with Export My Data
-					$a.text(__("Export My Data"));
-					$a.off("click").on("click", function (e) {
-						e.preventDefault();
-						e.stopPropagation();
-						show_my_data_export_dialog(dt);
-					});
-				}
-			});
-
+			// Add "Export My Data" to the Menu (three-dot) dropdown
+			cur_list._my_export_added = true;
+			cur_list.page.add_menu_item(
+				__("Export My Data"),
+				function () { show_my_data_export_dialog(dt); },
+				true,  // standard
+				null,  // shortcut
+				true   // show_parent (ensures menu button is visible)
+			);
 			clearInterval(interval);
 		}, 500);
 	}
