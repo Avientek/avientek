@@ -552,20 +552,29 @@
 				return;
 			}
 
-			// Hide standard Export from Actions dropdown (if it exists)
-			$(".actions-btn-group .dropdown-menu a").filter(function () {
+			// Find the visible Actions dropdown
+			let $actions_dropdown = cur_list.$page
+				? cur_list.$page.find(".actions-btn-group .dropdown-menu")
+				: $(".actions-btn-group .dropdown-menu");
+
+			if (!$actions_dropdown.length) return;
+
+			cur_list._my_export_added = true;
+
+			// Hide standard Export if present
+			$actions_dropdown.find("a").filter(function () {
 				return $(this).text().trim() === "Export";
 			}).closest("li").hide();
 
-			// Add "Export My Data" to the Menu (three-dot) dropdown
-			cur_list._my_export_added = true;
-			cur_list.page.add_menu_item(
-				__("Export My Data"),
-				function () { show_my_data_export_dialog(dt); },
-				true,  // standard
-				null,  // shortcut
-				true   // show_parent (ensures menu button is visible)
-			);
+			// Inject "Export My Data" directly into the Actions dropdown DOM
+			let $item = $('<li><a class="dropdown-item" href="#">' +
+				__("Export My Data") + '</a></li>');
+			$item.find("a").on("click", function (e) {
+				e.preventDefault();
+				show_my_data_export_dialog(dt);
+			});
+			$actions_dropdown.append($item);
+
 			clearInterval(interval);
 		}, 500);
 	}
