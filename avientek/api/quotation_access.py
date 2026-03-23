@@ -935,19 +935,28 @@ def patch_shared_document_filter():
 	_original_build = DatabaseQuery.build_match_conditions
 
 	def patched_build_match_conditions(self, as_condition=True):
-		# For restricted doctypes, suppress shared document bypass
+		result = _original_build(self, as_condition=as_condition)
+
+		# For restricted doctypes, remove the shared doc OR bypass
+		# Frappe generates: ((conditions) or (name in (...shared...)))
+		# We strip the shared part so ALL docs must pass permission conditions
 		if (
 			as_condition
+			and result
 			and self.doctype in _RESTRICTED_DOCTYPES
 			and (self.user or frappe.session.user) != "Administrator"
+			and self.shared
 		):
-			# Temporarily clear shared to prevent OR bypass
-			saved_shared = self.shared
-			self.shared = []
-			result = _original_build(self, as_condition=as_condition)
-			self.shared = saved_shared
-			return result
+			share_cond = self.get_share_condition()
+			if share_cond and share_cond in result:
+				# Remove the OR (shared) wrapper
+				# Result looks like: ((real_conditions) or (share_condition))
+				# Strip to just: real_conditions
+				result = result.replace(f" or ({share_cond})", "")
+				# Clean up extra wrapper parens: ((...)) -> ...
+				if result.startswith("((") and result.endswith("))"):
+					result = result[1:-1]
 
-		return _original_build(self, as_condition=as_condition)
+		return result
 
 	DatabaseQuery.build_match_conditions = patched_build_match_conditions
