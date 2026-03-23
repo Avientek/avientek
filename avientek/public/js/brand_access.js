@@ -537,40 +537,38 @@
 		});
 		if (!dt) return;
 
-		// Retry until cur_list is ready and Actions menu is built
+		// Retry until the Actions dropdown is in the DOM
 		let attempts = 0;
 		let interval = setInterval(function () {
 			attempts++;
-			if (attempts > 20) {
+			if (attempts > 30) {
 				clearInterval(interval);
 				return;
 			}
-			if (!cur_list || !cur_list.page) return;
 
-			// Find and replace Export with Export My Data in the actions dropdown
-			let $actions_menu = cur_list.page.actions_btn_group
-				? cur_list.page.actions_btn_group.find(".dropdown-menu")
-				: $(".actions-btn-group .dropdown-menu");
+			// Find the Actions dropdown menu in DOM
+			let $dropdown = $(".actions-btn-group .dropdown-menu");
+			if (!$dropdown.length) return;
 
-			if (!$actions_menu.length) return;
+			// Already processed?
+			if ($dropdown.data("export-patched")) return;
+			$dropdown.data("export-patched", true);
 
-			// Hide standard Export
-			let $export_items = $actions_menu.find("a").filter(function () {
-				return $(this).text().trim() === "Export";
+			// Find and rename "Export" to "Export My Data"
+			$dropdown.find("a").each(function () {
+				let $a = $(this);
+				if ($a.text().trim() === "Export") {
+					// Replace the Export item with Export My Data
+					$a.text(__("Export My Data"));
+					$a.off("click").on("click", function (e) {
+						e.preventDefault();
+						e.stopPropagation();
+						show_my_data_export_dialog(dt);
+					});
+				}
 			});
-			$export_items.closest("li").hide();
 
-			// Add "Export My Data" if not already added
-			if (!cur_list._my_export_added) {
-				cur_list._my_export_added = true;
-				// Use the same method Frappe uses: add_actions_menu_item
-				cur_list.page.add_actions_menu_item(
-					__("Export My Data"),
-					function () { show_my_data_export_dialog(dt); },
-					true
-				);
-				clearInterval(interval);
-			}
+			clearInterval(interval);
 		}, 500);
 	}
 
