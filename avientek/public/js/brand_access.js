@@ -544,7 +544,7 @@
 				clearInterval(interval);
 				return;
 			}
-			if (!cur_list || !cur_list.page) return;
+			if (typeof cur_list === "undefined" || !cur_list || !cur_list.page) return;
 
 			// Already added?
 			if (cur_list._my_export_added) {
@@ -552,28 +552,28 @@
 				return;
 			}
 
-			// Find the visible Actions dropdown
-			let $actions_dropdown = cur_list.$page
-				? cur_list.$page.find(".actions-btn-group .dropdown-menu")
-				: $(".actions-btn-group .dropdown-menu");
-
-			if (!$actions_dropdown.length) return;
+			// Use cur_list.page.actions (the jQuery element for the dropdown menu)
+			let $menu = cur_list.page.actions;
+			if (!$menu || !$menu.length) return;
 
 			cur_list._my_export_added = true;
 
 			// Hide standard Export if present
-			$actions_dropdown.find("a").filter(function () {
+			$menu.find("a").filter(function () {
 				return $(this).text().trim() === "Export";
 			}).closest("li").hide();
 
-			// Inject "Export My Data" directly into the Actions dropdown DOM
-			let $item = $('<li><a class="dropdown-item" href="#">' +
-				__("Export My Data") + '</a></li>');
-			$item.find("a").on("click", function (e) {
+			// Append Export My Data to the actions dropdown
+			let $li = $('<li><a class="dropdown-item" href="#">'
+				+ __("Export My Data") + "</a></li>");
+			$li.on("click", function (e) {
 				e.preventDefault();
 				show_my_data_export_dialog(dt);
 			});
-			$actions_dropdown.append($item);
+			$menu.append($li);
+
+			// Make sure the Actions button is visible
+			cur_list.page.actions_btn_group.removeClass("hide");
 
 			clearInterval(interval);
 		}, 500);
