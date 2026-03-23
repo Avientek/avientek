@@ -537,23 +537,28 @@
 		});
 		if (!dt) return;
 
-		// Wait for page to render, then replace Export with "Export My Data"
-		setTimeout(function () {
-			// Hide standard Export from Actions menu
-			let $menu = cur_list && cur_list.page && cur_list.page.menu;
-			if ($menu) {
-				$menu.find('a:contains("Export")').closest("li").hide();
+		// Retry multiple times to ensure list view is fully loaded
+		let attempts = 0;
+		let interval = setInterval(function () {
+			attempts++;
+			if (attempts > 10) {
+				clearInterval(interval);
+				return;
 			}
-			$('.actions-btn-group .dropdown-menu a, .list-header-actions .dropdown-menu a')
+			if (!cur_list || !cur_list.page) return;
+
+			// Hide standard Export from ALL possible locations
+			$('.actions-btn-group .dropdown-menu a, .menu-btn-group .dropdown-menu a')
 				.filter(function () { return $(this).text().trim() === "Export"; })
 				.closest("li").hide();
 
-			// Add "Export My Data" button to page
-			if (cur_list && cur_list.page && !cur_list._my_export_added) {
+			// Add "Export My Data" as an action item in the Actions menu
+			if (!cur_list._my_export_added) {
 				cur_list._my_export_added = true;
-				cur_list.page.add_inner_button(__("Export My Data"), function () {
+				cur_list.page.add_action_item(__("Export My Data"), function () {
 					show_my_data_export_dialog(dt);
 				});
+				clearInterval(interval);
 			}
 		}, 500);
 	}
