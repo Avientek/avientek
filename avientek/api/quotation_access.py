@@ -275,12 +275,18 @@ def get_permitted_doc_preview(doctype, docname):
 		item_brand = item.get("brand") or ""
 		item_ig = item.get("item_group") or ""
 
-		# Check brand restriction
+		# Brand OR Item Group (item matches EITHER restriction)
 		brand_ok = not brand_perms or not item_brand or item_brand in brand_perms
-		# Check item group restriction
 		ig_ok = not item_group_perms or not item_ig or item_ig in item_group_perms
 
-		if brand_ok and ig_ok:
+		# If BOTH restrictions exist, use OR: item passes if it matches either
+		if brand_perms and item_group_perms:
+			item_ok = brand_ok or ig_ok
+		else:
+			# Only one restriction: must match that one
+			item_ok = brand_ok and ig_ok
+
+		if item_ok:
 			permitted_items.append({
 				"idx": item.idx,
 				"item_code": item.get("item_code") or "",
@@ -535,43 +541,70 @@ def _sales_person_permission_query(user, parent_dt):
 # ── Combined permission query (brand + item group) for each doctype ──
 
 def _combined_permission_query(user, parent_dt, child_dt):
-	"""Combine all permission queries for a child-item doctype."""
-	parts = []
+	"""Combine all permission queries for a child-item doctype.
+
+	Brand + Item Group use OR logic (item matches EITHER brand OR item group).
+	Customer Group, Supplier Group, Sales Person use AND (all must match).
+	"""
+	# Item-level filters: Brand OR Item Group
+	item_parts = []
 	brand_cond = _brand_permission_query(user, parent_dt, child_dt)
 	if brand_cond:
-		parts.append(brand_cond)
+		item_parts.append(brand_cond)
 	ig_cond = _item_group_permission_query(user, parent_dt, child_dt)
 	if ig_cond:
-		parts.append(ig_cond)
+		item_parts.append(ig_cond)
+
+	# Document-level filters: AND logic
+	doc_parts = []
+	if item_parts:
+		if len(item_parts) == 1:
+			doc_parts.append(item_parts[0])
+		else:
+			# OR between brand and item group
+			doc_parts.append("(" + " OR ".join(item_parts) + ")")
+
 	# Customer Group (parent-level field)
 	if parent_dt in CUSTOMER_GROUP_PARENT_DOCTYPES:
 		cg_cond = _customer_group_permission_query(user, parent_dt)
 		if cg_cond:
-			parts.append(cg_cond)
+			doc_parts.append(cg_cond)
 	# Supplier Group (parent-level field)
 	if parent_dt in SUPPLIER_GROUP_PARENT_DOCTYPES:
 		sg_cond = _supplier_group_permission_query(user, parent_dt)
 		if sg_cond:
-			parts.append(sg_cond)
+			doc_parts.append(sg_cond)
 	# Sales Person (Sales Team child table)
 	if parent_dt in SALES_PERSON_DOCTYPES:
 		sp_cond = _sales_person_permission_query(user, parent_dt)
 		if sp_cond:
-			parts.append(sp_cond)
-	return " AND ".join(parts)
+			doc_parts.append(sp_cond)
+	return " AND ".join(doc_parts)
 
 
 def _combined_parent_permission_query(user, parent_dt):
-	"""Combine all permission queries for a parent-level doctype."""
-	parts = []
+	"""Combine all permission queries for a parent-level doctype.
+
+	Brand + Item Group use OR logic (matches EITHER).
+	Other restrictions use AND.
+	"""
+	# Item-level: Brand OR Item Group
+	item_parts = []
 	if parent_dt in BRAND_PARENT_DOCTYPES:
 		brand_cond = _brand_parent_permission_query(user, parent_dt)
 		if brand_cond:
-			parts.append(brand_cond)
+			item_parts.append(brand_cond)
 	if parent_dt in ITEM_GROUP_PARENT_DOCTYPES:
 		ig_cond = _item_group_parent_permission_query(user, parent_dt)
 		if ig_cond:
-			parts.append(ig_cond)
+			item_parts.append(ig_cond)
+
+	parts = []
+	if item_parts:
+		if len(item_parts) == 1:
+			parts.append(item_parts[0])
+		else:
+			parts.append("(" + " OR ".join(item_parts) + ")")
 	if parent_dt in CUSTOMER_GROUP_PARENT_DOCTYPES:
 		cg_cond = _customer_group_permission_query(user, parent_dt)
 		if cg_cond:
@@ -651,8 +684,14 @@ def has_permission_check(doc, ptype, user):
 				if ig_perms and item_ig and item_ig in ig_perms:
 					has_ig_match = True
 
-			if not has_brand_match or not has_ig_match:
-				return False
+			# Brand + Item Group use OR logic: doc passes if EITHER matches
+			if brand_perms and ig_perms:
+				if not has_brand_match and not has_ig_match:
+					return False
+			else:
+				# Only one restriction type: must match that one
+				if not has_brand_match or not has_ig_match:
+					return False
 
 	return None  # Defer to Frappe's standard checks
 
