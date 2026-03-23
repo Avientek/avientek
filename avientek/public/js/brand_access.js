@@ -537,17 +537,58 @@
 		});
 		if (!dt) return;
 
-		// Wait for page to render, then hide Export from Actions menu
+		// Wait for page to render, then replace Export with "Export My Data"
 		setTimeout(function () {
+			// Hide standard Export from Actions menu
 			let $menu = cur_list && cur_list.page && cur_list.page.menu;
 			if ($menu) {
 				$menu.find('a:contains("Export")').closest("li").hide();
 			}
-			// Also check dropdown in actions
 			$('.actions-btn-group .dropdown-menu a, .list-header-actions .dropdown-menu a')
 				.filter(function () { return $(this).text().trim() === "Export"; })
 				.closest("li").hide();
+
+			// Add "Export My Data" button to page
+			if (cur_list && cur_list.page && !cur_list._my_export_added) {
+				cur_list._my_export_added = true;
+				cur_list.page.add_inner_button(__("Export My Data"), function () {
+					show_my_data_export_dialog(dt);
+				});
+			}
 		}, 500);
+	}
+
+	function show_my_data_export_dialog(doctype) {
+		let d = new frappe.ui.Dialog({
+			title: __("Export My Data — {0}", [__(doctype)]),
+			fields: [
+				{
+					fieldname: "info",
+					fieldtype: "HTML",
+					options: '<p style="color:#888;">' +
+						__("This will export only the data you have permission to access, filtered by your Brand, Item Group, and Sales Person restrictions.") +
+						"</p>",
+				},
+				{
+					fieldname: "file_type",
+					fieldtype: "Select",
+					label: __("File Type"),
+					options: "CSV\nExcel",
+					default: "CSV",
+				},
+			],
+			primary_action_label: __("Download"),
+			primary_action: function () {
+				let file_type = d.get_value("file_type");
+				d.hide();
+				window.open(
+					"/api/method/avientek.api.quotation_access.export_my_data" +
+					"?doctype=" + encodeURIComponent(doctype) +
+					"&file_type=" + encodeURIComponent(file_type)
+				);
+			},
+		});
+		d.show();
 	}
 
 	// ── Initialize ──

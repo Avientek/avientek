@@ -1016,6 +1016,159 @@ def restricted_query_report_run(
 	)
 
 
+# ── Custom filtered export for restricted users ──
+
+@frappe.whitelist()
+def export_my_data(doctype, file_type="CSV"):
+	"""Export only the user's permitted data with child-row filtering.
+
+	Unlike Frappe's standard export which dumps ALL child rows,
+	this filters child table rows to only include permitted brands,
+	item groups, and sales persons.
+	"""
+	import csv
+	import io
+
+	user = frappe.session.user
+	if user == "Administrator":
+		frappe.throw(_("Administrators should use the standard Export."))
+
+	if doctype not in EXPORT_RESTRICTED_DOCTYPES:
+		frappe.throw(_("This doctype does not require filtered export."))
+
+	brand_perms = _get_user_brands(user)
+	ig_perms = _get_user_item_groups(user)
+	sp_perms = _get_user_sales_persons(user)
+
+	# Get permitted parent documents via get_list (applies permission_query_conditions)
+	parent_fields = ["name"]
+	meta = frappe.get_meta(doctype)
+
+	# Add common useful fields
+	for fn in ["customer", "customer_name", "supplier", "supplier_name", "party_name",
+			   "transaction_date", "posting_date", "grand_total", "status",
+			   "company", "currency", "customer_group"]:
+		if meta.has_field(fn):
+			parent_fields.append(fn)
+
+	try:
+		frappe.flags.ignore_permissions = True
+		# Build permission condition manually
+		child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+		perm_cond = ""
+		if child_dt:
+			perm_cond = _combined_permission_query(user, doctype, child_dt)
+		if not perm_cond:
+			frappe.throw(_("No permission conditions found."))
+
+		parent_names = frappe.db.sql(
+			"SELECT name FROM `tab{dt}` WHERE {cond} ORDER BY modified DESC LIMIT 5000".format(
+				dt=doctype, cond=perm_cond
+			),
+			pluck="name",
+		)
+	finally:
+		frappe.flags.ignore_permissions = False
+
+	if not parent_names:
+		frappe.throw(_("No records found matching your permissions."))
+
+	# Get child table data with filtering
+	child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+	if not child_dt:
+		frappe.throw(_("No child table found for {0}").format(doctype))
+
+	child_meta = frappe.get_meta(child_dt)
+	child_fields = ["parent", "idx"]
+	for fn in ["item_code", "item_name", "brand", "item_group", "qty", "rate",
+			   "amount", "uom", "description", "warehouse"]:
+		if child_meta.has_field(fn):
+			child_fields.append(fn)
+
+	# Fetch all child rows for permitted parents
+	placeholders = ", ".join(["%s"] * len(parent_names))
+	all_children = frappe.db.sql(
+		"SELECT {fields} FROM `tab{dt}` WHERE parent IN ({ph}) ORDER BY parent, idx".format(
+			fields=", ".join(child_fields), dt=child_dt, ph=placeholders
+		),
+		parent_names,
+		as_dict=True,
+	)
+
+	# Filter child rows by brand/item_group/sales_person
+	filtered_children = []
+	for row in all_children:
+		row_brand = row.get("brand") or ""
+		row_ig = row.get("item_group") or ""
+
+		brand_ok = not brand_perms or not row_brand or row_brand in brand_perms
+		ig_ok = not ig_perms or not row_ig or row_ig in ig_perms
+
+		if brand_ok and ig_ok:
+			filtered_children.append(row)
+
+	# Also get Sales Team data if sales_person restriction exists
+	sales_team_data = {}
+	if sp_perms and doctype in SALES_PERSON_DOCTYPES:
+		st_rows = frappe.db.sql(
+			"SELECT parent, sales_person, allocated_percentage FROM `tabSales Team` "
+			"WHERE parent IN ({ph}) AND parenttype = %s AND sales_person IN ({sp})".format(
+				ph=placeholders,
+				sp=", ".join(frappe.db.escape(s) for s in sp_perms)
+			),
+			parent_names + [doctype],
+			as_dict=True,
+		)
+		for st in st_rows:
+			sales_team_data.setdefault(st.parent, []).append(st.sales_person)
+
+	# Build parent lookup
+	parent_data = {}
+	for name in parent_names:
+		parent_data[name] = frappe.db.get_value(
+			doctype, name, parent_fields, as_dict=True
+		)
+
+	# Generate CSV
+	output = io.StringIO()
+	writer = csv.writer(output)
+
+	# Header row
+	header = ["Document"] + [fn for fn in parent_fields if fn != "name"]
+	header += [fn for fn in child_fields if fn not in ("parent",)]
+	if sp_perms:
+		header.append("Sales Person")
+	writer.writerow(header)
+
+	# Data rows
+	for row in filtered_children:
+		parent = parent_data.get(row.parent, {})
+		data = [row.parent]
+		data += [parent.get(fn, "") for fn in parent_fields if fn != "name"]
+		data += [row.get(fn, "") for fn in child_fields if fn not in ("parent",)]
+		if sp_perms:
+			data.append(", ".join(sales_team_data.get(row.parent, [])))
+		writer.writerow(data)
+
+	csv_content = output.getvalue()
+	output.close()
+
+	if file_type == "Excel":
+		from frappe.utils.xlsxutils import make_xlsx
+		xlsx_data = []
+		reader = csv.reader(io.StringIO(csv_content))
+		for r in reader:
+			xlsx_data.append(r)
+		xlsx_file = make_xlsx(xlsx_data, doctype)
+		frappe.response["filename"] = f"{doctype}_my_data.xlsx"
+		frappe.response["filecontent"] = xlsx_file.getvalue()
+		frappe.response["type"] = "download"
+	else:
+		frappe.response["filename"] = f"{doctype}_my_data.csv"
+		frappe.response["filecontent"] = csv_content
+		frappe.response["type"] = "download"
+
+
 # ── Monkey-patch: force permission_query_conditions on shared docs ──
 
 _RESTRICTED_DOCTYPES = set(
