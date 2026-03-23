@@ -936,7 +936,87 @@ function update_doc_totals_preview(frm) {
         row.base_net_amount = flt(net_amount_val * conversion_rate, 4);
     });
 
+    // ── Rebuild Brand Summary table (instant preview) ──
+    rebuild_brand_summary_preview(frm, addl_discount);
+
     frm.refresh_fields();
+}
+
+
+/**
+ * Rebuild Brand Summary child table in JS preview.
+ * Mirrors server-side rebuild_brand_summary() + addl discount distribution.
+ */
+function rebuild_brand_summary_preview(frm, addl_discount) {
+    let buckets = {};
+    (frm.doc.items || []).forEach(row => {
+        let b = row.brand || "Unbranded";
+        if (!buckets[b]) {
+            buckets[b] = {
+                shipping: 0, shipping_pct: 0,
+                finance: 0, finance_pct: 0,
+                processing: 0, processing_pct: 0,
+                reward: 0, reward_pct: 0,
+                incentive: 0, incentive_pct: 0,
+                customs: 0, customs_pct: 0,
+                buying: 0, cost: 0, selling: 0, cnt: 0,
+            };
+        }
+        let bk = buckets[b];
+        let qty = Math.max(cint(row.qty), 1);
+        bk.shipping     += flt(row.shipping);
+        bk.shipping_pct += flt(row.shipping_per);
+        bk.finance      += flt(row.custom_finance_value);
+        bk.finance_pct  += flt(row.custom_finance_);
+        bk.processing   += flt(row.custom_transport_value);
+        bk.processing_pct += flt(row.custom_transport_);
+        bk.reward       += flt(row.reward);
+        bk.reward_pct   += flt(row.reward_per);
+        bk.incentive    += flt(row.custom_incentive_value);
+        bk.incentive_pct += flt(row.custom_incentive_);
+        bk.customs      += flt(row.custom_customs_value);
+        bk.customs_pct  += flt(row.custom_customs_);
+        bk.buying       += flt(flt(row.custom_special_price) * qty, 4);
+        bk.cost         += flt(row.custom_cogs);
+        bk.selling      += flt(row.custom_selling_price);
+        bk.cnt          += 1;
+    });
+
+    let total_selling = Object.values(buckets).reduce((s, b) => s + b.selling, 0);
+
+    frm.doc.custom_quotation_brand_summary = [];
+    Object.keys(buckets).forEach(brand => {
+        let d = buckets[brand];
+        let n = d.cnt || 1;
+        let ts = d.selling;
+        let tc = d.cost;
+
+        // Distribute addl discount pro-rata
+        let brand_addl = (addl_discount > 0 && total_selling > 0)
+            ? flt(addl_discount * ts / total_selling, 4) : 0;
+        let eff_ts = flt(ts - brand_addl, 4);
+        let margin_pct = eff_ts ? flt((eff_ts - tc) / eff_ts * 100, 4) : 0;
+
+        let row = frm.add_child("custom_quotation_brand_summary");
+        row.brand            = brand;
+        row.buying_price     = flt(d.buying, 4);
+        row.shipping         = flt(d.shipping, 4);
+        row.shipping_percent = flt(d.shipping_pct / n, 4);
+        row.finance          = flt(d.finance, 4);
+        row.finance_percent  = flt(d.finance_pct / n, 4);
+        row.processing       = flt(d.processing, 4);
+        row.processing_percent = flt(d.processing_pct / n, 4);
+        row.reward           = flt(d.reward, 4);
+        row.reward_percent   = flt(d.reward_pct / n, 4);
+        row.incentive        = flt(d.incentive, 4);
+        row.incentive_percent = flt(d.incentive_pct / n, 4);
+        row.customs          = flt(d.customs, 4);
+        row.customs_         = flt(d.customs_pct / n, 4);
+        row.total_cost       = flt(tc, 4);
+        row.total_selling    = flt(eff_ts, 4);
+        row.margin           = flt(eff_ts - tc, 4);
+        row.margin_percent   = margin_pct;
+    });
 }
 
 
