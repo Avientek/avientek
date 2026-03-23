@@ -587,6 +587,76 @@ def _combined_parent_permission_query(user, parent_dt):
 	return " AND ".join(parts)
 
 
+# ── has_permission hook ──
+# Frappe's permission_query_conditions is ORed with owner/shared docs,
+# so owned/shared docs bypass our filters. This hook enforces the
+# restriction even for owned/shared documents.
+
+def has_permission_check(doc, ptype, user):
+	"""has_permission hook for child-item doctypes.
+
+	Returns False if the document's items don't match the user's
+	Brand/Item Group restrictions. Returns None (defer to Frappe)
+	for users without restrictions or for non-read operations.
+	"""
+	if ptype not in ("read", "select", "export", "print", "email"):
+		return None  # Only restrict read-like operations
+
+	if user == "Administrator":
+		return None
+
+	brand_perms = _get_user_brands(user)
+	ig_perms = _get_user_item_groups(user)
+	cg_perms = _get_user_customer_groups(user)
+	sp_perms = _get_user_sales_persons(user)
+
+	if not brand_perms and not ig_perms and not cg_perms and not sp_perms:
+		return None  # No restrictions
+
+	doctype = doc.doctype if hasattr(doc, "doctype") else doc.get("doctype")
+	if not doctype:
+		return None
+
+	# Check Customer Group (parent-level)
+	if cg_perms and doctype in CUSTOMER_GROUP_PARENT_DOCTYPES:
+		doc_cg = doc.get("customer_group") or ""
+		if doc_cg and doc_cg not in cg_perms:
+			return False
+
+	# Check Sales Person (Sales Team child table)
+	if sp_perms and doctype in SALES_PERSON_DOCTYPES:
+		sales_team = [st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person]
+		if sales_team and not set(sales_team) & set(sp_perms):
+			return False
+
+	# Check child item Brand and Item Group
+	child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+	if child_dt and (brand_perms or ig_perms):
+		items_field = "items"
+		for df in doc.meta.get_table_fields():
+			if df.options == child_dt:
+				items_field = df.fieldname
+				break
+
+		child_items = doc.get(items_field) or []
+		if child_items:
+			has_brand_match = not brand_perms  # True if no brand restriction
+			has_ig_match = not ig_perms  # True if no item group restriction
+
+			for item in child_items:
+				item_brand = item.get("brand") or ""
+				item_ig = item.get("item_group") or ""
+				if brand_perms and item_brand and item_brand in brand_perms:
+					has_brand_match = True
+				if ig_perms and item_ig and item_ig in ig_perms:
+					has_ig_match = True
+
+			if not has_brand_match or not has_ig_match:
+				return False
+
+	return None  # Defer to Frappe's standard checks
+
+
 # ── Individual permission query functions (referenced from hooks.py) ──
 
 def quotation_permission_query(user):
@@ -840,4 +910,44 @@ def restricted_download_template(
 		export_filters=export_filters,
 		file_type=file_type,
 	)
-# deploy trigger 1774183206
+
+# ── Monkey-patch: force permission_query_conditions on shared docs ──
+
+_RESTRICTED_DOCTYPES = set(
+	list(BRAND_DOCTYPES.keys()) + list(ITEM_GROUP_DOCTYPES.keys()) +
+	CUSTOMER_GROUP_PARENT_DOCTYPES + SUPPLIER_GROUP_PARENT_DOCTYPES +
+	SALES_PERSON_DOCTYPES
+)
+
+
+def patch_shared_document_filter():
+	"""Monkey-patch DatabaseQuery.build_match_conditions so that shared
+	documents also go through our permission_query_conditions.
+
+	By default Frappe adds: (match_conds AND pq_conds) OR (name IN shared_docs)
+	The shared docs OR bypass ignores our custom permission filters.
+
+	This patch removes shared docs from the OR clause for restricted doctypes,
+	forcing all documents to go through the standard permission path.
+	"""
+	from frappe.model.db_query import DatabaseQuery
+
+	_original_build = DatabaseQuery.build_match_conditions
+
+	def patched_build_match_conditions(self, as_condition=True):
+		# For restricted doctypes, suppress shared document bypass
+		if (
+			as_condition
+			and self.doctype in _RESTRICTED_DOCTYPES
+			and (self.user or frappe.session.user) != "Administrator"
+		):
+			# Temporarily clear shared to prevent OR bypass
+			saved_shared = self.shared
+			self.shared = []
+			result = _original_build(self, as_condition=as_condition)
+			self.shared = saved_shared
+			return result
+
+		return _original_build(self, as_condition=as_condition)
+
+	DatabaseQuery.build_match_conditions = patched_build_match_conditions

@@ -369,10 +369,21 @@ permission_query_conditions = {
     "Existing Quotation": "avientek.api.quotation_access.existing_quotation_permission_query",
 }
 
-# has_permission = {
-#     "Project Quotation": "avientek.events.sales_person_permission.project_quotation_has_perm",
-#     "Quotation": "avientek.events.sales_person_permission.quotation_has_perm",
-# }
+has_permission = {
+    "Quotation": "avientek.api.quotation_access.has_permission_check",
+    "Sales Order": "avientek.api.quotation_access.has_permission_check",
+    "Sales Invoice": "avientek.api.quotation_access.has_permission_check",
+    "Delivery Note": "avientek.api.quotation_access.has_permission_check",
+    "POS Invoice": "avientek.api.quotation_access.has_permission_check",
+    "Purchase Order": "avientek.api.quotation_access.has_permission_check",
+    "Purchase Receipt": "avientek.api.quotation_access.has_permission_check",
+    "Purchase Invoice": "avientek.api.quotation_access.has_permission_check",
+    "Material Request": "avientek.api.quotation_access.has_permission_check",
+    "Supplier Quotation": "avientek.api.quotation_access.has_permission_check",
+    "Request for Quotation": "avientek.api.quotation_access.has_permission_check",
+    "Opportunity": "avientek.api.quotation_access.has_permission_check",
+}
+
 # DocType Class
 # ---------------
 # Override standard doctype classes
