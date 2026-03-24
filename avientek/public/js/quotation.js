@@ -386,20 +386,23 @@ frappe.ui.form.on('Quotation', {
         });
 
         // Filter customers by company + Customer Group + Sales Person
-        // Uses server-side query to filter by Sales Team child table
-        frm.set_query('party_name', function () {
-            if (frm.doc.quotation_to !== 'Customer') return;
-            if ((frm._permitted_customer_groups && frm._permitted_customer_groups.length) ||
-                (frm._permitted_sales_persons && frm._permitted_sales_persons.length)) {
-                return {
-                    query: "avientek.api.quotation_access.get_filtered_customers",
-                    filters: { company: frm.doc.company || "" }
-                };
-            }
-            if (frm.doc.company) {
-                return { filters: { company: frm.doc.company } };
-            }
-        });
+        // Only override for Customer — Leave Lead/Prospect to ERPNext's default query
+        if (frm.doc.quotation_to === 'Customer') {
+            frm.set_query('party_name', function () {
+                if (frm.doc.quotation_to !== 'Customer') return {};
+                if ((frm._permitted_customer_groups && frm._permitted_customer_groups.length) ||
+                    (frm._permitted_sales_persons && frm._permitted_sales_persons.length)) {
+                    return {
+                        query: "avientek.api.quotation_access.get_filtered_customers",
+                        filters: { company: frm.doc.company || "" }
+                    };
+                }
+                if (frm.doc.company) {
+                    return { filters: { company: frm.doc.company } };
+                }
+                return {};
+            });
+        }
 
         // Filter items by permitted Brands and Item Groups
         frm.set_query('item_code', 'items', function () {
