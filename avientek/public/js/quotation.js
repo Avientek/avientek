@@ -952,6 +952,13 @@ function update_doc_totals_preview(frm) {
     }
 
     frm.refresh_fields();
+
+    // Force-refresh key total fields that may not update with refresh_fields()
+    ["custom_total_margin_new", "custom_total_margin_percent_new",
+     "custom_total_selling_new", "custom_total_cost_new", "custom_total_buying_price",
+     "custom_total_shipping_new", "custom_total_finance_new", "custom_total_transport_new",
+     "custom_total_reward_new", "custom_total_incentive_new", "custom_total_customs_new"
+    ].forEach(fn => frm.refresh_field(fn));
 }
 
 
