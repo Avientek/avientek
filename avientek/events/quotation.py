@@ -262,24 +262,32 @@ def get_shipment_and_margin(item_code, price_list, company=None):
     if not item_code or not price_list:
         return {}
 
-    filters = {
-        "item_code": item_code,
-        "price_list": price_list
-    }
-    if company:
-        filters["custom_company"] = company
+    fields = [
+        "custom_shipping__air_",
+        "custom_shipping__sea_",
+        "custom_min_margin_",
+        "custom_markup_",
+    ]
 
-    data = frappe.db.get_value(
-        "Item Price",
-        filters,
-        [
-            "custom_shipping__air_",
-            "custom_shipping__sea_",
-            "custom_min_margin_",
-            "custom_markup_",
-        ],
-        as_dict=True
-    )
+    data = None
+
+    # Try with company filter first (company-specific Item Price)
+    if company:
+        data = frappe.db.get_value(
+            "Item Price",
+            {"item_code": item_code, "price_list": price_list, "custom_company": company},
+            fields,
+            as_dict=True,
+        )
+
+    # Fallback: without company filter
+    if not data:
+        data = frappe.db.get_value(
+            "Item Price",
+            {"item_code": item_code, "price_list": price_list},
+            fields,
+            as_dict=True,
+        )
 
     if not data:
         return {}
