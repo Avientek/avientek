@@ -664,19 +664,20 @@ def has_permission_check(doc, ptype, user):
 		if sales_team and not set(sales_team) & set(sp_perms):
 			return False
 
-	# Check child item Brand and Item Group
+	# Check child item Brand and Item Group using direct SQL
+	# (avoid loading child items via doc.get() which triggers Frappe's
+	# built-in User Permission check on each child row)
 	child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
-	if child_dt and (brand_perms or ig_perms):
-		items_field = "items"
-		for df in doc.meta.get_table_fields():
-			if df.options == child_dt:
-				items_field = df.fieldname
-				break
-
-		child_items = doc.get(items_field) or []
+	docname = doc.name if hasattr(doc, "name") else doc.get("name")
+	if child_dt and docname and (brand_perms or ig_perms):
+		child_items = frappe.db.sql(
+			"SELECT brand, item_group FROM `tab{dt}` WHERE parent = %s".format(dt=child_dt),
+			docname,
+			as_dict=True,
+		)
 		if child_items:
-			has_brand_match = not brand_perms  # True if no brand restriction
-			has_ig_match = not ig_perms  # True if no item group restriction
+			has_brand_match = not brand_perms
+			has_ig_match = not ig_perms
 
 			for item in child_items:
 				item_brand = item.get("brand") or ""
@@ -686,16 +687,14 @@ def has_permission_check(doc, ptype, user):
 				if ig_perms and item_ig and item_ig in ig_perms:
 					has_ig_match = True
 
-			# Brand + Item Group use OR logic: doc passes if EITHER matches
 			if brand_perms and ig_perms:
 				if not has_brand_match and not has_ig_match:
 					return False
 			else:
-				# Only one restriction type: must match that one
 				if not has_brand_match or not has_ig_match:
 					return False
 
-	return None  # Defer to Frappe's standard checks
+	return True  # Explicitly allow — our permission_query_conditions already filtered the list
 
 
 # ── Individual permission query functions (referenced from hooks.py) ──
