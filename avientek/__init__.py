@@ -34,6 +34,7 @@ def _patch_has_user_permission():
 	_original_has_user_permission = perms.has_user_permission
 
 	def patched_has_user_permission(doc, user=None, debug=False, ptype=None):
+		import frappe
 		from avientek.api.quotation_access import (
 			BRAND_DOCTYPES, ITEM_GROUP_DOCTYPES,
 			_get_user_brands, _get_user_item_groups,
