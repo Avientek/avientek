@@ -1224,3 +1224,4 @@ def patch_shared_document_filter():
 
 	DatabaseQuery.build_match_conditions = patched_build_match_conditions
 
+
