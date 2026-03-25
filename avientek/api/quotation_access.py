@@ -60,64 +60,36 @@ SUPPLIER_GROUP_PARENT_DOCTYPES = ["Purchase Invoice"]
 SALES_PERSON_DOCTYPES = ["Sales Order", "Sales Invoice", "Delivery Note", "POS Invoice"]
 
 
-def _get_user_brands(user=None):
-	"""Get list of permitted brands for a user. Returns empty list if no restriction."""
-	user = user or frappe.session.user
-	if user == "Administrator":
+def _get_user_perms(user, allow_type):
+	"""Get permitted values for a user. Uses direct SQL to bypass permission checks
+	on the User Permission doctype itself (restricted users can't always read their own perms)."""
+	if not user or user == "Administrator":
 		return []
-	return frappe.get_all(
-		"User Permission",
-		filters={"user": user, "allow": "Brand"},
+	return frappe.db.sql(
+		"SELECT for_value FROM `tabUser Permission` WHERE user=%s AND allow=%s",
+		(user, allow_type),
 		pluck="for_value",
 	)
+
+
+def _get_user_brands(user=None):
+	return _get_user_perms(user or frappe.session.user, "Brand")
 
 
 def _get_user_item_groups(user=None):
-	"""Get list of permitted item groups for a user. Returns empty list if no restriction."""
-	user = user or frappe.session.user
-	if user == "Administrator":
-		return []
-	return frappe.get_all(
-		"User Permission",
-		filters={"user": user, "allow": "Item Group"},
-		pluck="for_value",
-	)
+	return _get_user_perms(user or frappe.session.user, "Item Group")
 
 
 def _get_user_customer_groups(user=None):
-	"""Get list of permitted customer groups for a user. Returns empty list if no restriction."""
-	user = user or frappe.session.user
-	if user == "Administrator":
-		return []
-	return frappe.get_all(
-		"User Permission",
-		filters={"user": user, "allow": "Customer Group"},
-		pluck="for_value",
-	)
+	return _get_user_perms(user or frappe.session.user, "Customer Group")
 
 
 def _get_user_supplier_groups(user=None):
-	"""Get list of permitted supplier groups for a user. Returns empty list if no restriction."""
-	user = user or frappe.session.user
-	if user == "Administrator":
-		return []
-	return frappe.get_all(
-		"User Permission",
-		filters={"user": user, "allow": "Supplier Group"},
-		pluck="for_value",
-	)
+	return _get_user_perms(user or frappe.session.user, "Supplier Group")
 
 
 def _get_user_sales_persons(user=None):
-	"""Get list of permitted sales persons for a user. Returns empty list if no restriction."""
-	user = user or frappe.session.user
-	if user == "Administrator":
-		return []
-	return frappe.get_all(
-		"User Permission",
-		filters={"user": user, "allow": "Sales Person"},
-		pluck="for_value",
-	)
+	return _get_user_perms(user or frappe.session.user, "Sales Person")
 
 
 @frappe.whitelist()
@@ -1052,19 +1024,29 @@ def export_my_data(doctype, file_type="CSV"):
 		if meta.has_field(fn):
 			parent_fields.append(fn)
 
-	# Use frappe.get_list which applies ALL permission conditions automatically:
-	# - Company permissions
-	# - Customer Group permissions
-	# - Our custom permission_query_conditions (Brand, Item Group, Sales Person)
-	# - Shared document access
-	# - Owner access
-	parent_names = frappe.get_list(
-		doctype,
-		fields=["name"],
-		limit_page_length=5000,
-		order_by="modified desc",
-		pluck="name",
-	)
+	# Build permission query directly (bypasses shared doc OR bypass)
+	child_dt_for_query = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+	if child_dt_for_query:
+		perm_cond = _combined_permission_query(user, doctype, child_dt_for_query)
+	else:
+		perm_cond = ""
+
+	if perm_cond:
+		parent_names = frappe.db.sql(
+			"SELECT name FROM `tab{dt}` WHERE {cond} ORDER BY modified DESC LIMIT 5000".format(
+				dt=doctype, cond=perm_cond
+			),
+			pluck="name",
+		)
+	else:
+		# No custom restrictions — use standard get_list
+		parent_names = frappe.get_list(
+			doctype,
+			fields=["name"],
+			limit_page_length=5000,
+			order_by="modified desc",
+			pluck="name",
+		)
 
 	if not parent_names:
 		frappe.respond_as_web_page(
