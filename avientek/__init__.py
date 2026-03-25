@@ -75,7 +75,7 @@ def _patch_has_user_permission():
 			ig = item.get("item_group") or ""
 			brand_ok = not brand_perms or not ib or ib in brand_perms
 			ig_ok = not ig_perms or not ig or ig in ig_perms
-			if brand_ok or ig_ok:
+			if brand_ok and ig_ok:
 				has_match = True
 				break
 

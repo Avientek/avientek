@@ -240,16 +240,10 @@ def get_permitted_doc_preview(doctype, docname):
 		item_brand = item.get("brand") or ""
 		item_ig = item.get("item_group") or ""
 
-		# Brand OR Item Group (item matches EITHER restriction)
+		# AND logic: item must match ALL active restrictions
 		brand_ok = not brand_perms or not item_brand or item_brand in brand_perms
 		ig_ok = not item_group_perms or not item_ig or item_ig in item_group_perms
-
-		# If BOTH restrictions exist, use OR: item passes if it matches either
-		if brand_perms and item_group_perms:
-			item_ok = brand_ok or ig_ok
-		else:
-			# Only one restriction: must match that one
-			item_ok = brand_ok and ig_ok
+		item_ok = brand_ok and ig_ok
 
 		if item_ok:
 			permitted_items.append({
@@ -508,26 +502,17 @@ def _sales_person_permission_query(user, parent_dt):
 def _combined_permission_query(user, parent_dt, child_dt):
 	"""Combine all permission queries for a child-item doctype.
 
-	Brand + Item Group use OR logic (item matches EITHER brand OR item group).
-	Customer Group, Supplier Group, Sales Person use AND (all must match).
+	Brand + Item Group use AND logic (item must match BOTH brand AND item group).
+	Customer Group, Supplier Group, Sales Person also use AND.
 	"""
-	# Item-level filters: Brand OR Item Group
-	item_parts = []
+	# Item-level filters: Brand AND Item Group
+	doc_parts = []
 	brand_cond = _brand_permission_query(user, parent_dt, child_dt)
 	if brand_cond:
-		item_parts.append(brand_cond)
+		doc_parts.append(brand_cond)
 	ig_cond = _item_group_permission_query(user, parent_dt, child_dt)
 	if ig_cond:
-		item_parts.append(ig_cond)
-
-	# Document-level filters: AND logic
-	doc_parts = []
-	if item_parts:
-		if len(item_parts) == 1:
-			doc_parts.append(item_parts[0])
-		else:
-			# OR between brand and item group
-			doc_parts.append("(" + " OR ".join(item_parts) + ")")
+		doc_parts.append(ig_cond)
 
 	# Customer Group (parent-level field)
 	if parent_dt in CUSTOMER_GROUP_PARENT_DOCTYPES:
@@ -565,11 +550,8 @@ def _combined_parent_permission_query(user, parent_dt):
 			item_parts.append(ig_cond)
 
 	parts = []
-	if item_parts:
-		if len(item_parts) == 1:
-			parts.append(item_parts[0])
-		else:
-			parts.append("(" + " OR ".join(item_parts) + ")")
+	for p in item_parts:
+		parts.append(p)
 	if parent_dt in CUSTOMER_GROUP_PARENT_DOCTYPES:
 		cg_cond = _customer_group_permission_query(user, parent_dt)
 		if cg_cond:
@@ -1085,18 +1067,16 @@ def export_my_data(doctype, file_type="CSV"):
 		)
 		all_children.extend(rows)
 
-	# Filter child rows by Brand OR Item Group (OR logic)
+	# Filter child rows: AND logic — item must match ALL active restrictions
 	filtered_children = []
 	for row in all_children:
 		row_brand = row.get("brand") or ""
 		row_ig = row.get("item_group") or ""
 
-		# OR logic: item passes if it matches ANY of the user's restrictions
-		# Empty brand/item_group always passes
 		brand_ok = not brand_perms or not row_brand or row_brand in brand_perms
 		ig_ok = not ig_perms or not row_ig or row_ig in ig_perms
 
-		if brand_ok or ig_ok:
+		if brand_ok and ig_ok:
 			filtered_children.append(row)
 
 	# Get Sales Team data (only permitted sales persons)
