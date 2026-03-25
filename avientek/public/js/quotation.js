@@ -439,6 +439,13 @@ frappe.ui.form.on('Quotation', {
             });
         }
 
+        // Show "Create Address" button for Lead quotations without address
+        if (frm.doc.quotation_to === "Lead" && frm.doc.party_name && !frm.doc.customer_address) {
+            frm.add_custom_button(__("Create Address"), function () {
+                show_create_address_dialog(frm);
+            }, __("Address"));
+        }
+
         // Toggle discount fields based on type selection
         toggle_discount_fields(frm);
         toggle_apply_discount_button(frm);
@@ -1047,6 +1054,79 @@ function rebuild_brand_summary_preview(frm, addl_discount) {
  * Single server call to load all item defaults when item_code is selected.
  * Replaces the old rate_calculation + update_rates nested async calls.
  */
+/**
+ * Show dialog to create a new Address for a Lead directly from Quotation.
+ */
+function show_create_address_dialog(frm) {
+    let lead_name = frm.doc.party_name;
+    if (!lead_name) {
+        frappe.msgprint(__("Please select a Lead first."));
+        return;
+    }
+
+    let d = new frappe.ui.Dialog({
+        title: __("Create Address for {0}", [lead_name]),
+        fields: [
+            { fieldname: "address_title", fieldtype: "Data", label: __("Address Title"), reqd: 1,
+              default: frm.doc.title || lead_name },
+            { fieldname: "address_type", fieldtype: "Select", label: __("Address Type"),
+              options: "Billing\nShipping\nOffice\nPersonal\nPlant\nPostal\nShop\nSubsidiary\nWarehouse\nOther",
+              default: "Billing", reqd: 1 },
+            { fieldtype: "Section Break" },
+            { fieldname: "address_line1", fieldtype: "Data", label: __("Address Line 1"), reqd: 1 },
+            { fieldname: "address_line2", fieldtype: "Data", label: __("Address Line 2") },
+            { fieldtype: "Column Break" },
+            { fieldname: "city", fieldtype: "Data", label: __("City"), reqd: 1 },
+            { fieldname: "state", fieldtype: "Data", label: __("State") },
+            { fieldtype: "Section Break" },
+            { fieldname: "country", fieldtype: "Link", label: __("Country"), options: "Country", reqd: 1 },
+            { fieldname: "pincode", fieldtype: "Data", label: __("Postal Code") },
+            { fieldtype: "Column Break" },
+            { fieldname: "phone", fieldtype: "Data", label: __("Phone") },
+            { fieldname: "email_id", fieldtype: "Data", label: __("Email"), options: "Email" },
+        ],
+        primary_action_label: __("Create"),
+        primary_action: function (values) {
+            frappe.call({
+                method: "frappe.client.insert",
+                args: {
+                    doc: {
+                        doctype: "Address",
+                        address_title: values.address_title,
+                        address_type: values.address_type,
+                        address_line1: values.address_line1,
+                        address_line2: values.address_line2,
+                        city: values.city,
+                        state: values.state,
+                        country: values.country,
+                        pincode: values.pincode,
+                        phone: values.phone,
+                        email_id: values.email_id,
+                        links: [{
+                            link_doctype: "Lead",
+                            link_name: lead_name,
+                        }],
+                    },
+                },
+                freeze: true,
+                freeze_message: __("Creating Address..."),
+                callback: function (r) {
+                    if (r.message) {
+                        d.hide();
+                        frm.set_value("customer_address", r.message.name);
+                        frappe.show_alert({
+                            message: __("Address {0} created and linked to {1}", [r.message.name, lead_name]),
+                            indicator: "green",
+                        }, 5);
+                    }
+                },
+            });
+        },
+    });
+    d.show();
+}
+
+
 function load_item_defaults(frm, cdt, cdn) {
     let row = locals[cdt][cdn];
     if (!row.item_code || !frm.doc.selling_price_list) return;
