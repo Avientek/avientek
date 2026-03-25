@@ -771,7 +771,6 @@ def get_user_restrictions():
 	user = frappe.session.user
 	if user == "Administrator":
 		return {}
-
 	return {
 		"brands": _get_user_brands(user),
 		"item_groups": _get_user_item_groups(user),
@@ -1223,5 +1222,6 @@ def patch_shared_document_filter():
 		return result
 
 	DatabaseQuery.build_match_conditions = patched_build_match_conditions
+
 
 
