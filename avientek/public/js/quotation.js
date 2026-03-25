@@ -443,7 +443,9 @@ frappe.ui.form.on('Quotation', {
         if (frm.doc.quotation_to === "Lead" && frm.doc.party_name && !frm.doc.customer_address) {
             frm.add_custom_button(__("Create Address"), function () {
                 show_create_address_dialog(frm);
-            }, __("Address"));
+            });
+            // Make it stand out
+            frm.change_custom_button_type(__("Create Address"), null, "primary");
         }
 
         // Toggle discount fields based on type selection
