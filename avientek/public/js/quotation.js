@@ -379,6 +379,16 @@ frappe.ui.form.on('Quotation', {
             frm._calc_override_applied = true;
         }
 
+        // Ensure frappe.dynamic_link is set (ERPNext controller sets it but
+        // timing can cause it to be undefined when address_query fires)
+        if (frm.doc.quotation_to && frm.doc.party_name) {
+            frappe.dynamic_link = {
+                doc: frm.doc,
+                fieldname: "party_name",
+                doctype: frm.doc.quotation_to,
+            };
+        }
+
         update_custom_service_totals(frm);
 
         frm.set_query("selling_price_list", function () {
