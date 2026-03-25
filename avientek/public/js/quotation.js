@@ -942,16 +942,17 @@ function update_doc_totals_preview(frm) {
     // ── Rebuild Brand Summary table (instant preview) ──
     rebuild_brand_summary_preview(frm, addl_discount);
 
-    // ── Recalculate Total Margin from Brand Summary for consistency ──
+    // ── Recalculate Total Margin from Brand Summary ──
+    // Total Margin % = SUM of each brand's Margin (%) from Brand Summary table
     let bs_margin = 0;
-    let bs_selling = 0;
+    let bs_margin_pct_sum = 0;
     (frm.doc.custom_quotation_brand_summary || []).forEach(row => {
-        bs_margin  += flt(row.margin);
-        bs_selling += flt(row.total_selling);
+        bs_margin += flt(row.margin);
+        bs_margin_pct_sum += flt(row.margin_percent);
     });
-    if (bs_selling) {
+    if (bs_margin_pct_sum) {
         frm.doc.custom_total_margin_new         = flt(bs_margin, 4);
-        frm.doc.custom_total_margin_percent_new = flt(bs_margin / bs_selling * 100, 4);
+        frm.doc.custom_total_margin_percent_new = flt(bs_margin_pct_sum, 4);
     }
 
     frm.refresh_fields();

@@ -523,16 +523,16 @@ def recalc_doc_totals(doc):
     effective_selling = flt(ts - addl_discount, 4)
 
     # Derive Total Margin from Brand Summary for consistency with per-brand values.
-    # Brand Summary is rebuilt before recalc_doc_totals in the pipeline.
+    # Total Margin % = SUM of each brand's Margin (%) from Brand Summary table.
     bs_margin = 0
-    bs_selling = 0
+    bs_margin_pct_sum = 0
     for bs_row in (doc.get("custom_quotation_brand_summary") or []):
-        bs_margin  += flt(bs_row.margin)
-        bs_selling += flt(bs_row.total_selling)
+        bs_margin += flt(bs_row.margin)
+        bs_margin_pct_sum += flt(bs_row.margin_percent)
 
-    if bs_selling:
+    if bs_margin_pct_sum:
         margin = flt(bs_margin, 4)
-        margin_pct = flt(bs_margin / bs_selling * 100, 4)
+        margin_pct = flt(bs_margin_pct_sum, 4)
     else:
         margin = flt(effective_selling - tc, 4)
         margin_pct = flt(margin / effective_selling * 100, 4) if effective_selling else 0
