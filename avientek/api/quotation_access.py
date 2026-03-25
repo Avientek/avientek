@@ -69,7 +69,7 @@ def _get_user_perms(user, allow_type):
 		"SELECT for_value FROM `tabUser Permission` WHERE user=%s AND allow=%s",
 		(user, allow_type),
 		pluck="for_value",
-	)
+	) or []
 
 
 def _get_user_brands(user=None):
