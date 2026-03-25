@@ -92,49 +92,41 @@ def _get_user_sales_persons(user=None):
 	return _get_user_perms(user or frappe.session.user, "Sales Person")
 
 
-@frappe.whitelist()
-def check_user_has_item_group_restriction():
-	"""Quick check: does the current user have any Item Group User Permissions?"""
+# RELOAD_MARKER_v2
+def _has_user_perm(allow_type):
+	"""Check if user has a User Permission of given type. Uses direct SQL."""
 	user = frappe.session.user
 	if user == "Administrator":
 		return False
-	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Item Group"}))
+	return bool(frappe.db.sql(
+		"SELECT 1 FROM `tabUser Permission` WHERE user=%s AND allow=%s LIMIT 1",
+		(user, allow_type),
+	))
+
+
+@frappe.whitelist()
+def check_user_has_item_group_restriction():
+	return _has_user_perm("Item Group")
 
 
 @frappe.whitelist()
 def check_user_has_brand_restriction():
-	"""Quick check: does the current user have any Brand User Permissions?"""
-	user = frappe.session.user
-	if user == "Administrator":
-		return False
-	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Brand"}))
+	return _has_user_perm("Brand")
 
 
 @frappe.whitelist()
 def check_user_has_customer_group_restriction():
-	"""Quick check: does the current user have any Customer Group User Permissions?"""
-	user = frappe.session.user
-	if user == "Administrator":
-		return False
-	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Customer Group"}))
+	return _has_user_perm("Customer Group")
 
 
 @frappe.whitelist()
 def check_user_has_supplier_group_restriction():
-	"""Quick check: does the current user have any Supplier Group User Permissions?"""
-	user = frappe.session.user
-	if user == "Administrator":
-		return False
-	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Supplier Group"}))
+	return _has_user_perm("Supplier Group")
 
 
 @frappe.whitelist()
 def check_user_has_sales_person_restriction():
-	"""Quick check: does the current user have any Sales Person User Permissions?"""
-	user = frappe.session.user
-	if user == "Administrator":
-		return False
-	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Sales Person"}))
+	return _has_user_perm("Sales Person")
 
 
 @frappe.whitelist()
