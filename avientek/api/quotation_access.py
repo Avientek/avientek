@@ -92,7 +92,6 @@ def _get_user_sales_persons(user=None):
 	return _get_user_perms(user or frappe.session.user, "Sales Person")
 
 
-# RELOAD_MARKER_v2
 def _has_user_perm(allow_type):
 	"""Check if user has a User Permission of given type. Uses direct SQL."""
 	user = frappe.session.user
@@ -772,6 +771,7 @@ def get_user_restrictions():
 	user = frappe.session.user
 	if user == "Administrator":
 		return {}
+
 	return {
 		"brands": _get_user_brands(user),
 		"item_groups": _get_user_item_groups(user),
@@ -1223,3 +1223,4 @@ def patch_shared_document_filter():
 		return result
 
 	DatabaseQuery.build_match_conditions = patched_build_match_conditions
+
