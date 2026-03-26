@@ -396,6 +396,7 @@ after_migrate = "avientek.migrate.after_migrate"
 
 override_doctype_class = {
     "Comment": "avientek.overrides.comment.CustomComment",
+    "Item Price": "avientek.overrides.item_price.CustomItemPrice",
 }
 
 # Document Events
