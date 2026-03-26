@@ -7,64 +7,77 @@
  "engine": "InnoDB",
  "field_order": [
   "salutation",
-  "first_name",
-  "last_name",
-  "designation",
   "department",
   "email",
   "mobile",
+  "column_break_uhpi",
+  "first_name",
+  "last_name",
+  "designation",
   "type"
  ],
  "fields": [
   {
    "fieldname": "salutation",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Salutation",
    "options": "Salutation"
   },
   {
    "fieldname": "first_name",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "First Name"
   },
   {
    "fieldname": "last_name",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Last Name"
   },
   {
    "fieldname": "designation",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Designation"
   },
   {
    "fieldname": "department",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Department"
   },
   {
    "fieldname": "email",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Email",
    "options": "Email"
   },
   {
    "fieldname": "mobile",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Mobile"
   },
   {
    "fieldname": "type",
    "fieldtype": "Select",
+   "in_list_view": 1,
    "label": "Type",
    "options": "\nSOA\nETA\nPOS"
+  },
+  {
+   "fieldname": "column_break_uhpi",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-01-22 13:42:24.799326",
+ "modified": "2026-03-26 13:36:51.507862",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Contact Details",
