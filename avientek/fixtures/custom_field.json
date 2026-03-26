@@ -6707,7 +6707,7 @@
   "name": "Lead-custom_reference_from",
   "no_copy": 0,
   "non_negative": 0,
-  "options": "\nLead\nVendor\nSelf ",
+  "options": "\nLead\nVendor\nSelf",
   "permlevel": 0,
   "placeholder": null,
   "precision": "",
