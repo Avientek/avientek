@@ -1005,14 +1005,16 @@ def restricted_query_report_run(
 # ── Custom filtered export for restricted users ──
 
 @frappe.whitelist()
-def export_my_data(doctype, file_type="CSV"):
+def export_my_data(doctype, file_type="CSV", docnames=None):
 	"""Export only the user's permitted data with dynamic child-row filtering.
 
 	Dynamically reads ALL User Permissions for the current user and filters
 	child rows by ANY matching field (brand, item_group, etc.) using AND logic.
+	If docnames is provided, only those specific documents are exported.
 	"""
 	import csv
 	import io
+	import json as json_mod
 
 	user = frappe.session.user
 	if user == "Administrator":
@@ -1020,6 +1022,14 @@ def export_my_data(doctype, file_type="CSV"):
 
 	if doctype not in EXPORT_RESTRICTED_DOCTYPES:
 		frappe.throw(_("This doctype does not require filtered export."))
+
+	# Parse selected docnames if provided
+	selected_names = None
+	if docnames:
+		if isinstance(docnames, str):
+			selected_names = json_mod.loads(docnames)
+		else:
+			selected_names = list(docnames)
 
 	# ── Dynamically read ALL User Permissions ──
 	all_perms = frappe.db.sql(
@@ -1049,16 +1059,21 @@ def export_my_data(doctype, file_type="CSV"):
 		perm_cond = ""
 
 	if perm_cond:
-		parent_names = frappe.db.sql(
-			"SELECT name FROM `tab{dt}` WHERE {cond} ORDER BY modified DESC LIMIT 5000".format(
-				dt=doctype, cond=perm_cond
-			),
-			pluck="name",
-		)
+		sql = "SELECT name FROM `tab{dt}` WHERE {cond}".format(dt=doctype, cond=perm_cond)
+		# If specific docs selected, intersect with permission query
+		if selected_names:
+			ph = ", ".join(["%s"] * len(selected_names))
+			sql += " AND name IN ({ph})".format(ph=ph)
+			parent_names = frappe.db.sql(sql + " ORDER BY modified DESC LIMIT 5000", selected_names, pluck="name")
+		else:
+			parent_names = frappe.db.sql(sql + " ORDER BY modified DESC LIMIT 5000", pluck="name")
 	else:
+		filters = {}
+		if selected_names:
+			filters["name"] = ["in", selected_names]
 		parent_names = frappe.get_list(
-			doctype, fields=["name"], limit_page_length=5000,
-			order_by="modified desc", pluck="name",
+			doctype, fields=["name"], filters=filters,
+			limit_page_length=5000, order_by="modified desc", pluck="name",
 		)
 
 	if not parent_names:

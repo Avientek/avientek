@@ -582,15 +582,25 @@
 	}
 
 	function show_my_data_export_dialog(doctype) {
+		// Get selected records from list view
+		let selected = [];
+		if (cur_list && cur_list.get_checked_items) {
+			selected = cur_list.get_checked_items().map(function (item) {
+				return item.name;
+			});
+		}
+
+		let info_text = selected.length
+			? __("Export {0} selected {1} record(s) — only items you have permission to access.", [selected.length, __(doctype)])
+			: __("Export all permitted {0} records — only items you have permission to access.", [__(doctype)]);
+
 		let d = new frappe.ui.Dialog({
 			title: __("Export My Data — {0}", [__(doctype)]),
 			fields: [
 				{
 					fieldname: "info",
 					fieldtype: "HTML",
-					options: '<p style="color:#888;">' +
-						__("This will export only the data you have permission to access, filtered by your Brand, Item Group, and Sales Person restrictions.") +
-						"</p>",
+					options: '<p style="color:#888;">' + info_text + "</p>",
 				},
 				{
 					fieldname: "file_type",
@@ -604,11 +614,13 @@
 			primary_action: function () {
 				let file_type = d.get_value("file_type");
 				d.hide();
-				window.open(
-					"/api/method/avientek.api.quotation_access.export_my_data" +
+				let url = "/api/method/avientek.api.quotation_access.export_my_data" +
 					"?doctype=" + encodeURIComponent(doctype) +
-					"&file_type=" + encodeURIComponent(file_type)
-				);
+					"&file_type=" + encodeURIComponent(file_type);
+				if (selected.length) {
+					url += "&docnames=" + encodeURIComponent(JSON.stringify(selected));
+				}
+				window.open(url);
 			},
 		});
 		d.show();
