@@ -582,12 +582,24 @@
 	}
 
 	function show_my_data_export_dialog(doctype) {
-		// Get selected records from list view
+		// Get selected records from list view — use multiple methods for robustness
 		let selected = [];
-		if (cur_list && cur_list.get_checked_items) {
-			selected = cur_list.get_checked_items().map(function (item) {
-				return item.name;
-			});
+		try {
+			// Method 1: cur_list API
+			if (typeof cur_list !== "undefined" && cur_list && cur_list.get_checked_items) {
+				selected = cur_list.get_checked_items().map(function (item) {
+					return item.name;
+				});
+			}
+			// Method 2: fallback to DOM checkboxes
+			if (!selected.length) {
+				$(".list-row-checkbox:checked").each(function () {
+					let name = $(this).data("name");
+					if (name) selected.push(name);
+				});
+			}
+		} catch (e) {
+			// silently ignore
 		}
 
 		let info_text = selected.length
