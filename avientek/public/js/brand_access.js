@@ -528,17 +528,26 @@
 		let route = frappe.get_route();
 		if (!route || route.length < 2) return;
 
-		let slug = route[0] === "List" ? route[1] : route[0];
+		// Detect doctype from List View or Report View route
+		let view_type = route[0]; // "List" or "query-report" or slug
+		let slug = view_type === "List" ? route[1] : route[0];
 		let dt = null;
 		RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
 			if (frappe.router.slug(d) === slug || d === slug) {
 				dt = d;
 			}
 		});
+		// Also detect Report View: /app/quotation/view/report
+		if (!dt && route.length >= 3 && route[2] === "report") {
+			RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
+				if (frappe.router.slug(d) === route[0] || d === route[0]) {
+					dt = d;
+				}
+			});
+		}
 		if (!dt) return;
 
-		// Frappe rebuilds the Actions dropdown every time checkboxes change.
-		// Use MutationObserver to re-inject our changes whenever the dropdown is rebuilt.
+		// Patch Actions dropdown (appears when rows are checked)
 		function patch_actions_menu() {
 			let $menu = $(".actions-btn-group .dropdown-menu");
 			if (!$menu.length) return;
@@ -560,23 +569,60 @@
 			}
 		}
 
-		// Run immediately and on every DOM change to the actions area
+		// Patch the "..." (Menu) dropdown — hide Export, add Export My Data
+		function patch_page_menu() {
+			$(".menu-btn-group .dropdown-menu, .page-icon-group .dropdown-menu").each(function () {
+				let $menu = $(this);
+
+				// Hide standard Export
+				$menu.find("a, button").filter(function () {
+					let txt = $(this).text().trim();
+					return txt === "Export" || txt === __("Export");
+				}).closest("li, .dropdown-item").hide();
+
+				// Add "Export My Data" if not already there
+				if (!$menu.find("a:contains('Export My Data')").length) {
+					let $item = $('<a class="dropdown-item" href="#">'
+						+ __("Export My Data") + "</a>");
+					$item.on("click", function (e) {
+						e.preventDefault();
+						show_my_data_export_dialog(dt);
+					});
+					$menu.append($item);
+				}
+			});
+		}
+
+		// Run immediately and on every DOM change
 		let observer_started = false;
 		let check_interval = setInterval(function () {
 			let $actions_group = $(".actions-btn-group");
-			if (!$actions_group.length) return;
+			let $page_container = $(".page-container, .frappe-control");
 
-			patch_actions_menu();
+			patch_page_menu(); // Always patch the "..." menu
 
-			if (!observer_started) {
+			if ($actions_group.length && !observer_started) {
 				observer_started = true;
-				clearInterval(check_interval);
+				patch_actions_menu();
 
 				// Watch for Actions dropdown being rebuilt (on checkbox select/deselect)
 				let observer = new MutationObserver(function () {
-					setTimeout(patch_actions_menu, 100);
+					setTimeout(function () {
+						patch_actions_menu();
+						patch_page_menu();
+					}, 100);
 				});
 				observer.observe($actions_group[0], { childList: true, subtree: true });
+			}
+
+			// Also observe the page body for menu rebuilds
+			if ($page_container.length && !$page_container.data("export-observer")) {
+				$page_container.data("export-observer", true);
+				let pageObserver = new MutationObserver(function () {
+					setTimeout(patch_page_menu, 200);
+				});
+				pageObserver.observe($page_container[0], { childList: true, subtree: true });
+				clearInterval(check_interval);
 			}
 		}, 500);
 	}

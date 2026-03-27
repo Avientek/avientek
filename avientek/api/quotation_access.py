@@ -95,6 +95,10 @@ def _get_user_sales_persons(user=None):
 	return _get_user_perms(user or frappe.session.user, "Sales Person")
 
 
+def _get_user_companies(user=None):
+	return _get_user_perms(user or frappe.session.user, "Company")
+
+
 def _has_user_perm(allow_type):
 	"""Check if user has a User Permission of given type. Uses direct SQL."""
 	user = frappe.session.user
@@ -146,9 +150,10 @@ def get_permitted_doc_preview(doctype, docname):
 	cg_perms = _get_user_customer_groups(user)
 	sg_perms = _get_user_supplier_groups(user)
 	sp_perms = _get_user_sales_persons(user)
+	company_perms = _get_user_companies(user)
 
 	# No restrictions at all
-	if not brand_perms and not item_group_perms and not cg_perms and not sg_perms and not sp_perms:
+	if not brand_perms and not item_group_perms and not cg_perms and not sg_perms and not sp_perms and not company_perms:
 		return {"full_access": True}
 
 	# Validate doctype is one we support
@@ -178,8 +183,12 @@ def get_permitted_doc_preview(doctype, docname):
 	finally:
 		frappe.flags.ignore_permissions = False
 
-	# Check document-level restrictions (Customer Group, Supplier Group, Sales Person)
+	# Check document-level restrictions (Company, Customer Group, Supplier Group, Sales Person)
 	blocked = []
+	if company_perms:
+		doc_company = doc.get("company") or ""
+		if doc_company and doc_company not in company_perms:
+			blocked.append(_("Company '{0}'").format(doc_company))
 	if cg_perms and has_customer_group:
 		doc_cg = doc.get("customer_group") or ""
 		if doc_cg and doc_cg not in cg_perms:
@@ -522,6 +531,28 @@ def _sales_person_parent_permission_query(user, parent_dt):
 	)
 
 
+def _company_permission_query(user, parent_dt):
+	"""Permission query for Company restriction. Dynamically checks if the doctype has a company field."""
+	if user == "Administrator":
+		return ""
+
+	company_perms = _get_user_companies(user)
+	if not company_perms:
+		return ""
+
+	# Check if the doctype has a company field
+	meta = frappe.get_meta(parent_dt)
+	if not meta.has_field("company"):
+		return ""
+
+	companies_sql = ", ".join(frappe.db.escape(c) for c in company_perms)
+	parent_table = "`tab{}`".format(parent_dt)
+
+	return "({parent}.`company` IN ({companies}) OR IFNULL({parent}.`company`, '') = '')".format(
+		parent=parent_table, companies=companies_sql
+	)
+
+
 # ── Combined permission query (brand + item group) for each doctype ──
 
 def _combined_permission_query(user, parent_dt, child_dt):
@@ -559,6 +590,10 @@ def _combined_permission_query(user, parent_dt, child_dt):
 		sp_parent_cond = _sales_person_parent_permission_query(user, parent_dt)
 		if sp_parent_cond:
 			doc_parts.append(sp_parent_cond)
+	# Company (dynamic — applies if doctype has company field and user has Company perms)
+	company_cond = _company_permission_query(user, parent_dt)
+	if company_cond:
+		doc_parts.append(company_cond)
 	return " AND ".join(doc_parts)
 
 
@@ -598,6 +633,10 @@ def _combined_parent_permission_query(user, parent_dt):
 		sp_parent_cond = _sales_person_parent_permission_query(user, parent_dt)
 		if sp_parent_cond:
 			parts.append(sp_parent_cond)
+	# Company (dynamic)
+	company_cond = _company_permission_query(user, parent_dt)
+	if company_cond:
+		parts.append(company_cond)
 	return " AND ".join(parts)
 
 
@@ -623,13 +662,20 @@ def has_permission_check(doc, ptype, user):
 	ig_perms = _get_user_item_groups(user)
 	cg_perms = _get_user_customer_groups(user)
 	sp_perms = _get_user_sales_persons(user)
+	company_perms = _get_user_companies(user)
 
-	if not brand_perms and not ig_perms and not cg_perms and not sp_perms:
+	if not brand_perms and not ig_perms and not cg_perms and not sp_perms and not company_perms:
 		return None  # No restrictions
 
 	doctype = doc.doctype if hasattr(doc, "doctype") else doc.get("doctype")
 	if not doctype:
 		return None
+
+	# Check Company (parent-level)
+	if company_perms:
+		doc_company = doc.get("company") or ""
+		if doc_company and doc_company not in company_perms:
+			return False
 
 	# Check Customer Group (parent-level)
 	if cg_perms and doctype in CUSTOMER_GROUP_PARENT_DOCTYPES:
@@ -885,6 +931,7 @@ def restricted_export_query():
 				or _get_user_customer_groups(user)
 				or _get_user_supplier_groups(user)
 				or _get_user_sales_persons(user)
+				or _get_user_companies(user)
 			)
 			if has_restriction:
 				frappe.respond_as_web_page(
@@ -918,6 +965,7 @@ def restricted_download_template(
 			or _get_user_customer_groups(user)
 			or _get_user_supplier_groups(user)
 			or _get_user_sales_persons(user)
+			or _get_user_companies(user)
 		)
 		if has_restriction:
 			frappe.respond_as_web_page(
