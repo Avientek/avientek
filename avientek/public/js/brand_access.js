@@ -569,20 +569,29 @@
 			}
 		}
 
-		// Patch the "..." (Menu) dropdown — hide Export, add Export My Data
+		// Patch ALL menus on the page — hide Export, add Export My Data
 		function patch_page_menu() {
-			$(".menu-btn-group .dropdown-menu, .page-icon-group .dropdown-menu").each(function () {
+			// Target every dropdown-menu on the page (Menu "...", page actions, etc.)
+			$(".dropdown-menu").each(function () {
 				let $menu = $(this);
+				// Skip the Actions dropdown (handled separately by patch_actions_menu)
+				if ($menu.closest(".actions-btn-group").length) return;
 
-				// Hide standard Export
-				$menu.find("a, button").filter(function () {
+				// Find and hide "Export" items
+				let found_export = false;
+				$menu.find("a, button, .dropdown-item").filter(function () {
 					let txt = $(this).text().trim();
 					return txt === "Export" || txt === __("Export");
-				}).closest("li, .dropdown-item").hide();
+				}).each(function () {
+					found_export = true;
+					$(this).closest("li").length
+						? $(this).closest("li").hide()
+						: $(this).hide();
+				});
 
-				// Add "Export My Data" if not already there
-				if (!$menu.find("a:contains('Export My Data')").length) {
-					let $item = $('<a class="dropdown-item" href="#">'
+				// Add "Export My Data" if Export was found/hidden and our button isn't there
+				if (found_export && !$menu.find(".export-my-data-btn").length) {
+					let $item = $('<a class="dropdown-item export-my-data-btn" href="#">'
 						+ __("Export My Data") + "</a>");
 					$item.on("click", function (e) {
 						e.preventDefault();
