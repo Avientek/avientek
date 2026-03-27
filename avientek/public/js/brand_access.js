@@ -582,19 +582,17 @@
 	}
 
 	function show_my_data_export_dialog(doctype) {
-		// Get selected records from list view — use multiple methods for robustness
+		// Get selected records from list view
 		let selected = [];
 		try {
-			// Method 1: cur_list API
 			if (typeof cur_list !== "undefined" && cur_list && cur_list.get_checked_items) {
 				selected = cur_list.get_checked_items().map(function (item) {
 					return item.name;
 				});
 			}
-			// Method 2: fallback to DOM checkboxes
 			if (!selected.length) {
 				$(".list-row-checkbox:checked").each(function () {
-					let name = $(this).data("name");
+					var name = $(this).data("name");
 					if (name) selected.push(name);
 				});
 			}
@@ -602,17 +600,32 @@
 			// silently ignore
 		}
 
-		let info_text = selected.length
-			? __("Export {0} selected {1} record(s) — only items you have permission to access.", [selected.length, __(doctype)])
-			: __("Export all permitted {0} records — only items you have permission to access.", [__(doctype)]);
-
 		let d = new frappe.ui.Dialog({
 			title: __("Export My Data — {0}", [__(doctype)]),
 			fields: [
 				{
 					fieldname: "info",
 					fieldtype: "HTML",
-					options: '<p style="color:#888;">' + info_text + "</p>",
+					options: '<p style="color:#888;">' +
+						__("Export only the data you have permission to access.") +
+						"</p>",
+				},
+				{
+					fieldname: "export_scope",
+					fieldtype: "Select",
+					label: __("Export Scope"),
+					options: __("All Permitted Records") + "\n" + __("Selected Records Only"),
+					default: selected.length
+						? __("Selected Records Only")
+						: __("All Permitted Records"),
+				},
+				{
+					fieldname: "docnames",
+					fieldtype: "Small Text",
+					label: __("Document Names (one per line)"),
+					default: selected.join("\n"),
+					depends_on: "eval:doc.export_scope=='" + __("Selected Records Only") + "'",
+					description: __("Enter document names to export, one per line"),
 				},
 				{
 					fieldname: "file_type",
@@ -625,12 +638,26 @@
 			primary_action_label: __("Download"),
 			primary_action: function () {
 				let file_type = d.get_value("file_type");
+				let scope = d.get_value("export_scope");
+				let names_to_export = [];
+
+				if (scope === __("Selected Records Only")) {
+					let raw = d.get_value("docnames") || "";
+					names_to_export = raw.split("\n")
+						.map(function (n) { return n.trim(); })
+						.filter(function (n) { return n; });
+					if (!names_to_export.length) {
+						frappe.msgprint(__("Please enter at least one document name."));
+						return;
+					}
+				}
+
 				d.hide();
 				let url = "/api/method/avientek.api.quotation_access.export_my_data" +
 					"?doctype=" + encodeURIComponent(doctype) +
 					"&file_type=" + encodeURIComponent(file_type);
-				if (selected.length) {
-					url += "&docnames=" + encodeURIComponent(JSON.stringify(selected));
+				if (names_to_export.length) {
+					url += "&docnames=" + encodeURIComponent(JSON.stringify(names_to_export));
 				}
 				window.open(url);
 			},
