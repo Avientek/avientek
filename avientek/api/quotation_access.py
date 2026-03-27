@@ -59,6 +59,9 @@ SUPPLIER_GROUP_PARENT_DOCTYPES = ["Purchase Invoice"]
 # Doctypes with Sales Team child table (sales_person field)
 SALES_PERSON_DOCTYPES = ["Sales Order", "Sales Invoice", "Delivery Note", "POS Invoice"]
 
+# Doctypes with sales_person as a parent-level Link field (not Sales Team child table)
+SALES_PERSON_PARENT_DOCTYPES = ["Quotation"]
+
 
 def _get_user_perms(user, allow_type):
 	"""Get permitted values for a user. Uses direct SQL to bypass permission checks
@@ -189,6 +192,11 @@ def get_permitted_doc_preview(doctype, docname):
 		sales_team = [st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person]
 		if sales_team and not set(sales_team) & set(sp_perms):
 			blocked.append(_("Sales Person"))
+	# Sales Person as parent-level Link field
+	if sp_perms and doctype in SALES_PERSON_PARENT_DOCTYPES:
+		doc_sp = doc.get("sales_person") or ""
+		if doc_sp and doc_sp not in sp_perms:
+			blocked.append(_("Sales Person '{0}'").format(doc_sp))
 
 	if blocked:
 		return {
@@ -497,6 +505,23 @@ def _sales_person_permission_query(user, parent_dt):
 	).format(parent=parent_table, parent_dt=parent_dt, sps=sps_sql)
 
 
+def _sales_person_parent_permission_query(user, parent_dt):
+	"""Permission query for doctypes where sales_person is a parent-level Link field."""
+	if user == "Administrator":
+		return ""
+
+	sp_perms = _get_user_sales_persons(user)
+	if not sp_perms:
+		return ""
+
+	sps_sql = ", ".join(frappe.db.escape(sp) for sp in sp_perms)
+	parent_table = "`tab{}`".format(parent_dt)
+
+	return "({parent}.`sales_person` IN ({sps}) OR IFNULL({parent}.`sales_person`, '') = '')".format(
+		parent=parent_table, sps=sps_sql
+	)
+
+
 # ── Combined permission query (brand + item group) for each doctype ──
 
 def _combined_permission_query(user, parent_dt, child_dt):
@@ -529,6 +554,11 @@ def _combined_permission_query(user, parent_dt, child_dt):
 		sp_cond = _sales_person_permission_query(user, parent_dt)
 		if sp_cond:
 			doc_parts.append(sp_cond)
+	# Sales Person (parent-level Link field)
+	if parent_dt in SALES_PERSON_PARENT_DOCTYPES:
+		sp_parent_cond = _sales_person_parent_permission_query(user, parent_dt)
+		if sp_parent_cond:
+			doc_parts.append(sp_parent_cond)
 	return " AND ".join(doc_parts)
 
 
@@ -564,6 +594,10 @@ def _combined_parent_permission_query(user, parent_dt):
 		sp_cond = _sales_person_permission_query(user, parent_dt)
 		if sp_cond:
 			parts.append(sp_cond)
+	if parent_dt in SALES_PERSON_PARENT_DOCTYPES:
+		sp_parent_cond = _sales_person_parent_permission_query(user, parent_dt)
+		if sp_parent_cond:
+			parts.append(sp_parent_cond)
 	return " AND ".join(parts)
 
 
@@ -607,6 +641,12 @@ def has_permission_check(doc, ptype, user):
 	if sp_perms and doctype in SALES_PERSON_DOCTYPES:
 		sales_team = [st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person]
 		if sales_team and not set(sales_team) & set(sp_perms):
+			return False
+
+	# Check Sales Person (parent-level Link field)
+	if sp_perms and doctype in SALES_PERSON_PARENT_DOCTYPES:
+		doc_sp = doc.get("sales_person") or ""
+		if doc_sp and doc_sp not in sp_perms:
 			return False
 
 	# Check child item Brand and Item Group using direct SQL
@@ -822,7 +862,7 @@ EXPORT_RESTRICTED_DOCTYPES = set(
 	list(BRAND_DOCTYPES.keys()) + BRAND_PARENT_DOCTYPES +
 	list(ITEM_GROUP_DOCTYPES.keys()) + ITEM_GROUP_PARENT_DOCTYPES +
 	CUSTOMER_GROUP_PARENT_DOCTYPES + SUPPLIER_GROUP_PARENT_DOCTYPES +
-	SALES_PERSON_DOCTYPES
+	SALES_PERSON_DOCTYPES + SALES_PERSON_PARENT_DOCTYPES
 )
 
 
@@ -966,12 +1006,10 @@ def restricted_query_report_run(
 
 @frappe.whitelist()
 def export_my_data(doctype, file_type="CSV"):
-	"""Export only the user's permitted data with child-row filtering.
+	"""Export only the user's permitted data with dynamic child-row filtering.
 
-	Uses frappe.get_list (which applies ALL permission conditions including
-	Company, Customer Group, our custom permission_query_conditions, AND
-	shared document filters) to get permitted parent documents.
-	Then fetches child rows and filters them by Brand/Item Group.
+	Dynamically reads ALL User Permissions for the current user and filters
+	child rows by ANY matching field (brand, item_group, etc.) using AND logic.
 	"""
 	import csv
 	import io
@@ -983,9 +1021,15 @@ def export_my_data(doctype, file_type="CSV"):
 	if doctype not in EXPORT_RESTRICTED_DOCTYPES:
 		frappe.throw(_("This doctype does not require filtered export."))
 
-	brand_perms = _get_user_brands(user)
-	ig_perms = _get_user_item_groups(user)
-	sp_perms = _get_user_sales_persons(user)
+	# ── Dynamically read ALL User Permissions ──
+	all_perms = frappe.db.sql(
+		"SELECT allow, for_value FROM `tabUser Permission` WHERE user=%s",
+		user, as_dict=True,
+	)
+	# Group by allow type: {"Brand": ["Yealink"], "Item Group": ["UC Product"], ...}
+	perm_map = {}
+	for p in all_perms:
+		perm_map.setdefault(p["allow"], []).append(p["for_value"])
 
 	meta = frappe.get_meta(doctype)
 
@@ -993,11 +1037,11 @@ def export_my_data(doctype, file_type="CSV"):
 	parent_fields = ["name"]
 	for fn in ["customer", "customer_name", "supplier", "supplier_name", "party_name",
 			   "transaction_date", "posting_date", "grand_total", "status",
-			   "company", "currency", "customer_group"]:
+			   "company", "currency", "customer_group", "sales_person"]:
 		if meta.has_field(fn):
 			parent_fields.append(fn)
 
-	# Build permission query directly (bypasses shared doc OR bypass)
+	# Build permission query for parent docs (uses all restriction types)
 	child_dt_for_query = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
 	if child_dt_for_query:
 		perm_cond = _combined_permission_query(user, doctype, child_dt_for_query)
@@ -1012,21 +1056,16 @@ def export_my_data(doctype, file_type="CSV"):
 			pluck="name",
 		)
 	else:
-		# No custom restrictions — use standard get_list
 		parent_names = frappe.get_list(
-			doctype,
-			fields=["name"],
-			limit_page_length=5000,
-			order_by="modified desc",
-			pluck="name",
+			doctype, fields=["name"], limit_page_length=5000,
+			order_by="modified desc", pluck="name",
 		)
 
 	if not parent_names:
 		frappe.respond_as_web_page(
 			_("No Data"),
 			_("No {0} records found matching your permissions.").format(_(doctype)),
-			http_status_code=200,
-			indicator_color="orange",
+			http_status_code=200, indicator_color="orange",
 		)
 		return
 
@@ -1043,16 +1082,24 @@ def export_my_data(doctype, file_type="CSV"):
 		_send_csv_response(output.getvalue(), doctype, file_type)
 		return
 
-	# Fetch child table fields
+	# ── Build dynamic child-row filter map ──
+	# Map User Permission type → child table fieldname
+	# e.g. {"Brand": "brand", "Item Group": "item_group"}
 	child_meta = frappe.get_meta(child_dt)
+	child_filter_map = {}  # {fieldname: [permitted_values]}
+	for allow_type, values in perm_map.items():
+		fieldname = frappe.scrub(allow_type)  # "Brand" → "brand", "Item Group" → "item_group"
+		if child_meta.has_field(fieldname):
+			child_filter_map[fieldname] = set(values)
+
+	# Fetch child table fields
 	child_fields = ["parent", "idx"]
 	for fn in ["item_code", "item_name", "brand", "item_group", "qty", "rate",
 			   "amount", "uom", "description", "warehouse"]:
 		if child_meta.has_field(fn):
 			child_fields.append(fn)
 
-	# Fetch ALL child rows for permitted parents (use ignore_permissions
-	# since parent access is already verified via get_list above)
+	# Fetch ALL child rows for permitted parents
 	all_children = []
 	batch_size = 500
 	for i in range(0, len(parent_names), batch_size):
@@ -1062,24 +1109,25 @@ def export_my_data(doctype, file_type="CSV"):
 			"SELECT {fields} FROM `tab{dt}` WHERE parent IN ({ph}) ORDER BY parent, idx".format(
 				fields=", ".join(child_fields), dt=child_dt, ph=ph
 			),
-			batch,
-			as_dict=True,
+			batch, as_dict=True,
 		)
 		all_children.extend(rows)
 
-	# Filter child rows: AND logic — item must match ALL active restrictions
+	# ── Dynamic child-row filtering: AND logic ──
+	# Item must match ALL active restrictions that exist on the child table
 	filtered_children = []
 	for row in all_children:
-		row_brand = row.get("brand") or ""
-		row_ig = row.get("item_group") or ""
-
-		brand_ok = not brand_perms or not row_brand or row_brand in brand_perms
-		ig_ok = not ig_perms or not row_ig or row_ig in ig_perms
-
-		if brand_ok and ig_ok:
+		ok = True
+		for fieldname, permitted_values in child_filter_map.items():
+			row_val = row.get(fieldname) or ""
+			if row_val and row_val not in permitted_values:
+				ok = False
+				break
+		if ok:
 			filtered_children.append(row)
 
 	# Get Sales Team data (only permitted sales persons)
+	sp_perms = perm_map.get("Sales Person", [])
 	sales_team_data = {}
 	if sp_perms and doctype in SALES_PERSON_DOCTYPES:
 		for i in range(0, len(parent_names), batch_size):
@@ -1090,8 +1138,7 @@ def export_my_data(doctype, file_type="CSV"):
 				"SELECT parent, sales_person FROM `tabSales Team` "
 				"WHERE parent IN ({ph}) AND parenttype = %s "
 				"AND sales_person IN ({sp})".format(ph=ph, sp=sp_list),
-				batch + [doctype],
-				as_dict=True,
+				batch + [doctype], as_dict=True,
 			)
 			for st in st_rows:
 				sales_team_data.setdefault(st.parent, []).append(st.sales_person)
@@ -1128,9 +1175,8 @@ def export_my_data(doctype, file_type="CSV"):
 	if not filtered_children:
 		frappe.respond_as_web_page(
 			_("No Data"),
-			_("No items matching your Brand/Item Group permissions found in the permitted {0} records.").format(_(doctype)),
-			http_status_code=200,
-			indicator_color="orange",
+			_("No items matching your permissions found in the permitted {0} records.").format(_(doctype)),
+			http_status_code=200, indicator_color="orange",
 		)
 		return
 
