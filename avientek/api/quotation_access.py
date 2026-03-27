@@ -257,9 +257,9 @@ def get_permitted_doc_preview(doctype, docname):
 		item_brand = item.get("brand") or ""
 		item_ig = item.get("item_group") or ""
 
-		# AND logic: item must match ALL active restrictions
-		brand_ok = not brand_perms or not item_brand or item_brand in brand_perms
-		ig_ok = not item_group_perms or not item_ig or item_ig in item_group_perms
+		# Strict AND logic: item must match ALL active restrictions, blank = hidden
+		brand_ok = not brand_perms or (item_brand and item_brand in brand_perms)
+		ig_ok = not item_group_perms or (item_ig and item_ig in item_group_perms)
 		item_ok = brand_ok and ig_ok
 
 		if item_ok:
@@ -331,7 +331,7 @@ def _brand_permission_query(user, parent_dt, child_dt):
 		"EXISTS ("
 		"SELECT 1 FROM {child} qi "
 		"WHERE qi.parent = {parent}.name "
-		"AND (qi.brand IN ({brands}) OR IFNULL(qi.brand, '') = '')"
+		"AND qi.brand IN ({brands})"
 		")"
 	).format(child=child_table, parent=parent_table, brands=brands_sql)
 
@@ -350,7 +350,7 @@ def _brand_permission_query(user, parent_dt, child_dt):
 	# Filter item child table rows in report view
 	if any(child_table in str(f) for f in fields):
 		conditions.append(
-			"({child}.`brand` IN ({brands}) OR IFNULL({child}.`brand`, '') = '')".format(
+			"{child}.`brand` IN ({brands})".format(
 				child=child_table, brands=brands_sql
 			)
 		)
@@ -359,7 +359,7 @@ def _brand_permission_query(user, parent_dt, child_dt):
 	brand_summary_table = "`tabQuotation Brand Summary`"
 	if parent_dt == "Quotation" and brand_summary_table in fields_str:
 		conditions.append(
-			"({bs}.`brand` IN ({brands}) OR IFNULL({bs}.`brand`, '') = '')".format(
+			"{bs}.`brand` IN ({brands})".format(
 				bs=brand_summary_table, brands=brands_sql
 			)
 		)
@@ -380,7 +380,7 @@ def _brand_parent_permission_query(user, parent_dt):
 	parent_table = "`tab{}`".format(parent_dt)
 
 	# Also show items with no brand set (empty/null)
-	return "({parent}.`brand` IN ({brands}) OR IFNULL({parent}.`brand`, '') = '')".format(
+	return "{parent}.`brand` IN ({brands})".format(
 		parent=parent_table, brands=brands_sql
 	)
 
@@ -405,7 +405,7 @@ def _item_group_permission_query(user, parent_dt, child_dt):
 		"EXISTS ("
 		"SELECT 1 FROM {child} qi "
 		"WHERE qi.parent = {parent}.name "
-		"AND (qi.item_group IN ({igs}) OR IFNULL(qi.item_group, '') = '')"
+		"AND qi.item_group IN ({igs})"
 		")"
 	).format(child=child_table, parent=parent_table, igs=igs_sql)
 
@@ -420,7 +420,7 @@ def _item_group_permission_query(user, parent_dt, child_dt):
 	is_report_view = any(child_table in str(f) for f in fields)
 
 	if is_report_view:
-		return "{exists} AND ({child}.`item_group` IN ({igs}) OR IFNULL({child}.`item_group`, '') = '')".format(
+		return "{exists} AND {child}.`item_group` IN ({igs})".format(
 			exists=exists_cond, child=child_table, igs=igs_sql
 		)
 
@@ -439,7 +439,7 @@ def _item_group_parent_permission_query(user, parent_dt):
 	igs_sql = ", ".join(frappe.db.escape(ig) for ig in ig_perms)
 	parent_table = "`tab{}`".format(parent_dt)
 
-	return "({parent}.`item_group` IN ({igs}) OR IFNULL({parent}.`item_group`, '') = '')".format(
+	return "{parent}.`item_group` IN ({igs})".format(
 		parent=parent_table, igs=igs_sql
 	)
 
@@ -458,7 +458,7 @@ def _customer_group_permission_query(user, parent_dt):
 	cgs_sql = ", ".join(frappe.db.escape(cg) for cg in cg_perms)
 	parent_table = "`tab{}`".format(parent_dt)
 
-	return "({parent}.`customer_group` IN ({cgs}) OR IFNULL({parent}.`customer_group`, '') = '')".format(
+	return "{parent}.`customer_group` IN ({cgs})".format(
 		parent=parent_table, cgs=cgs_sql
 	)
 
@@ -477,7 +477,7 @@ def _supplier_group_permission_query(user, parent_dt):
 	sgs_sql = ", ".join(frappe.db.escape(sg) for sg in sg_perms)
 	parent_table = "`tab{}`".format(parent_dt)
 
-	return "({parent}.`supplier_group` IN ({sgs}) OR IFNULL({parent}.`supplier_group`, '') = '')".format(
+	return "{parent}.`supplier_group` IN ({sgs})".format(
 		parent=parent_table, sgs=sgs_sql
 	)
 
@@ -496,20 +496,13 @@ def _sales_person_permission_query(user, parent_dt):
 	sps_sql = ", ".join(frappe.db.escape(sp) for sp in sp_perms)
 	parent_table = "`tab{}`".format(parent_dt)
 
-	# Show documents that have at least one matching sales person,
-	# OR documents with no Sales Team entries (empty = visible, like brand pattern)
+	# Strict: only show documents that have at least one matching sales person
 	return (
-		"("
 		"EXISTS ("
 		"SELECT 1 FROM `tabSales Team` st "
 		"WHERE st.parent = {parent}.name "
 		"AND st.parenttype = '{parent_dt}' "
 		"AND st.sales_person IN ({sps})"
-		") OR NOT EXISTS ("
-		"SELECT 1 FROM `tabSales Team` st2 "
-		"WHERE st2.parent = {parent}.name "
-		"AND st2.parenttype = '{parent_dt}'"
-		")"
 		")"
 	).format(parent=parent_table, parent_dt=parent_dt, sps=sps_sql)
 
@@ -526,7 +519,7 @@ def _sales_person_parent_permission_query(user, parent_dt):
 	sps_sql = ", ".join(frappe.db.escape(sp) for sp in sp_perms)
 	parent_table = "`tab{}`".format(parent_dt)
 
-	return "({parent}.`sales_person` IN ({sps}) OR IFNULL({parent}.`sales_person`, '') = '')".format(
+	return "{parent}.`sales_person` IN ({sps})".format(
 		parent=parent_table, sps=sps_sql
 	)
 
@@ -548,7 +541,7 @@ def _company_permission_query(user, parent_dt):
 	companies_sql = ", ".join(frappe.db.escape(c) for c in company_perms)
 	parent_table = "`tab{}`".format(parent_dt)
 
-	return "({parent}.`company` IN ({companies}) OR IFNULL({parent}.`company`, '') = '')".format(
+	return "{parent}.`company` IN ({companies})".format(
 		parent=parent_table, companies=companies_sql
 	)
 
@@ -1183,7 +1176,8 @@ def export_my_data(doctype, file_type="CSV", docnames=None):
 		ok = True
 		for fieldname, permitted_values in child_filter_map.items():
 			row_val = row.get(fieldname) or ""
-			if row_val and row_val not in permitted_values:
+			# Strict: blank values are NOT permitted, must match exactly
+			if not row_val or row_val not in permitted_values:
 				ok = False
 				break
 		if ok:
