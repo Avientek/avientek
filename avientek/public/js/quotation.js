@@ -426,12 +426,14 @@ frappe.ui.form.on('Quotation', {
             if (Object.keys(filters).length) return { filters: filters };
         });
 
-        // Filter Sales Person by permitted values
-        frm.set_query('sales_person', 'sales_team', function () {
-            if (frm._permitted_sales_persons && frm._permitted_sales_persons.length) {
-                return { filters: { name: ["in", frm._permitted_sales_persons] } };
-            }
-        });
+        // Filter Sales Person by permitted values (sales_team child table, if exists)
+        if (frm.fields_dict.sales_team) {
+            frm.set_query('sales_person', 'sales_team', function () {
+                if (frm._permitted_sales_persons && frm._permitted_sales_persons.length) {
+                    return { filters: { name: ["in", frm._permitted_sales_persons] } };
+                }
+            });
+        }
 
         // Fetch user permission restrictions once (cached in frm)
         if (!frm._perms_loaded) {
