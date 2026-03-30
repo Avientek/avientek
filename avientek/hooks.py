@@ -130,7 +130,6 @@ fixtures = [
 					"Quotation-custom_discount_amount_value","Quotation-custom_discount_",
      				"Quotation-custom_column_break_lqu6l","Quotation-custom_apply_discount",
 					"Quotation Item-custom_discount_amount_value","Quotation Item-custom_discount_amount_qty","Quotation Item-custom_addl_discount_amount",
-					"Quotation Item-custom_column_break_calc_3","Quotation Item-custom_column_break_calc_4",
 					"Quotation Item-custom_special_price_note","Quotation Item-custom_delivery_eta_copy","Quotation Item-custom_shipping_mode",
 					"Quotation-custom_discount_type","Quotation-custom_incentive_type","Quotation-custom_item_info_html",
 					"Quotation-custom_created_by","Quotation-custom_section_break_tlqc2","Quotation-custom_note",

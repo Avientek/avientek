@@ -123,7 +123,6 @@ def _fix_quotation_item_calc_layout():
 	# ── Create missing column breaks if needed ──
 	for cb in [
 		{"fieldname": "custom_column_break_calc_3", "insert_after": "custom_transport_value"},
-		{"fieldname": "custom_column_break_calc_4", "insert_after": "custom_discount_amount_qty"},
 	]:
 		if not frappe.db.exists("Custom Field", {"dt": dt, "fieldname": cb["fieldname"]}):
 			doc = frappe.new_doc("Custom Field")
@@ -171,8 +170,7 @@ def _fix_quotation_item_calc_layout():
 		("custom_finance_", "reward_per"),
 		("custom_transport_", "custom_finance_"),
 		# Calc section: Col 2 — values
-		("column_break_32", "custom_transport_"),
-		("shipping", "column_break_32"),
+		("shipping", "custom_transport_"),
 		("reward", "shipping"),
 		("custom_finance_value", "reward"),
 		("custom_transport_value", "custom_finance_value"),
@@ -186,8 +184,7 @@ def _fix_quotation_item_calc_layout():
 		("custom_discount_amount_value", "custom_special_rate"),
 		("custom_discount_amount_qty", "custom_discount_amount_value"),
 		# Calc section: Col 4 — calculation values
-		("custom_column_break_calc_4", "custom_discount_amount_qty"),
-		("custom_incentive_value", "custom_column_break_calc_4"),
+		("custom_incentive_value", "custom_discount_amount_qty"),
 		("custom_customs_value", "custom_incentive_value"),
 		("custom_markup_value", "custom_customs_value"),
 		("custom_margin_value", "custom_markup_value"),

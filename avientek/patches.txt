@@ -1,2 +1,3 @@
 avientek.patches.fix_quotation_item_layout
 avientek.patches.fix_quotation_item_layout_v2
+avientek.patches.remove_quotation_item_column_breaks
