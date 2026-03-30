@@ -241,7 +241,7 @@ def _fix_global_field_settings():
 		frappe.db.set_value("Custom Field", si_cf, "reqd", 0)
 
 	# 3. Delete stale column breaks from Quotation Item (permanent cleanup)
-	for fn in ["column_break_32", "column_break_38", "custom_column_break_calc_4"]:
+	for fn in ["column_break_32", "column_break_38", "custom_column_break_calc_4", "custom_column_break_9d6lj"]:
 		cf_name = f"Quotation Item-{fn}"
 		if frappe.db.exists("Custom Field", cf_name):
 			frappe.delete_doc("Custom Field", cf_name, force=True)
