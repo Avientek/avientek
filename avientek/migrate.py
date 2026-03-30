@@ -11,6 +11,7 @@ def after_migrate():
 	_create_asset_dam_fields()
 	_deactivate_old_quotation_workflows()
 	_fix_quotation_item_calc_layout()
+	_fix_global_field_settings()
 
 
 def _create_asset_dam_fields():
@@ -191,6 +192,7 @@ def _fix_quotation_item_calc_layout():
 		("custom_selling_price", "custom_margin_value"),
 		("custom_total_", "custom_selling_price"),
 		("custom_cogs", "custom_total_"),
+		("custom_addl_discount_amount", "custom_cogs"),
 	]
 
 	# Start at idx 100 — safely after ALL standard Quotation Item fields
@@ -214,6 +216,35 @@ def _fix_quotation_item_calc_layout():
 	)
 	for j, lf in enumerate(legacy_fields):
 		frappe.db.set_value("Custom Field", lf["name"], "idx", legacy_start + j)
+
+	frappe.db.commit()
+
+
+def _fix_global_field_settings():
+	"""Fix field settings that must persist across all servers.
+
+	Runs on every migrate to ensure these settings are always correct,
+	regardless of DB state or which server is being migrated.
+	"""
+	# 1. Hide is_reverse_charge on Quotation
+	if frappe.db.exists("Custom Field", {"dt": "Quotation", "fieldname": "is_reverse_charge"}):
+		if not frappe.db.exists("Property Setter", {
+			"doc_type": "Quotation", "field_name": "is_reverse_charge", "property": "hidden"
+		}):
+			make_property_setter(
+				"Quotation", "is_reverse_charge", "hidden", "1", "Check"
+			)
+
+	# 2. Make custom_quote_type optional on Sales Invoice
+	si_cf = frappe.db.exists("Custom Field", "Sales Invoice-custom_quote_type")
+	if si_cf:
+		frappe.db.set_value("Custom Field", si_cf, "reqd", 0)
+
+	# 3. Delete stale column breaks from Quotation Item (permanent cleanup)
+	for fn in ["column_break_32", "column_break_38", "custom_column_break_calc_4"]:
+		cf_name = f"Quotation Item-{fn}"
+		if frappe.db.exists("Custom Field", cf_name):
+			frappe.delete_doc("Custom Field", cf_name, force=True)
 
 	frappe.db.commit()
 
