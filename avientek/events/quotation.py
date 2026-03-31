@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import flt
+from frappe import _
 from frappe.utils import flt, cint
 from frappe.model.workflow import apply_workflow
 import json
@@ -400,6 +400,7 @@ def rebuild_brand_summary(doc):
                 "customs": 0, "customs_percent": 0,
                 "buying_price": 0,
                 "total_cost": 0, "total_selling": 0,
+                "std_margin_weighted_sum": 0, "selling_weight_sum": 0,
                 "cnt": 0,
             }
 
@@ -422,6 +423,8 @@ def rebuild_brand_summary(doc):
         bk["buying_price"]       += flt(sp * qty, 4)
         bk["total_cost"]         += _to_flt(it.custom_cogs)
         bk["total_selling"]      += _to_flt(it.custom_selling_price)
+        bk["std_margin_weighted_sum"] += _to_flt(it.std_margin_per) * _to_flt(it.custom_selling_price)
+        bk["selling_weight_sum"]     += _to_flt(it.custom_selling_price)
         bk["cnt"]                += 1
 
     # Get additional discount to distribute to brand summary
@@ -442,6 +445,12 @@ def rebuild_brand_summary(doc):
         effective_ts = flt(ts - brand_addl, 4)
         brand_margin_pct = flt((effective_ts - tc) / effective_ts * 100, 4) if effective_ts else 0
 
+        # Weighted average std margin for the brand
+        std_margin_percent = (
+            d["std_margin_weighted_sum"] / d["selling_weight_sum"]
+            if d["selling_weight_sum"] > 0 else 0
+        )
+
         doc.append("custom_quotation_brand_summary", {
             "brand":              brand,
             "buying_price":       flt(d["buying_price"], 4),
@@ -461,6 +470,8 @@ def rebuild_brand_summary(doc):
             "total_selling":      flt(effective_ts, 4),
             "margin":             flt(effective_ts - tc, 4),
             "margin_percent":     brand_margin_pct,
+            "std_margin_percent": flt(std_margin_percent, 2),
+            "approval_status":    "",
         })
 
 
@@ -772,6 +783,7 @@ def run_calculation_pipeline(doc, method=None):
 
     rebuild_brand_summary(doc)
     recalc_doc_totals(doc)
+    set_margin_flags(doc)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -902,9 +914,24 @@ def get_overall_margin(salesperson, brand):
     date_cut = frappe.db.get_single_value(
         "Selling Settings", "custom_applicable_date"
     )
+    include_cancelled = cint(frappe.db.get_single_value(
+        "Selling Settings", "custom_include_cancelled_quotations"
+    ))
+    include_lost = cint(frappe.db.get_single_value(
+        "Selling Settings", "custom_include_lost_quotations"
+    ))
 
-    cond = """
-        q.docstatus = 1
+    # Build docstatus / status filter
+    status_parts = ["q.docstatus = 1"]
+    if include_cancelled:
+        status_parts.append("q.docstatus = 2")
+    if include_lost:
+        status_parts.append("q.status = 'Lost'")
+
+    status_cond = "(" + " OR ".join(status_parts) + ")"
+
+    cond = f"""
+        {status_cond}
         AND q.sales_person = %(sp)s
         AND qi.brand = %(br)s
         AND qi.rate > 0
@@ -938,57 +965,69 @@ def get_overall_margin(salesperson, brand):
 
 
 def set_margin_flags(doc, method=None):
+    """Evaluate margin approval rules per brand from Brand Summary.
+
+    Decision flow (worst case wins across all brands):
+    1. New Margin >= Standard Margin OR >= 80% of Std → APPROVED
+    2. New Margin >= 60% of Std AND Overall Margin >= 80% of Std → APPROVED_WITH_WARNING
+    3. New Margin >= 60% of Std AND Overall Margin < 80% of Std → LEVEL_1
+    4. New Margin < 60% of Std → LEVEL_2 (mandatory note)
+    """
     doc.custom_auto_approve_ok = 1
-    doc.custom_level_1_approve_ok = 0
+    doc.custom_level_1_approve_ok = 1
 
-    salesperson = doc.sales_person
-
+    salesperson = doc.get("sales_person") or ""
     level_1_required = False
     level_2_required = False
+    warnings = []
 
-    for row in doc.items:
-        std = flt(row.std_margin_per)
-        new = flt(row.custom_margin_)
-        brand = row.brand
+    for bs_row in (doc.get("custom_quotation_brand_summary") or []):
+        brand = bs_row.brand or ""
+        new_margin = flt(bs_row.margin_percent)
+        std_margin = flt(bs_row.std_margin_percent)
 
-        # 1️⃣ Auto approval (no warning)
-        if new >= std or new >= (0.80 * std):
+        # Skip brands with no standard margin (no restriction)
+        if not std_margin:
+            bs_row.approval_status = "APPROVED"
             continue
 
-        # 2️⃣ Auto approval with warning
-        if new >= (0.60 * std):
-            overall = get_overall_margin(salesperson, brand)
-            if overall >= (0.80 * std):
-                frappe.msgprint(
-                    f"""
-                    Brand <b>{brand}</b><br>
-                    Current Margin : <b>{round(new, 2)}%</b><br>
-                    Standard Margin : <b>{round(std, 2)}%</b><br>
-                    Short by : <b>{round(std - new, 2)}%</b><br>
-                    """,
-                    title="Margin Warning",
-                    indicator="orange"
-                )
+        # Rule 1: Auto Approval
+        if new_margin >= std_margin or new_margin >= (0.80 * std_margin):
+            bs_row.approval_status = "APPROVED"
+            continue
 
-                # frappe.msgprint(
-                #     "Current margin below standard, but historical overall margin is healthy."
-                # )
+        # Rule 2 & 3: 60-80% range — check historical overall margin
+        if new_margin >= (0.60 * std_margin):
+            overall = get_overall_margin(salesperson, brand)
+            if overall >= (0.80 * std_margin):
+                bs_row.approval_status = "APPROVED_WITH_WARNING"
+                warnings.append(
+                    _("Brand <b>{0}</b>: Current margin {1}% below standard {2}%, "
+                      "but historical overall margin ({3}%) is healthy.").format(
+                        brand, round(new_margin, 2), round(std_margin, 2), round(overall, 2)
+                    )
+                )
+                continue
+            else:
+                bs_row.approval_status = "LEVEL_1"
+                level_1_required = True
                 continue
 
-            level_1_required = True
-            continue
-
-        # 3️⃣ Level 2 approval
+        # Rule 4: Critical — below 60%
+        bs_row.approval_status = "LEVEL_2"
         level_2_required = True
-    # 🔻 Final decision (AFTER checking all items)
 
+    # Worst case wins
     if level_2_required:
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 0
-
     elif level_1_required:
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 1
+
+    # Show warnings (non-blocking)
+    if warnings:
+        frappe.msgprint("<br><br>".join(warnings), title=_("Margin Warning"), indicator="orange")
 
 
 @frappe.whitelist()

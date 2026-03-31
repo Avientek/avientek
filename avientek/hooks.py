@@ -173,6 +173,8 @@ fixtures = [
 					"Asset-custom_dam_notes",
 					"Asset-custom_so_number",
 					"Asset-custom_so_date",
+					"Selling Settings-custom_include_cancelled_quotations",
+					"Selling Settings-custom_include_lost_quotations",
      ),
 			]
 		],
@@ -424,7 +426,6 @@ doc_events = {
         "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
     },
     "Quotation": {
-        "validate": "avientek.events.quotation.set_margin_flags",
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
             "avientek.events.quotation.validate_total_discount",

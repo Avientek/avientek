@@ -655,6 +655,29 @@
 			// silently ignore
 		}
 
+		// Capture Report View columns (Pick Columns selection)
+		let report_parent_fields = [];
+		let report_child_fields = [];
+		try {
+			if (typeof cur_list !== "undefined" && cur_list && cur_list.report_view
+				&& cur_list.report_view.columns) {
+				cur_list.report_view.columns.forEach(function (col) {
+					if (col.df && col.df.fieldname) {
+						let fn = col.df.fieldname;
+						if (fn === "name" || fn === "idx") return;
+						// Check if field belongs to child table
+						if (col.docfield && col.docfield.parent && col.docfield.parent !== doctype) {
+							report_child_fields.push(fn);
+						} else {
+							report_parent_fields.push(fn);
+						}
+					}
+				});
+			}
+		} catch (e) {
+			// silently ignore
+		}
+
 		let d = new frappe.ui.Dialog({
 			title: __("Export My Data — {0}", [__(doctype)]),
 			fields: [
@@ -713,6 +736,13 @@
 					"&file_type=" + encodeURIComponent(file_type);
 				if (names_to_export.length) {
 					url += "&docnames=" + encodeURIComponent(JSON.stringify(names_to_export));
+				}
+				// Include Report View custom columns if available
+				if (report_parent_fields.length) {
+					url += "&parent_fields_json=" + encodeURIComponent(JSON.stringify(report_parent_fields));
+				}
+				if (report_child_fields.length) {
+					url += "&child_fields_json=" + encodeURIComponent(JSON.stringify(report_child_fields));
 				}
 				window.open(url);
 			},

@@ -1046,12 +1046,13 @@ def restricted_query_report_run(
 # ── Custom filtered export for restricted users ──
 
 @frappe.whitelist()
-def export_my_data(doctype, file_type="CSV", docnames=None):
+def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=None, child_fields_json=None):
 	"""Export only the user's permitted data with dynamic child-row filtering.
 
 	Dynamically reads ALL User Permissions for the current user and filters
 	child rows by ANY matching field (brand, item_group, etc.) using AND logic.
 	If docnames is provided, only those specific documents are exported.
+	If parent_fields_json/child_fields_json provided, use those columns instead of defaults.
 	"""
 	import csv
 	import io
@@ -1084,13 +1085,24 @@ def export_my_data(doctype, file_type="CSV", docnames=None):
 
 	meta = frappe.get_meta(doctype)
 
+	# Parse custom field lists if provided (from Report View Pick Columns)
+	custom_parent_fields = None
+	custom_child_fields = None
+	if parent_fields_json:
+		custom_parent_fields = json_mod.loads(parent_fields_json) if isinstance(parent_fields_json, str) else list(parent_fields_json)
+	if child_fields_json:
+		custom_child_fields = json_mod.loads(child_fields_json) if isinstance(child_fields_json, str) else list(child_fields_json)
+
 	# Build parent fields list
-	parent_fields = ["name"]
-	for fn in ["customer", "customer_name", "supplier", "supplier_name", "party_name",
-			   "transaction_date", "posting_date", "grand_total", "status",
-			   "company", "currency", "customer_group", "sales_person"]:
-		if meta.has_field(fn):
-			parent_fields.append(fn)
+	if custom_parent_fields:
+		parent_fields = ["name"] + [fn for fn in custom_parent_fields if fn != "name" and meta.has_field(fn)]
+	else:
+		parent_fields = ["name"]
+		for fn in ["customer", "customer_name", "supplier", "supplier_name", "party_name",
+				   "transaction_date", "posting_date", "grand_total", "status",
+				   "company", "currency", "customer_group", "sales_person"]:
+			if meta.has_field(fn):
+				parent_fields.append(fn)
 
 	# Build permission query for parent docs (uses all restriction types)
 	child_dt_for_query = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
@@ -1149,11 +1161,14 @@ def export_my_data(doctype, file_type="CSV", docnames=None):
 			child_filter_map[fieldname] = set(values)
 
 	# Fetch child table fields
-	child_fields = ["parent", "idx"]
-	for fn in ["item_code", "item_name", "brand", "item_group", "qty", "rate",
-			   "amount", "uom", "description", "warehouse"]:
-		if child_meta.has_field(fn):
-			child_fields.append(fn)
+	if custom_child_fields:
+		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and child_meta.has_field(fn)]
+	else:
+		child_fields = ["parent", "idx"]
+		for fn in ["item_code", "item_name", "brand", "item_group", "qty", "rate",
+				   "amount", "uom", "description", "warehouse"]:
+			if child_meta.has_field(fn):
+				child_fields.append(fn)
 
 	# Fetch ALL child rows for permitted parents
 	all_children = []
