@@ -742,3 +742,4 @@
 	// Global access for list view handlers
 	window.show_brand_preview = show_restricted_preview;
 })();
+

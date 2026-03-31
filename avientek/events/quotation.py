@@ -322,6 +322,11 @@ def calc_item_totals(it):
     std_price = _to_flt(it.custom_standard_price_)
     sp        = _to_flt(it.custom_special_price)
 
+    # Skip calculation if no custom pricing is configured (no Item Price setup).
+    # Preserve manually entered rate/amount so they don't get zeroed out on save.
+    if not std_price and not sp:
+        return
+
     # Layer 1: percentage-based charges (total values)
     shipping  = flt(_to_flt(it.shipping_per)      * std_price / 100 * qty, 4)
     finance   = flt(_to_flt(it.custom_finance_)   * sp        / 100 * qty, 4)

@@ -226,7 +226,7 @@ fixtures = [
 # app_include_css = "/assets/avientek/css/avientek.css"
 app_include_js = [
     "/assets/avientek/js/workflow_confirm.js?v=5",
-    "/assets/avientek/js/brand_access.js?v=4",
+    "/assets/avientek/js/brand_access.js?v=5",
 ]
 
 # include js, css files in header of web template
@@ -420,7 +420,9 @@ doc_events = {
         "on_cancel": "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
     },
     "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
-    "Sales Order": {"before_update_after_submit": "avientek.events.sales_order.update_eta_in_po"},
+    "Sales Order": {
+        "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
+    },
     "Quotation": {
         "validate": "avientek.events.quotation.set_margin_flags",
         "before_save": [
