@@ -247,8 +247,11 @@ def _fix_global_field_settings():
 		if cf:
 			frappe.db.set_value("Custom Field", cf, "reqd", 0)
 
-	# 3. Set ignore_user_permissions on Quotation child tables with Company field
-	for fn in ["custom_stock"]:
+	# 3. Set ignore_user_permissions on ALL Quotation custom child tables
+	# Prevents "Not permitted" errors for users with Company restrictions
+	for fn in ["custom_stock", "custom_brand_summary", "custom_history",
+			   "custom_quotation_brand_summary", "custom_service_items",
+			   "custom_shipment_and_margin", "optional_items"]:
 		cf = frappe.db.exists("Custom Field", f"Quotation-{fn}")
 		if cf:
 			frappe.db.set_value("Custom Field", cf, "ignore_user_permissions", 1)
