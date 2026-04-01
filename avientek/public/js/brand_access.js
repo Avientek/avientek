@@ -638,7 +638,7 @@
 
 	function show_my_data_export_dialog(doctype) {
 		// Get selected records from list view
-		let selected = [];
+		var selected = [];
 		try {
 			if (typeof cur_list !== "undefined" && cur_list && cur_list.get_checked_items) {
 				selected = cur_list.get_checked_items().map(function (item) {
@@ -655,72 +655,117 @@
 			// silently ignore
 		}
 
-		// Capture Report View columns (Pick Columns selection)
-		let report_parent_fields = [];
-		let report_child_fields = [];
-		try {
-			if (typeof cur_list !== "undefined" && cur_list && cur_list.report_view
-				&& cur_list.report_view.columns) {
-				cur_list.report_view.columns.forEach(function (col) {
-					if (col.df && col.df.fieldname) {
-						let fn = col.df.fieldname;
-						if (fn === "name" || fn === "idx") return;
-						// Check if field belongs to child table
-						if (col.docfield && col.docfield.parent && col.docfield.parent !== doctype) {
-							report_child_fields.push(fn);
-						} else {
-							report_parent_fields.push(fn);
-						}
-					}
+		// Build field options for parent doctype
+		var meta = frappe.get_meta(doctype);
+		var parent_options = (meta.fields || [])
+			.filter(function (df) {
+				return df.fieldtype && !["Section Break", "Column Break", "Tab Break",
+					"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype);
+			})
+			.map(function (df) {
+				return {
+					label: __(df.label || df.fieldname, null, doctype),
+					value: df.fieldname,
+					checked: ["customer_name", "transaction_date", "posting_date",
+						"grand_total", "status", "company", "currency"].includes(df.fieldname),
+				};
+			});
+
+		// Build field options for child table
+		var child_dt = null;
+		var child_options = [];
+		var table_fields = meta.fields.filter(function (df) {
+			return df.fieldtype === "Table" && df.fieldname === "items";
+		});
+		if (table_fields.length) {
+			child_dt = table_fields[0].options;
+			var child_meta = frappe.get_meta(child_dt);
+			child_options = (child_meta.fields || [])
+				.filter(function (df) {
+					return df.fieldtype && !["Section Break", "Column Break", "Tab Break",
+						"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype);
+				})
+				.map(function (df) {
+					return {
+						label: __(df.label || df.fieldname, null, child_dt),
+						value: df.fieldname,
+						checked: ["item_code", "item_name", "brand", "item_group",
+							"qty", "rate", "amount", "uom"].includes(df.fieldname),
+					};
 				});
-			}
-		} catch (e) {
-			// silently ignore
 		}
 
-		let d = new frappe.ui.Dialog({
-			title: __("Export My Data — {0}", [__(doctype)]),
-			fields: [
-				{
-					fieldname: "info",
-					fieldtype: "HTML",
-					options: '<p style="color:#888;">' +
-						__("Export only the data you have permission to access.") +
-						"</p>",
-				},
-				{
-					fieldname: "export_scope",
-					fieldtype: "Select",
-					label: __("Export Scope"),
-					options: __("All Permitted Records") + "\n" + __("Selected Records Only"),
-					default: selected.length
-						? __("Selected Records Only")
-						: __("All Permitted Records"),
-				},
-				{
-					fieldname: "docnames",
-					fieldtype: "Small Text",
-					label: __("Document Names (one per line)"),
-					default: selected.join("\n"),
-					depends_on: "eval:doc.export_scope=='" + __("Selected Records Only") + "'",
-					description: __("Enter document names to export, one per line"),
-				},
-				{
-					fieldname: "file_type",
-					fieldtype: "Select",
-					label: __("File Type"),
-					options: "CSV\nExcel",
-					default: "CSV",
-				},
-			],
-			primary_action_label: __("Download"),
-			primary_action: function () {
-				let file_type = d.get_value("file_type");
-				let scope = d.get_value("export_scope");
-				let names_to_export = [];
+		// Build dialog fields
+		var dialog_fields = [
+			{
+				fieldname: "info",
+				fieldtype: "HTML",
+				options: '<p style="color:#888;">' +
+					__("Export only the data you have permission to access. Select fields to include in the export.") +
+					"</p>",
+			},
+			{
+				fieldname: "export_scope",
+				fieldtype: "Select",
+				label: __("Export Scope"),
+				options: [
+					{ label: __("All Permitted Records"), value: "all" },
+					{ label: __("Selected Records Only"), value: "selected" },
+				],
+				default: selected.length ? "selected" : "all",
+			},
+			{
+				fieldname: "docnames",
+				fieldtype: "Small Text",
+				label: __("Document Names (one per line)"),
+				default: selected.join("\n"),
+				depends_on: "eval:doc.export_scope=='selected'",
+			},
+			{
+				fieldname: "file_type",
+				fieldtype: "Select",
+				label: __("File Type"),
+				options: "CSV\nExcel",
+				default: "CSV",
+			},
+			{ fieldtype: "Section Break", label: __("Select Fields — {0}", [__(doctype)]) },
+			{
+				fieldname: "select_all_area",
+				fieldtype: "HTML",
+			},
+			{
+				fieldname: "parent_fields",
+				label: __(doctype),
+				fieldtype: "MultiCheck",
+				columns: 2,
+				options: parent_options,
+				sort_options: false,
+			},
+		];
 
-				if (scope === __("Selected Records Only")) {
-					let raw = d.get_value("docnames") || "";
+		if (child_options.length) {
+			dialog_fields.push({
+				fieldname: "child_fields",
+				label: child_dt ? __(child_dt) : __("Items"),
+				fieldtype: "MultiCheck",
+				columns: 2,
+				options: child_options,
+				sort_options: false,
+			});
+		}
+
+		var d = new frappe.ui.Dialog({
+			title: __("Export My Data — {0}", [__(doctype)]),
+			fields: dialog_fields,
+			size: "large",
+			primary_action_label: __("Export"),
+			primary_action: function () {
+				var file_type = d.get_value("file_type");
+				var scope = d.get_value("export_scope");
+				var names_to_export = [];
+
+				if (scope === "selected") {
+					var raw = d.get_value("docnames") || "";
 					names_to_export = raw.split("\n")
 						.map(function (n) { return n.trim(); })
 						.filter(function (n) { return n; });
@@ -730,23 +775,50 @@
 					}
 				}
 
+				// Get selected fields
+				var p_fields = d.get_value("parent_fields") || [];
+				var c_fields = d.get_value("child_fields") || [];
+
 				d.hide();
-				let url = "/api/method/avientek.api.quotation_access.export_my_data" +
+				var url = "/api/method/avientek.api.quotation_access.export_my_data" +
 					"?doctype=" + encodeURIComponent(doctype) +
 					"&file_type=" + encodeURIComponent(file_type);
 				if (names_to_export.length) {
 					url += "&docnames=" + encodeURIComponent(JSON.stringify(names_to_export));
 				}
-				// Include Report View custom columns if available
-				if (report_parent_fields.length) {
-					url += "&parent_fields_json=" + encodeURIComponent(JSON.stringify(report_parent_fields));
+				if (p_fields.length) {
+					url += "&parent_fields_json=" + encodeURIComponent(JSON.stringify(p_fields));
 				}
-				if (report_child_fields.length) {
-					url += "&child_fields_json=" + encodeURIComponent(JSON.stringify(report_child_fields));
+				if (c_fields.length) {
+					url += "&child_fields_json=" + encodeURIComponent(JSON.stringify(c_fields));
 				}
 				window.open(url);
 			},
 		});
+
+		// Add Select All / Unselect All buttons
+		var $btn_area = d.get_field("select_all_area").$wrapper;
+		$btn_area.html(
+			'<div style="margin-bottom: 10px;">' +
+			'<button class="btn btn-xs btn-default" data-action="select-all">' + __("Select All") + "</button> " +
+			'<button class="btn btn-xs btn-default" data-action="unselect-all">' + __("Unselect All") + "</button>" +
+			"</div>"
+		);
+		$btn_area.find('[data-action="select-all"]').on("click", function () {
+			d.fields.forEach(function (f) {
+				if (f.df.fieldtype === "MultiCheck") {
+					$(f.$wrapper).find(":checkbox").prop("checked", true).trigger("change");
+				}
+			});
+		});
+		$btn_area.find('[data-action="unselect-all"]').on("click", function () {
+			d.fields.forEach(function (f) {
+				if (f.df.fieldtype === "MultiCheck") {
+					$(f.$wrapper).find(":checkbox").prop("checked", false).trigger("change");
+				}
+			});
+		});
+
 		d.show();
 	}
 
