@@ -1099,9 +1099,13 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	if child_fields_json:
 		custom_child_fields = json_mod.loads(child_fields_json) if isinstance(child_fields_json, str) else list(child_fields_json)
 
-	# Build parent fields list
+	# Build parent fields list — validate against actual DB columns
+	db_columns = {col.fieldname for col in meta.fields if col.fieldtype not in (
+		"Table", "Table MultiSelect", "HTML", "Button", "Heading", "Fold",
+		"Tab Break", "Section Break", "Column Break",
+	)} | {"name"}
 	if custom_parent_fields:
-		parent_fields = ["name"] + [fn for fn in custom_parent_fields if fn != "name" and meta.has_field(fn)]
+		parent_fields = ["name"] + [fn for fn in custom_parent_fields if fn != "name" and fn in db_columns]
 	else:
 		parent_fields = ["name"]
 		for fn in ["customer", "customer_name", "supplier", "supplier_name", "party_name",
@@ -1166,9 +1170,13 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		if child_meta.has_field(fieldname):
 			child_filter_map[fieldname] = set(values)
 
-	# Fetch child table fields
+	# Fetch child table fields — validate against actual DB columns
+	child_db_columns = {col.fieldname for col in child_meta.fields if col.fieldtype not in (
+		"Table", "Table MultiSelect", "HTML", "Button", "Heading", "Fold",
+		"Tab Break", "Section Break", "Column Break",
+	)} | {"parent", "idx", "name"}
 	if custom_child_fields:
-		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and child_meta.has_field(fn)]
+		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and fn in child_db_columns]
 	else:
 		child_fields = ["parent", "idx"]
 		for fn in ["item_code", "item_name", "brand", "item_group", "qty", "rate",

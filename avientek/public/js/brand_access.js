@@ -856,13 +856,15 @@
 		);
 		$btn_area.find('[data-action="select-all"]').on("click", function (e) {
 			e.preventDefault();
-			d.$wrapper.find(".multicheck-toolbar :checkbox, .frappe-control[data-fieldtype='MultiCheck'] :checkbox")
-				.prop("checked", true).trigger("click").prop("checked", true);
+			d.$wrapper.find('input[type="checkbox"][data-unit]').each(function () {
+				if (!this.checked) $(this).click();
+			});
 		});
 		$btn_area.find('[data-action="unselect-all"]').on("click", function (e) {
 			e.preventDefault();
-			d.$wrapper.find(".multicheck-toolbar :checkbox, .frappe-control[data-fieldtype='MultiCheck'] :checkbox")
-				.prop("checked", false).trigger("click").prop("checked", false);
+			d.$wrapper.find('input[type="checkbox"][data-unit]').each(function () {
+				if (this.checked) $(this).click();
+			});
 		});
 
 		d.show();
