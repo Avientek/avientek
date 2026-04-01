@@ -235,10 +235,11 @@ def _fix_global_field_settings():
 				"Quotation", "is_reverse_charge", "hidden", "1", "Check"
 			)
 
-	# 2. Make custom_quote_type optional on Sales Invoice
-	si_cf = frappe.db.exists("Custom Field", "Sales Invoice-custom_quote_type")
-	if si_cf:
-		frappe.db.set_value("Custom Field", si_cf, "reqd", 0)
+	# 2. Make custom_quote_type optional on Sales Invoice and Sales Order
+	for dt in ["Sales Invoice", "Sales Order"]:
+		cf = frappe.db.exists("Custom Field", f"{dt}-custom_quote_type")
+		if cf:
+			frappe.db.set_value("Custom Field", cf, "reqd", 0)
 
 	# 3. Delete stale column breaks from Quotation Item (permanent cleanup)
 	for fn in ["column_break_32", "column_break_38", "custom_column_break_calc_4", "custom_column_break_9d6lj"]:
