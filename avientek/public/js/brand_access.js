@@ -655,6 +655,35 @@
 			// silently ignore
 		}
 
+		// Capture Report View columns if available (for pre-selection)
+		var rv_parent_fields = {};
+		var rv_child_fields = {};
+		var is_report_view = false;
+		try {
+			if (typeof cur_list !== "undefined" && cur_list && cur_list.report_view
+				&& cur_list.report_view.columns && cur_list.report_view.columns.length) {
+				is_report_view = true;
+				cur_list.report_view.columns.forEach(function (col) {
+					if (col.df && col.df.fieldname) {
+						var fn = col.df.fieldname;
+						if (fn === "name" || fn === "idx") return;
+						if (col.docfield && col.docfield.parent && col.docfield.parent !== doctype) {
+							rv_child_fields[fn] = true;
+						} else {
+							rv_parent_fields[fn] = true;
+						}
+					}
+				});
+			}
+		} catch (e) {
+			// silently ignore
+		}
+
+		var default_parent = ["customer_name", "transaction_date", "posting_date",
+			"grand_total", "status", "company", "currency"];
+		var default_child = ["item_code", "item_name", "brand", "item_group",
+			"qty", "rate", "amount", "uom"];
+
 		// Build field options for parent doctype
 		var meta = frappe.get_meta(doctype);
 		var parent_options = (meta.fields || [])
@@ -663,11 +692,13 @@
 					"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype);
 			})
 			.map(function (df) {
+				var is_checked = is_report_view
+					? rv_parent_fields[df.fieldname] || false
+					: default_parent.includes(df.fieldname);
 				return {
 					label: __(df.label || df.fieldname, null, doctype),
 					value: df.fieldname,
-					checked: ["customer_name", "transaction_date", "posting_date",
-						"grand_total", "status", "company", "currency"].includes(df.fieldname),
+					checked: is_checked,
 				};
 			});
 
@@ -686,11 +717,13 @@
 						"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype);
 				})
 				.map(function (df) {
+					var is_checked = is_report_view
+						? rv_child_fields[df.fieldname] || false
+						: default_child.includes(df.fieldname);
 					return {
 						label: __(df.label || df.fieldname, null, child_dt),
 						value: df.fieldname,
-						checked: ["item_code", "item_name", "brand", "item_group",
-							"qty", "rate", "amount", "uom"].includes(df.fieldname),
+						checked: is_checked,
 					};
 				});
 		}
