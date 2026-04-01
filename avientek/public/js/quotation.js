@@ -1214,6 +1214,11 @@ function load_item_defaults(frm, cdt, cdn) {
             frappe.after_ajax(() => {
                 calculate_all_preview(frm, cdt, cdn);
                 update_doc_totals_preview(frm);
+                // Re-render item info HTML with updated Cl.Margin
+                let updated_row = locals[cdt][cdn];
+                if (updated_row && updated_row.item_code) {
+                    refresh_item_info_html(frm, updated_row.item_code);
+                }
             });
         }
     });
@@ -1797,8 +1802,13 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
             }
 
             // Find the current item row to get calculated margin
-            let item_row = (frm.doc.items || []).find(row => row.item_code === item_code);
-            r.message.cal_margin = item_row ? flt(item_row.custom_margin_) : 0;
+            // Check all items with this code and pick the one with a margin value (or the first)
+            let item_rows = (frm.doc.items || []).filter(row => row.item_code === item_code);
+            let cal_margin = 0;
+            for (let ir of item_rows) {
+                if (flt(ir.custom_margin_)) { cal_margin = flt(ir.custom_margin_); break; }
+            }
+            r.message.cal_margin = cal_margin;
 
             // Populate tables for backward compatibility (only on new item selection)
             if (populate_tables) {
