@@ -12,8 +12,30 @@ frappe.ui.form.on('Quotation', {
     },
 
     after_save(frm) {
-        // Server pipeline syncs all totals in before_save.
-        // No reload needed — avoids field flickering.
+        // Show margin warning after save (approval_status is now set by server)
+        frm._margin_warning_shown = false; // reset so warning shows again
+        var warnings = [];
+        (frm.doc.custom_quotation_brand_summary || []).forEach(function (row) {
+            if (row.approval_status === "APPROVED_WITH_WARNING") {
+                warnings.push(
+                    __("Brand <b>{0}</b>: Margin {1}% is below standard {2}%, but historical overall margin is healthy.", [
+                        row.brand, row.margin_percent, row.std_margin_percent
+                    ])
+                );
+            }
+        });
+        if (warnings.length) {
+            frm.dashboard.set_headline(
+                '<span style="color: #e67e22; font-weight: bold;">⚠ Margin Warning: ' +
+                warnings.join(" | ") + '</span>'
+            );
+            frappe.msgprint({
+                title: __("Margin Warning"),
+                message: warnings.join("<br><br>"),
+                indicator: "orange",
+            });
+            frm._margin_warning_shown = true;
+        }
     },
 
     // ── Shipping mode (parent-level) ────────────────────────

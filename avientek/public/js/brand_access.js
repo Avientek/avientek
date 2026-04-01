@@ -811,9 +811,23 @@
 					}
 				}
 
-				// Get selected fields
-				var p_fields = d.get_value("parent_fields") || [];
-				var c_fields = d.get_value("child_fields") || [];
+				// Get selected fields from MultiCheck checkboxes
+				var p_fields = [];
+				var c_fields = [];
+				var pf = d.fields_dict.parent_fields;
+				if (pf && pf.$wrapper) {
+					pf.$wrapper.find(":checkbox:checked").each(function () {
+						var val = $(this).data("unit");
+						if (val) p_fields.push(val);
+					});
+				}
+				var cf = d.fields_dict.child_fields;
+				if (cf && cf.$wrapper) {
+					cf.$wrapper.find(":checkbox:checked").each(function () {
+						var val = $(this).data("unit");
+						if (val) c_fields.push(val);
+					});
+				}
 
 				d.hide();
 				var url = "/api/method/avientek.api.quotation_access.export_my_data" +
@@ -840,19 +854,15 @@
 			'<button class="btn btn-xs btn-default" data-action="unselect-all">' + __("Unselect All") + "</button>" +
 			"</div>"
 		);
-		$btn_area.find('[data-action="select-all"]').on("click", function () {
-			d.fields.forEach(function (f) {
-				if (f.df.fieldtype === "MultiCheck") {
-					$(f.$wrapper).find(":checkbox").prop("checked", true).trigger("change");
-				}
-			});
+		$btn_area.find('[data-action="select-all"]').on("click", function (e) {
+			e.preventDefault();
+			d.$wrapper.find(".multicheck-toolbar :checkbox, .frappe-control[data-fieldtype='MultiCheck'] :checkbox")
+				.prop("checked", true).trigger("click").prop("checked", true);
 		});
-		$btn_area.find('[data-action="unselect-all"]').on("click", function () {
-			d.fields.forEach(function (f) {
-				if (f.df.fieldtype === "MultiCheck") {
-					$(f.$wrapper).find(":checkbox").prop("checked", false).trigger("change");
-				}
-			});
+		$btn_area.find('[data-action="unselect-all"]').on("click", function (e) {
+			e.preventDefault();
+			d.$wrapper.find(".multicheck-toolbar :checkbox, .frappe-control[data-fieldtype='MultiCheck'] :checkbox")
+				.prop("checked", false).trigger("click").prop("checked", false);
 		});
 
 		d.show();
