@@ -366,6 +366,25 @@ frappe.ui.form.on('Quotation', {
 
     // ── Refresh / Onload ────────────────────────────────────
     refresh(frm) {
+        // Show margin warning for APPROVED_WITH_WARNING brands
+        if (frm.doc.custom_quotation_brand_summary && frm.doc.docstatus === 0) {
+            var warnings = [];
+            (frm.doc.custom_quotation_brand_summary || []).forEach(function (row) {
+                if (row.approval_status === "APPROVED_WITH_WARNING") {
+                    warnings.push(
+                        __("Brand <b>{0}</b>: Margin {1}% below standard {2}%, but historical overall margin is healthy.", [
+                            row.brand, row.margin_percent, row.std_margin_percent
+                        ])
+                    );
+                }
+            });
+            if (warnings.length) {
+                frm.dashboard.set_headline(
+                    '<span style="color: #e67e22;">' + warnings.join("<br>") + '</span>'
+                );
+            }
+        }
+
         // Override ERPNext's calculate_taxes_and_totals to prevent it from
         // overwriting our custom selling price calculations.
         // ERPNext calls this after get_item_details, qty changes, etc.
