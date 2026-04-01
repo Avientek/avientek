@@ -1099,12 +1099,11 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	if child_fields_json:
 		custom_child_fields = json_mod.loads(child_fields_json) if isinstance(child_fields_json, str) else list(child_fields_json)
 
-	# Build parent fields list — validate against actual DB columns
-	# Exclude virtual fields, non-data fieldtypes, and fields without DB columns
-	db_columns = {col.fieldname for col in meta.fields if col.fieldtype not in (
-		"Table", "Table MultiSelect", "HTML", "Button", "Heading", "Fold",
-		"Tab Break", "Section Break", "Column Break",
-	) and not col.get("is_virtual")} | {"name"}
+	# Build parent fields list — query actual DB columns (only reliable method)
+	db_columns = set(frappe.db.sql(
+		"SELECT column_name FROM information_schema.columns WHERE table_name=%s",
+		f"tab{doctype}", pluck="column_name",
+	))
 	if custom_parent_fields:
 		parent_fields = ["name"] + [fn for fn in custom_parent_fields if fn != "name" and fn in db_columns]
 	else:
@@ -1171,11 +1170,11 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		if child_meta.has_field(fieldname):
 			child_filter_map[fieldname] = set(values)
 
-	# Fetch child table fields — validate against actual DB columns
-	child_db_columns = {col.fieldname for col in child_meta.fields if col.fieldtype not in (
-		"Table", "Table MultiSelect", "HTML", "Button", "Heading", "Fold",
-		"Tab Break", "Section Break", "Column Break",
-	) and not col.get("is_virtual")} | {"parent", "idx", "name"}
+	# Fetch child table fields — query actual DB columns (only reliable method)
+	child_db_columns = set(frappe.db.sql(
+		"SELECT column_name FROM information_schema.columns WHERE table_name=%s",
+		f"tab{child_dt}", pluck="column_name",
+	))
 	if custom_child_fields:
 		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and fn in child_db_columns]
 	else:
