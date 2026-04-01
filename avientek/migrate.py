@@ -226,14 +226,20 @@ def _fix_global_field_settings():
 	Runs on every migrate to ensure these settings are always correct,
 	regardless of DB state or which server is being migrated.
 	"""
-	# 1. Hide is_reverse_charge on Quotation
-	if frappe.db.exists("Custom Field", {"dt": "Quotation", "fieldname": "is_reverse_charge"}):
-		if not frappe.db.exists("Property Setter", {
-			"doc_type": "Quotation", "field_name": "is_reverse_charge", "property": "hidden"
+	# 1. Hide fields on Quotation / Quotation Item
+	hide_fields = [
+		("Quotation", "is_reverse_charge"),
+		("Quotation Item", "discount_and_margin"),
+	]
+	for dt, fn in hide_fields:
+		has_field = (
+			frappe.db.exists("Custom Field", {"dt": dt, "fieldname": fn})
+			or frappe.get_meta(dt).has_field(fn)
+		)
+		if has_field and not frappe.db.exists("Property Setter", {
+			"doc_type": dt, "field_name": fn, "property": "hidden"
 		}):
-			make_property_setter(
-				"Quotation", "is_reverse_charge", "hidden", "1", "Check"
-			)
+			make_property_setter(dt, fn, "hidden", "1", "Check")
 
 	# 2. Make custom_quote_type optional on Sales Invoice and Sales Order
 	for dt in ["Sales Invoice", "Sales Order"]:
