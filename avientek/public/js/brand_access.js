@@ -746,18 +746,18 @@
 				fieldname: "export_scope",
 				fieldtype: "Select",
 				label: __("Export Scope"),
-				options: [
-					{ label: __("All Permitted Records"), value: "all" },
-					{ label: __("Selected Records Only"), value: "selected" },
-				],
-				default: selected.length ? "selected" : "all",
+				options: "All Permitted Records\nSelected Records Only",
+				default: selected.length ? "Selected Records Only" : "All Permitted Records",
+				description: selected.length
+					? __("{0} records selected", [selected.length])
+					: "",
 			},
 			{
 				fieldname: "docnames",
 				fieldtype: "Small Text",
 				label: __("Document Names (one per line)"),
 				default: selected.join("\n"),
-				depends_on: "eval:doc.export_scope=='selected'",
+				depends_on: "eval:doc.export_scope=='Selected Records Only'",
 			},
 			{
 				fieldname: "file_type",
@@ -802,7 +802,7 @@
 				var scope = d.get_value("export_scope");
 				var names_to_export = [];
 
-				if (scope === "selected") {
+				if (scope === "Selected Records Only") {
 					var raw = d.get_value("docnames") || "";
 					names_to_export = raw.split("\n")
 						.map(function (n) { return n.trim(); })
