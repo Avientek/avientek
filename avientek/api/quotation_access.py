@@ -1100,10 +1100,11 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		custom_child_fields = json_mod.loads(child_fields_json) if isinstance(child_fields_json, str) else list(child_fields_json)
 
 	# Build parent fields list — validate against actual DB columns
+	# Exclude virtual fields, non-data fieldtypes, and fields without DB columns
 	db_columns = {col.fieldname for col in meta.fields if col.fieldtype not in (
 		"Table", "Table MultiSelect", "HTML", "Button", "Heading", "Fold",
 		"Tab Break", "Section Break", "Column Break",
-	)} | {"name"}
+	) and not col.get("is_virtual")} | {"name"}
 	if custom_parent_fields:
 		parent_fields = ["name"] + [fn for fn in custom_parent_fields if fn != "name" and fn in db_columns]
 	else:
@@ -1174,7 +1175,7 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	child_db_columns = {col.fieldname for col in child_meta.fields if col.fieldtype not in (
 		"Table", "Table MultiSelect", "HTML", "Button", "Heading", "Fold",
 		"Tab Break", "Section Break", "Column Break",
-	)} | {"parent", "idx", "name"}
+	) and not col.get("is_virtual")} | {"parent", "idx", "name"}
 	if custom_child_fields:
 		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and fn in child_db_columns]
 	else:

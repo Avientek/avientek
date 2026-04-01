@@ -692,7 +692,8 @@
 		var parent_options = (meta.fields || [])
 			.filter(function (df) {
 				return df.fieldtype && !["Section Break", "Column Break", "Tab Break",
-					"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype);
+					"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype)
+					&& !df.is_virtual;
 			})
 			.map(function (df) {
 				var is_checked = is_report_view
@@ -717,7 +718,8 @@
 			child_options = (child_meta.fields || [])
 				.filter(function (df) {
 					return df.fieldtype && !["Section Break", "Column Break", "Tab Break",
-						"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype);
+						"Table", "HTML", "Button", "Heading", "Fold"].includes(df.fieldtype)
+						&& !df.is_virtual;
 				})
 				.map(function (df) {
 					var is_checked = is_report_view
