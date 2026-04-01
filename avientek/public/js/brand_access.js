@@ -830,19 +830,25 @@
 				}
 
 				d.hide();
-				var url = "/api/method/avientek.api.quotation_access.export_my_data" +
-					"?doctype=" + encodeURIComponent(doctype) +
-					"&file_type=" + encodeURIComponent(file_type);
+
+				// Use form POST to avoid URL length limits with many fields
+				var params = {
+					doctype: doctype,
+					file_type: file_type,
+				};
 				if (names_to_export.length) {
-					url += "&docnames=" + encodeURIComponent(JSON.stringify(names_to_export));
+					params.docnames = JSON.stringify(names_to_export);
 				}
 				if (p_fields.length) {
-					url += "&parent_fields_json=" + encodeURIComponent(JSON.stringify(p_fields));
+					params.parent_fields_json = JSON.stringify(p_fields);
 				}
 				if (c_fields.length) {
-					url += "&child_fields_json=" + encodeURIComponent(JSON.stringify(c_fields));
+					params.child_fields_json = JSON.stringify(c_fields);
 				}
-				window.open(url);
+				open_url_post(
+					"/api/method/avientek.api.quotation_access.export_my_data",
+					params
+				);
 			},
 		});
 
