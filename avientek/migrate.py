@@ -247,7 +247,13 @@ def _fix_global_field_settings():
 		if cf:
 			frappe.db.set_value("Custom Field", cf, "reqd", 0)
 
-	# 3. Delete stale column breaks from Quotation Item (permanent cleanup)
+	# 3. Set ignore_user_permissions on Quotation child tables with Company field
+	for fn in ["custom_stock"]:
+		cf = frappe.db.exists("Custom Field", f"Quotation-{fn}")
+		if cf:
+			frappe.db.set_value("Custom Field", cf, "ignore_user_permissions", 1)
+
+	# 4. Delete stale column breaks from Quotation Item (permanent cleanup)
 	for fn in ["column_break_32", "column_break_38", "custom_column_break_calc_4", "custom_column_break_9d6lj"]:
 		cf_name = f"Quotation Item-{fn}"
 		if frappe.db.exists("Custom Field", cf_name):
