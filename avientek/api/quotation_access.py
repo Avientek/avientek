@@ -1177,16 +1177,17 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 				child_fields.append(fn)
 
 	# Fetch ALL child rows for permitted parents
+	# Filter by parenttype to avoid orphaned rows or rows from other parent doctypes
 	all_children = []
 	batch_size = 500
 	for i in range(0, len(parent_names), batch_size):
 		batch = parent_names[i:i + batch_size]
 		ph = ", ".join(["%s"] * len(batch))
 		rows = frappe.db.sql(
-			"SELECT {fields} FROM `tab{dt}` WHERE parent IN ({ph}) ORDER BY parent, idx".format(
+			"SELECT {fields} FROM `tab{dt}` WHERE parent IN ({ph}) AND parenttype=%s ORDER BY parent, idx".format(
 				fields=", ".join(child_fields), dt=child_dt, ph=ph
 			),
-			batch, as_dict=True,
+			batch + [doctype], as_dict=True,
 		)
 		all_children.extend(rows)
 
