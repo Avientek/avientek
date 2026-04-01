@@ -1025,12 +1025,10 @@ def set_margin_flags(doc, method=None):
         doc.custom_auto_approve_ok = 0
         doc.custom_level_1_approve_ok = 1
 
-    # Show warnings (non-blocking) — use both msgprint and flags for reliability
+    # Show warnings (non-blocking) — use multiple methods for visibility
     if warnings:
         msg = "<br><br>".join(warnings)
-        frappe.msgprint(msg, title=_("Margin Warning"), indicator="orange")
-        # Also store in flags so client can display on refresh if msgprint is suppressed
-        doc._margin_warnings = msg
+        frappe.msgprint(msg, title=_("Margin Warning"), indicator="orange", alert=True)
 
 
 @frappe.whitelist()

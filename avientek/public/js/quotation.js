@@ -372,16 +372,27 @@ frappe.ui.form.on('Quotation', {
             (frm.doc.custom_quotation_brand_summary || []).forEach(function (row) {
                 if (row.approval_status === "APPROVED_WITH_WARNING") {
                     warnings.push(
-                        __("Brand <b>{0}</b>: Margin {1}% below standard {2}%, but historical overall margin is healthy.", [
+                        __("Brand <b>{0}</b>: Margin {1}% is below standard {2}%, but historical overall margin is healthy.", [
                             row.brand, row.margin_percent, row.std_margin_percent
                         ])
                     );
                 }
             });
             if (warnings.length) {
+                // 1. Dashboard headline (persistent orange bar)
                 frm.dashboard.set_headline(
-                    '<span style="color: #e67e22;">' + warnings.join("<br>") + '</span>'
+                    '<span style="color: #e67e22; font-weight: bold;">⚠ Margin Warning: ' +
+                    warnings.join(" | ") + '</span>'
                 );
+                // 2. Show dialog once per form load (not on every refresh)
+                if (!frm._margin_warning_shown) {
+                    frm._margin_warning_shown = true;
+                    frappe.msgprint({
+                        title: __("Margin Warning"),
+                        message: warnings.join("<br><br>"),
+                        indicator: "orange",
+                    });
+                }
             }
         }
 
