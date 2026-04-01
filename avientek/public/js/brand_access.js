@@ -755,18 +755,20 @@
 	$(document).ready(function () {
 		if (frappe.session.user === "Administrator") return;
 
-		// Pre-warm restriction caches (used later by route intercept & report filters)
-		check_brand_restriction(function () {});
-		check_item_group_restriction(function () {});
-		check_customer_group_restriction(function () {});
-		check_supplier_group_restriction(function () {});
-		check_sales_person_restriction(function () {});
+		// Check all restriction types synchronously (async: false in each call)
+		var has_restriction = false;
+		check_brand_restriction(function (r) { if (r) has_restriction = true; });
+		check_item_group_restriction(function (r) { if (r) has_restriction = true; });
+		check_customer_group_restriction(function (r) { if (r) has_restriction = true; });
+		check_supplier_group_restriction(function (r) { if (r) has_restriction = true; });
+		check_sales_person_restriction(function (r) { if (r) has_restriction = true; });
 
-		// Always set up for non-Admin users — server-side enforces real security,
-		// client-side just provides UX (hide Export, show Export My Data, etc.)
-		setup_route_intercept();
-		setup_report_filters();
-		setup_export_block();
+		// Only set up restrictions for users who actually have them
+		if (has_restriction) {
+			setup_route_intercept();
+			setup_report_filters();
+			setup_export_block();
+		}
 	});
 
 	// Global access for list view handlers

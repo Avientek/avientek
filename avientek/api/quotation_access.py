@@ -1078,6 +1078,12 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		"SELECT allow, for_value FROM `tabUser Permission` WHERE user=%s",
 		user, as_dict=True,
 	)
+	if not all_perms:
+		frappe.throw(
+			_("You have no data restrictions. Please use the standard Export instead."),
+			title=_("No Restrictions"),
+		)
+
 	# Group by allow type: {"Brand": ["Yealink"], "Item Group": ["UC Product"], ...}
 	perm_map = {}
 	for p in all_perms:
