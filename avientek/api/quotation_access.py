@@ -141,6 +141,19 @@ def check_user_has_company_restriction():
 
 
 @frappe.whitelist()
+def check_user_has_any_restriction():
+	"""Single call to check ALL restriction types at once."""
+	user = frappe.session.user
+	if user == "Administrator":
+		return False
+	perms = frappe.db.sql(
+		"SELECT COUNT(*) FROM `tabUser Permission` WHERE user=%s LIMIT 1",
+		user,
+	)
+	return bool(perms and perms[0][0] > 0)
+
+
+@frappe.whitelist()
 def get_permitted_doc_preview(doctype, docname):
 	"""Return document data filtered to only items the current user has permission for.
 

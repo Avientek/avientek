@@ -883,22 +883,24 @@
 	$(document).ready(function () {
 		if (frappe.session.user === "Administrator") return;
 
-		// Check all restriction types synchronously (async: false in each call)
+		// Single call to check if user has ANY restriction (Brand, Item Group,
+		// Customer Group, Supplier Group, Sales Person, Company — all in one query)
 		var has_restriction = false;
-		check_brand_restriction(function (r) { if (r) has_restriction = true; });
-		check_item_group_restriction(function (r) { if (r) has_restriction = true; });
-		check_customer_group_restriction(function (r) { if (r) has_restriction = true; });
-		check_supplier_group_restriction(function (r) { if (r) has_restriction = true; });
-		check_sales_person_restriction(function (r) { if (r) has_restriction = true; });
-		// Also check Company restriction
-		if (!has_restriction) {
-			frappe.call({
-				method: "avientek.api.quotation_access.check_user_has_company_restriction",
-				async: false,
-				callback: function (r) {
-					if (r.message) has_restriction = true;
-				},
-			});
+		frappe.call({
+			method: "avientek.api.quotation_access.check_user_has_any_restriction",
+			async: false,
+			callback: function (r) {
+				if (r.message) has_restriction = true;
+			},
+		});
+
+		// Pre-warm individual restriction caches (used by route intercept & report filters)
+		if (has_restriction) {
+			check_brand_restriction(function () {});
+			check_item_group_restriction(function () {});
+			check_customer_group_restriction(function () {});
+			check_supplier_group_restriction(function () {});
+			check_sales_person_restriction(function () {});
 		}
 
 		// Only set up restrictions for users who actually have them
