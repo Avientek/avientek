@@ -68,6 +68,25 @@ frappe.listview_settings["Sales Order"] = {
 			listview.call_for_selected_items(method, { status: "Submitted" });
 		});
 
+		// ── Client Script: "Auto Share with Sales Team" / "Sales Status in List view" ──
+		listview.page.add_actions_menu_item(__('Share with Sales Team Users'), async function () {
+			const selected = listview.get_checked_items();
+			if (!selected.length) {
+				frappe.msgprint(__('Please select at least one Sales Order.'));
+				return;
+			}
+
+			frappe.confirm(
+				__('Share {0} selected Sales Orders with assigned and parent sales persons?', [selected.length]),
+				async () => {
+					for (const so of selected) {
+						await _share_sales_order_with_users_list(so.name);
+					}
+					frappe.msgprint(__('Sharing complete.'));
+				}
+			);
+		});
+
 		if (frappe.model.can_create("Sales Invoice")) {
 			listview.page.add_action_item(__("Sales Invoice"), () => {
 				erpnext.bulk_transaction_processing.create(listview, "Sales Order", "Sales Invoice");
@@ -87,3 +106,83 @@ frappe.listview_settings["Sales Order"] = {
 		}
 	},
 };
+
+// ── Client Script: "Auto Share with Sales Team" ──
+async function _share_sales_order_with_users_list(sales_order_name) {
+	try {
+		const { message: doc } = await frappe.call({
+			method: "frappe.client.get",
+			args: { doctype: "Sales Order", name: sales_order_name }
+		});
+
+		if (!doc.sales_team || doc.sales_team.length === 0) return;
+
+		const salesPersons = doc.sales_team.map(row => row.sales_person).filter(Boolean);
+		const allSalesPersons = new Set(salesPersons);
+
+		await Promise.all(salesPersons.map(async sp => {
+			const res = await frappe.db.get_value('Sales Person', sp, 'parent_sales_person');
+			const parent = res && res.message && res.message.parent_sales_person;
+			if (parent) allSalesPersons.add(parent);
+		}));
+
+		const res = await frappe.call({
+			method: "frappe.client.get_list",
+			args: {
+				doctype: "User Permission",
+				filters: {
+					allow: "Sales Person",
+					for_value: ["in", Array.from(allSalesPersons)]
+				},
+				fields: ["user"],
+				limit_page_length: 1000
+			}
+		});
+
+		if (!res.message || res.message.length === 0) return;
+
+		const users = [...new Set(res.message.map(r => r.user))];
+
+		for (const user of users) {
+			let alreadyShared = false;
+			try {
+				const existing = await frappe.call({
+					method: "frappe.client.get_list",
+					args: {
+						doctype: "DocShare",
+						filters: {
+							user: user,
+							share_doctype: "Sales Order",
+							share_name: sales_order_name
+						},
+						fields: ["name"],
+						limit_page_length: 1
+					}
+				});
+				alreadyShared = existing.message && existing.message.length > 0;
+			} catch (e) {
+				alreadyShared = false;
+			}
+
+			if (!alreadyShared) {
+				await frappe.call({
+					method: "frappe.client.insert",
+					args: {
+						doc: {
+							doctype: "DocShare",
+							user: user,
+							share_doctype: "Sales Order",
+							share_name: sales_order_name,
+							read: 1,
+							write: 1,
+							share: 1,
+							submit: 1
+						}
+					}
+				});
+			}
+		}
+	} catch (err) {
+		console.error("Error sharing " + sales_order_name + ":", err);
+	}
+}

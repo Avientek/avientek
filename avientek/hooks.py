@@ -260,11 +260,17 @@ doctype_js = {
 	"Asset": "public/js/asset_extension.js",
 	"Asset Capitalization": "public/js/asset_capitalization.js",
 	"User": "public/js/user.js",
+	"Purchase Receipt": "public/js/purchase_receipt.js",
+	"Payment Request": "public/js/payment_request.js",
+	"Request for Quotation": "public/js/request_for_quotation.js",
+	"Supplier Quotation": "public/js/supplier_quotation.js",
+	"Delivery Note": "public/js/delivery_note.js",
 }
 doctype_list_js = {
 	"Sales Order": "public/js/sales_order_list.js",
 	"Quotation": "public/js/quotation_list.js",
 	"Asset": "public/js/asset_list.js",
+	"Sales Invoice": "public/js/sales_invoice_list.js",
 }
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -414,35 +420,72 @@ override_doctype_class = {
 doc_events = {
     "Customer": {
         "after_insert": "avientek.events.customer.after_insert",
+        "validate": "avientek.events.customer.validate_alias",
     },
     "Purchase Order": {
         "before_update_after_submit": "avientek.events.purchase_order.po_validate",
-        "validate": "avientek.events.purchase_order.check_exchange_rate",
+        "validate": [
+            "avientek.events.purchase_order.check_exchange_rate",
+            "avientek.events.purchase_order.validate_supplier_company",
+            "avientek.events.purchase_order.validate_item_tax_template",
+        ],
         "on_submit": "avientek.events.demo_unit_request_links.on_linked_doc_submit",
         "on_cancel": "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
     },
-    "Item":        {"validate": "avientek.events.item.validate_brand_pn"},
+    "Item": {"validate": "avientek.events.item.validate_brand_pn"},
     "Sales Order": {
         "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
+        "validate": [
+            "avientek.events.sales_order.validate_customer_company",
+            "avientek.events.sales_order.validate_exchange_rate_v2",
+        ],
+        "before_save": "avientek.events.sales_order.validate_item_tax_template",
+        "after_save": "avientek.events.sales_order.sync_delivery_date_to_items",
+        "on_submit": "avientek.events.sales_order.set_sales_order_confirmation_date",
     },
     "Quotation": {
+        "validate": "avientek.events.quotation.validate_item_tax_template",
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
             "avientek.events.quotation.validate_total_discount",
-        ]
+        ],
     },
     "Purchase Receipt": {
-        "before_submit": "avientek.events.purchase_receipt.validate_po_workflow_state",
+        "validate": [
+            "avientek.events.purchase_receipt.validate_supplier_company",
+            "avientek.events.purchase_receipt.validate_item_tax_template",
+        ],
+        "before_submit": [
+            "avientek.events.purchase_receipt.validate_po_workflow_state",
+            "avientek.events.purchase_receipt.add_batch_bundle_from_intercompany_dn",
+        ],
     },
-    "Sales Invoice": {"on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry"},
+    "Purchase Invoice": {
+        "validate": [
+            "avientek.events.purchase_invoice.validate_supplier_company",
+            "avientek.events.purchase_invoice.validate_item_tax_template",
+        ],
+    },
+    "Sales Invoice": {
+        "validate": [
+            "avientek.events.sales_invoice.validate_item_tax_template",
+            "avientek.events.sales_invoice.validate_customer_company",
+        ],
+        "before_save": "avientek.events.sales_invoice.set_vat_emirate",
+        "on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry",
+    },
+    "Delivery Note": {
+        "validate": "avientek.events.delivery_note.validate_item_tax_template",
+        "on_submit": "avientek.events.warranty.on_delivery_note_submit",
+        "on_cancel": "avientek.events.warranty.on_delivery_note_cancel",
+    },
+    "DocShare": {
+        "before_insert": "avientek.events.docshare.auto_share_po_with_write",
+    },
     "Comment": {"after_insert": "avientek.events.comment.after_insert"},
     "Demo Movement": {
         "on_submit": "avientek.events.demo_movement.on_submit",
         "on_cancel": "avientek.events.demo_movement.on_cancel",
-    },
-    "Delivery Note": {
-        "on_submit": "avientek.events.warranty.on_delivery_note_submit",
-        "on_cancel": "avientek.events.warranty.on_delivery_note_cancel",
     },
     "Asset Capitalization": {
         "before_submit": "avientek.events.asset_capitalization.before_submit",

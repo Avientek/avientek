@@ -1,16 +1,5 @@
-frappe.ui.form.on('Sales Invoice', {
-    refresh: function(frm) {
-        if (frm.doc.docstatus === 1) {
-            frm.add_custom_button("Payment Request Form", function() {
-                frappe.model.open_mapped_doc({
-                    method: "avientek.events.sales_invoice.create_payment_request",
-                    frm: frm
-                });
-            }, "Create");
-        }
-    },
-
-    // ── Client Script: "Sales Invoice" - filter customer by company ──
+// ── Client Script: "Delivery Note" ──
+frappe.ui.form.on('Delivery Note', {
     company: function(frm) {
         frappe.call({
             "method": "avientek.api.filtered_parties.get_filtered_customers",
@@ -30,7 +19,6 @@ frappe.ui.form.on('Sales Invoice', {
             }
         });
     },
-
     setup: function(frm) {
         if (frm.doc.company) {
             frappe.call({
@@ -52,8 +40,6 @@ frappe.ui.form.on('Sales Invoice', {
             });
         }
     },
-
-    // ── Client Script: "Sales Invoice" - auto share with sales team ──
     after_save: async function(frm) {
         if (!frm.doc.sales_team || frm.doc.sales_team.length === 0) return;
 
@@ -103,7 +89,9 @@ frappe.ui.form.on('Sales Invoice', {
                             limit_page_length: 1
                         },
                         callback: function(res) {
-                            if (res.message && res.message.length > 0) return;
+                            if (res.message && res.message.length > 0) {
+                                return;
+                            }
                             frappe.call({
                                 method: "frappe.client.insert",
                                 args: {

@@ -1,12 +1,23 @@
-frappe.ui.form.on('Purchase Invoice',{
-	refresh:function(frm){
-		if (frm.doc.docstatus === 1) {
-            frm.add_custom_button("Payment Request Form", function () {
-            frappe.model.open_mapped_doc({
-				method: "avientek.events.purchase_invoice.create_payment_request",
-				frm: frm
-			})
+frappe.ui.form.on('Purchase Invoice', {
+    refresh: function(frm) {
+        if (frm.doc.docstatus === 1) {
+            frm.add_custom_button("Payment Request Form", function() {
+                frappe.model.open_mapped_doc({
+                    method: "avientek.events.purchase_invoice.create_payment_request",
+                    frm: frm
+                });
             }, "Create");
         }
+    },
+
+    // ── Client Script: "PI" - filter supplier by company ──
+    company: function(frm) {
+        frm.set_query("supplier", function() {
+            return {
+                "filters": {
+                    'company': ['in', [frm.doc.company, '']]
+                }
+            };
+        });
     }
 });

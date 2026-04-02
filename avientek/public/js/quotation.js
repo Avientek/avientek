@@ -56,6 +56,11 @@ frappe.ui.form.on('Quotation', {
         let company = frm.doc.company;
 
         frappe.db.get_doc('Customer', frm.doc.party_name).then(customer_doc => {
+            // ── Client Script: "Quot" - auto-set sales_person from customer ──
+            if (customer_doc.sales_team && customer_doc.sales_team.length) {
+                frm.set_value("sales_person", customer_doc.sales_team[0].sales_person);
+            }
+
             let credit_limit = 0;
             if (customer_doc.credit_limits) {
                 let limit_entry = customer_doc.credit_limits.find(l => l.company === company);

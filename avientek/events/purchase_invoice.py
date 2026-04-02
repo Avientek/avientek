@@ -4,6 +4,31 @@ import frappe
 from frappe import _
 from frappe.model.mapper import get_mapped_doc
 
+
+# ── Server Script: "PI Validate supplier company" ──
+# DocType Event: Purchase Invoice, Before Validate
+def validate_supplier_company(doc, method=None):
+    """Ensure supplier belongs to the same company on the invoice."""
+    if doc.supplier and doc.company and not doc.is_internal_supplier:
+        supplier = frappe.get_doc("Supplier", doc.supplier)
+        if supplier.company and supplier.company != doc.company:
+            frappe.throw(_("Supplier does not belongs to company"))
+
+
+# ── Server Script: "PI - Item Tax Template" ──
+# DocType Event: Purchase Invoice, Before Validate
+def validate_item_tax_template(doc, method=None):
+    """Require Item Tax Template for all items when company is Avientek Electronics Trading PVT. LTD."""
+    if doc.company == "Avientek Electronics Trading PVT. LTD":
+        for item in doc.items:
+            if not item.item_tax_template:
+                frappe.throw(
+                    _("Kindly choose Item Tax template for item: {0} in Row# {1}").format(
+                        item.item_code, item.idx
+                    )
+                )
+
+
 @frappe.whitelist()
 def create_payment_request(source_name, target_doc=None, args=None):
     def set_single_reference(source, target):

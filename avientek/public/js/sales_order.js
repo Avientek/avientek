@@ -1,5 +1,99 @@
 frappe.ui.form.on('Sales Order',{
+	// ── Client Script: "Fetch Customer Name" - filter customer by company ──
+	setup: function(frm) {
+		if (frm.doc.company) {
+			frappe.call({
+				"method": "avientek.api.filtered_parties.get_filtered_customers",
+				"args": { 'company': frm.doc.company },
+				callback: function(r) {
+					if (r.message) {
+						frm.set_query("customer", function() {
+							return { "filters": { 'name': ['in', r.message] } };
+						});
+					}
+				}
+			});
+		}
+	},
+
+	company: function(frm) {
+		frappe.call({
+			"method": "avientek.api.filtered_parties.get_filtered_customers",
+			"args": { 'company': frm.doc.company },
+			callback: function(r) {
+				if (r.message) {
+					frm.set_query("customer", function() {
+						return { "filters": { 'name': ['in', r.message] } };
+					});
+				}
+			}
+		});
+	},
+
+	// ── Client Script: "Fetch Customer Name" - sync delivery_date and customer_name ──
+	onload: function(frm) {
+		if (frm.doc.docstatus === 1) return;
+		if (frm.doc.customer) {
+			frappe.db.get_value('Customer', frm.doc.customer, 'customer_name')
+				.then(r => {
+					if (r && r.message) {
+						frm.set_value('customer_name', r.message.customer_name);
+					}
+				});
+		}
+	},
+
+	delivery_date: function(frm) {
+		if (frm.doc.delivery_date) {
+			frm.doc.items.forEach(function(item) {
+				frappe.model.set_value(item.doctype, item.name, 'delivery_date', frm.doc.delivery_date);
+			});
+		}
+	},
+
+	// ── Client Script: "Fetch Customer Name" - discount logic ──
+	discount_amount: function(frm) {
+		if (frm.doc.apply_discount_on !== "Net Total") {
+			frappe.throw(__("Discount is only allowed when 'Apply Discount On' is set to <b>Net Total</b>."));
+			return;
+		}
+
+		if (frm._discount_timer) clearTimeout(frm._discount_timer);
+
+		frm._discount_timer = setTimeout(function() {
+			var total = parseFloat(frm.doc.total) || 0;
+			var discount = parseFloat(frm.doc.discount_amount) || 0;
+
+			if (discount > 0 && total > 0) {
+				var perc = (discount / total) * 100;
+				frm.set_value('additional_discount_percentage', parseFloat(perc.toFixed(6)));
+			}
+		}, 1000);
+	},
+
+	additional_discount_percentage: function(frm) {
+		if (frm.doc.apply_discount_on !== "Net Total") {
+			frappe.throw(__("Discount is only allowed when 'Apply Discount On' is set to <b>Net Total</b>."));
+			return;
+		}
+
+		var total = parseFloat(frm.doc.total) || 0;
+		var perc = parseFloat(frm.doc.additional_discount_percentage) || 0;
+
+		if (perc > 0 && total > 0) {
+			var amt = (perc / 100) * total;
+			frm.set_value('discount_amount', parseFloat(amt.toFixed(2)));
+		}
+	},
+
+	// ── Client Script: "Fetch Customer Name" - auto share with sales team ──
+	after_save: async function(frm) {
+		await _shareSalesOrderWithUsers(frm);
+	},
+
 	refresh:function(frm){
+		// ── Client Script: "SO Hide item" - control buttons ──
+		_control_so_buttons(frm);
 		if (frm.doc.docstatus===1){
 			frm.add_custom_button(__('Proforma Invoice'),() => {
 			frappe.model.open_mapped_doc({
@@ -225,3 +319,139 @@ frappe.ui.form.on('Sales Order',{
 // 		});
 // 		}
 // }
+
+// ── Client Script: "SO Hide item" - control Update Items / Status buttons ──
+var _so_button_observer = null;
+
+function _control_so_buttons(frm) {
+	var isAllowedState = [
+		"Approved for Update",
+		"Sent for Revision"
+	].indexOf(frm.doc.workflow_state) !== -1;
+
+	var styleId = 'so-button-control-style';
+	if (!document.getElementById(styleId)) {
+		var styleEl = document.createElement('style');
+		styleEl.id = styleId;
+		styleEl.textContent = '[data-so-hidden="true"] { display: none !important; }';
+		document.head.appendChild(styleEl);
+	}
+
+	function applyToButtons() {
+		frm.page.wrapper.find('button').each(function() {
+			var $btn = $(this);
+			var text = $btn.text().trim();
+
+			if (text === 'Update Items' || text === 'Status') {
+				$btn.attr('data-so-hidden', isAllowedState ? null : 'true');
+			}
+		});
+	}
+
+	applyToButtons();
+
+	if (_so_button_observer) {
+		_so_button_observer.disconnect();
+		_so_button_observer = null;
+	}
+
+	var toolbar = frm.page.wrapper.find('.page-actions')[0];
+	if (!toolbar) return;
+
+	_so_button_observer = new MutationObserver(function(mutations) {
+		var hasNewNodes = mutations.some(function(m) { return m.type === 'childList' && m.addedNodes.length; });
+		if (hasNewNodes) applyToButtons();
+	});
+
+	_so_button_observer.observe(toolbar, { childList: true, subtree: true });
+
+	setTimeout(function() {
+		if (_so_button_observer) {
+			_so_button_observer.disconnect();
+			_so_button_observer = null;
+		}
+	}, 5000);
+}
+
+// ── Client Script: "Fetch Customer Name" - auto share with sales team ──
+async function _shareSalesOrderWithUsers(frm) {
+	if (!frm.doc.sales_team || frm.doc.sales_team.length === 0) return;
+
+	var salesPersons = frm.doc.sales_team
+		.map(function(row) { return row.sales_person; })
+		.filter(Boolean);
+
+	if (salesPersons.length === 0) return;
+
+	var allSalesPersons = new Set(salesPersons);
+
+	await Promise.all(salesPersons.map(function(sp) {
+		return frappe.db.get_value('Sales Person', sp, 'parent_sales_person')
+			.then(function(res) {
+				if (res && res.message && res.message.parent_sales_person) {
+					allSalesPersons.add(res.message.parent_sales_person);
+				}
+			});
+	}));
+
+	frappe.call({
+		method: "frappe.client.get_list",
+		args: {
+			doctype: "User Permission",
+			filters: {
+				allow: "Sales Person",
+				for_value: ["in", Array.from(allSalesPersons)]
+			},
+			fields: ["user"],
+			limit_page_length: 100
+		},
+		callback: function(res) {
+			if (!res.message || res.message.length === 0) return;
+
+			var users = [...new Set(res.message.map(function(r) { return r.user; }))];
+
+			users.forEach(function(user) {
+				frappe.call({
+					method: "frappe.client.get_list",
+					args: {
+						doctype: "DocShare",
+						filters: {
+							user: user,
+							share_doctype: frm.doc.doctype,
+							share_name: frm.doc.name
+						},
+						limit_page_length: 1
+					},
+					callback: function(res) {
+						if (res.message && res.message.length > 0) return;
+						frappe.call({
+							method: "frappe.client.insert",
+							args: {
+								doc: {
+									doctype: "DocShare",
+									user: user,
+									share_doctype: frm.doc.doctype,
+									share_name: frm.doc.name,
+									read: 1,
+									write: 1,
+									share: 1,
+									submit: 1
+								}
+							}
+						});
+					}
+				});
+			});
+		}
+	});
+}
+
+// ── Client Script: "Validate Exchange Rate in Intercompany" (DISABLED) ──
+// frappe.ui.form.on('Sales Order', {
+//     onload: function(frm) {
+//         if ((frm.doc.currency == frm.doc.price_list_currency) &&
+//             (frm.doc.conversion_rate != frm.doc.plc_conversion_rate)) {
+//             frappe.throw("Exchange rate and price list exchange rate should be the same!");
+//         }
+//     }
+// });

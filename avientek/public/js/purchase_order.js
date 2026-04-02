@@ -1,5 +1,18 @@
 frappe.ui.form.on('Purchase Order',{
+	// ── Client Script: "Terms Company Filter" ──
+	onload: function(frm) {
+		_set_tc_name_query(frm);
+	},
+
+	// ── Client Script: "PO update item button hide" ──
+	onload_post_render: function(frm) {
+		_control_po_buttons(frm);
+	},
+
 	refresh:function(frm){
+		_set_tc_name_query(frm);
+		// ── Client Script: "PO update item button hide" ──
+		setTimeout(function() { _control_po_buttons(frm); }, 200);
 		if (!frm.doc.__islocal && frm.doc.docstatus === 1) {
             frm.add_custom_button("Payment Request Form", function () {
             frappe.model.open_mapped_doc({
@@ -88,6 +101,42 @@ frappe.ui.form.on('Purchase Order',{
 	avientek_exchange_rate: function(frm) {
 		set_display_currency(frm)
 	},
+
+	// ── Client Script: "Terms Company Filter" ──
+	company: function(frm) {
+		_set_tc_name_query(frm);
+		// ── Client Script: "PO" (enabled) - filter supplier by company ──
+		if (frm.doc.company) {
+			frappe.call({
+				"method": "avientek.api.filtered_parties.get_filtered_supplier",
+				"args": { 'company': frm.doc.company },
+				callback: function(r) {
+					if (r.message) {
+						frm.set_query("supplier", function() {
+							return { "filters": { 'name': ['in', r.message] } };
+						});
+					}
+				}
+			});
+		}
+	},
+
+	setup: function(frm) {
+		if (frm.doc.company) {
+			frappe.call({
+				"method": "avientek.api.filtered_parties.get_filtered_supplier",
+				"args": { 'company': frm.doc.company },
+				callback: function(r) {
+					if (r.message) {
+						frm.set_query("supplier", function() {
+							return { "filters": { 'name': ['in', r.message] } };
+						});
+					}
+				}
+			});
+		}
+	},
+
 	// custom_set_so_eta:function(frm) {
 	// 	let avientek_eta = frm.doc.items.map(({ avientek_eta }) => avientek_eta);
 	// 	if(avientek_eta){
@@ -263,3 +312,47 @@ var set_rate_from_avientek_rate = function(frm, cdt, cdn) {
 		frappe.model.set_value(cdt, cdn, 'avientek_exchange_rate', 0)
 	}
 }
+
+// ── Client Script: "Terms Company Filter" ──
+function _set_tc_name_query(frm) {
+	if (frm.doc.company) {
+		frm.set_query('tc_name', function() {
+			return {
+				filters: { custom_company: frm.doc.company }
+			};
+		});
+	} else {
+		frm.set_query('tc_name', function() {
+			return {};
+		});
+	}
+}
+
+// ── Client Script: "PO update item button hide" ──
+function _control_po_buttons(frm) {
+	var shouldShow = (
+		frm.doc.workflow_state === "Approved for Update" ||
+		frm.doc.workflow_state === "Sent for Revision" ||
+		frm.doc.workflow_state === "Draft"
+	);
+
+	var update_btn = $('button:contains("Update Items")');
+	var get_items_selectors = [
+		'button:contains("Get Items From")',
+		'.btn-group:has(button:contains("Get Items From"))',
+		'button.dropdown-toggle:contains("Get Items From")'
+	];
+
+	if (shouldShow) {
+		update_btn.show();
+		get_items_selectors.forEach(function(selector) { $(selector).show(); });
+	} else {
+		update_btn.hide();
+		get_items_selectors.forEach(function(selector) { $(selector).hide(); });
+	}
+}
+
+// ── Client Script: "Update PO update button" (DISABLED) ──
+// This was a more elaborate version with MutationObserver.
+// The simpler _control_po_buttons above (from "PO update item button hide") is active.
+// See server_client_scripts_backup.json for the full disabled version.

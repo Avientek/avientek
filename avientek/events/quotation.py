@@ -769,6 +769,20 @@ def distribute_discount_server(doc):
         })
 
 
+# ── Server Script: "Quot - Item Tax Template" ──
+# DocType Event: Quotation, Before Validate
+def validate_item_tax_template(doc, method=None):
+    """Require Item Tax Template for all items when company is Avientek Electronics Trading PVT. LTD."""
+    if doc.company == "Avientek Electronics Trading PVT. LTD":
+        for item in doc.items:
+            if not item.item_tax_template:
+                frappe.throw(
+                    _("Kindly choose Item Tax template for item: {0} in Row# {1}").format(
+                        item.item_code, item.idx
+                    )
+                )
+
+
 # ──────────────────────────────────────────────────────────────
 # 5)  MASTER PIPELINE  (called from before_save hook)
 # ──────────────────────────────────────────────────────────────

@@ -1,6 +1,21 @@
 import frappe
 
 
+# ── Server Script: "alias" ──
+# DocType Event: Customer, Before Validate
+def validate_alias(doc, method=None):
+    """Prevent duplicate customer_name + alias combinations."""
+    if doc.alias:
+        duplicate = frappe.db.exists({
+            "doctype": "Customer",
+            "customer_name": doc.customer_name,
+            "alias": doc.alias,
+            "name": ["!=", doc.name],
+        })
+        if duplicate:
+            frappe.throw("Same customer name already exist with same alias")
+
+
 def after_insert(doc, method=None):
 	"""When a Customer is created from a Lead, copy address/contact links and contact details."""
 	lead_name = doc.lead_name

@@ -1,6 +1,56 @@
 import frappe
+from frappe import _
 from frappe.utils import flt
 from frappe.model.mapper import get_mapped_doc
+
+
+# ── Server Script: "SI - Item Tax Template" ──
+# DocType Event: Sales Invoice, Before Validate
+def validate_item_tax_template(doc, method=None):
+    """Require Item Tax Template for all items when company is Avientek Electronics Trading PVT. LTD."""
+    if doc.company == "Avientek Electronics Trading PVT. LTD":
+        for item in doc.items:
+            if not item.item_tax_template:
+                frappe.throw(
+                    _("Kindly choose Item Tax template for item: {0} in Row# {1}").format(
+                        item.item_code, item.idx
+                    )
+                )
+
+
+# ── Server Script: "SI validate customer company" ──
+# DocType Event: Sales Invoice, Before Validate
+def validate_customer_company(doc, method=None):
+    """Ensure customer belongs to the same company on the invoice."""
+    if doc.customer and doc.company and not doc.is_internal_customer:
+        customer = frappe.get_doc("Customer", doc.customer)
+        if customer.company and customer.company != doc.company:
+            frappe.throw(_("Customer does not belongs to company"))
+
+
+# ── Server Script: "Get VAT Emirate" ──
+# DocType Event: Sales Invoice, Before Save
+def set_vat_emirate(doc, method=None):
+    """Copy emirate from customer address to vat_emirate field."""
+    if doc.customer_address:
+        emirate = frappe.db.get_value("Address", doc.customer_address, "emirate")
+        if emirate:
+            doc.db_set("vat_emirate", emirate)
+
+
+# ── Server Script: "Sales Invoice" (DISABLED) ──
+# DocType Event: Sales Invoice, Before Validate
+# NOTE: This script was disabled in the site.
+# def validate_delivery_note_linked(doc, method=None):
+#     """Ensure non-return invoices have delivery notes for stock items."""
+#     if not doc.is_return:
+#         for item in doc.items:
+#             order_type = frappe.db.get_value("Sales Order", item.sales_order, "order_type")
+#             if order_type != "Support" and not item.delivery_note:
+#                 frappe.throw(
+#                     _("Delivery Note is required for the stock item {0}.").format(item.item_name)
+#                 )
+
 
 def create_incentive_journal_entry(doc, method):
     """
