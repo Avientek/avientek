@@ -136,6 +136,11 @@ def check_user_has_sales_person_restriction():
 
 
 @frappe.whitelist()
+def check_user_has_company_restriction():
+	return _has_user_perm("Company")
+
+
+@frappe.whitelist()
 def get_permitted_doc_preview(doctype, docname):
 	"""Return document data filtered to only items the current user has permission for.
 

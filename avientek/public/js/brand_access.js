@@ -890,6 +890,16 @@
 		check_customer_group_restriction(function (r) { if (r) has_restriction = true; });
 		check_supplier_group_restriction(function (r) { if (r) has_restriction = true; });
 		check_sales_person_restriction(function (r) { if (r) has_restriction = true; });
+		// Also check Company restriction
+		if (!has_restriction) {
+			frappe.call({
+				method: "avientek.api.quotation_access.check_user_has_company_restriction",
+				async: false,
+				callback: function (r) {
+					if (r.message) has_restriction = true;
+				},
+			});
+		}
 
 		// Only set up restrictions for users who actually have them
 		if (has_restriction) {
