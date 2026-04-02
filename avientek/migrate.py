@@ -256,6 +256,14 @@ def _fix_global_field_settings():
 		if cf:
 			frappe.db.set_value("Custom Field", cf, "ignore_user_permissions", 1)
 
+	# 3b. Also set ignore_user_permissions on Company Link field INSIDE child DocTypes
+	# The parent table field's ignore_user_permissions alone is not enough —
+	# Frappe also checks the Link field inside the child table row
+	frappe.db.sql("""
+		UPDATE tabDocField SET ignore_user_permissions=1
+		WHERE parent='Quotation Stock' AND fieldname='company' AND options='Company'
+	""")
+
 	# 4. Delete stale column breaks from Quotation Item (permanent cleanup)
 	for fn in ["column_break_32", "column_break_38", "custom_column_break_calc_4", "custom_column_break_9d6lj"]:
 		cf_name = f"Quotation Item-{fn}"
