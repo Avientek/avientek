@@ -614,6 +614,17 @@ def recalc_doc_totals(doc):
     doc.rounded_total  = round(doc.grand_total)
     doc.base_rounded_total = round(doc.base_grand_total)
 
+    # ── Recalculate payment schedule to match updated grand_total ──
+    # ERPNext calculates payment schedule during validate (before our pipeline),
+    # so amounts are stale when grand_total changes here.
+    gt = flt(doc.rounded_total or doc.grand_total)
+    base_gt = flt(doc.base_rounded_total or doc.base_grand_total)
+    for ps in (doc.get("payment_schedule") or []):
+        portion = flt(ps.invoice_portion) or 100
+        ps.payment_amount = flt(gt * portion / 100, 4)
+        ps.base_payment_amount = flt(base_gt * portion / 100, 4)
+        ps.outstanding = ps.payment_amount
+
 
     # ── Sync item-level ERPNext fields (net_rate, net_amount, base_*) ──
     # ERPNext's validate already set these from the OLD rate before our
