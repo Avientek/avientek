@@ -525,8 +525,6 @@
 	}
 
 	function block_export_on_page() {
-		// Safety: don't block if user has no restrictions
-		if (!_brand_restricted && !_ig_restricted && !_cg_restricted && !_sg_restricted && !_sp_restricted) return;
 
 		let route = frappe.get_route();
 		if (!route || route.length < 2) return;
