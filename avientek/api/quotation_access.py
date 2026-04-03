@@ -998,14 +998,35 @@ def restricted_export_query():
 				or _get_user_companies(user)
 			)
 			if has_restriction:
+				import json as _json
 				file_type = frappe.form_dict.get("file_format_type", "CSV")
+
+				# Extract selected docnames from filters (Report View sends name IN [...])
+				docnames = None
+				raw_filters = frappe.form_dict.get("filters")
+				if raw_filters:
+					if isinstance(raw_filters, str):
+						try:
+							raw_filters = _json.loads(raw_filters)
+						except Exception:
+							raw_filters = []
+					if isinstance(raw_filters, (list, tuple)):
+						for f in raw_filters:
+							if isinstance(f, (list, tuple)) and len(f) >= 3:
+								fieldname = f[1] if len(f) == 4 else f[0]
+								operator = f[2] if len(f) == 4 else f[1]
+								value = f[3] if len(f) == 4 else f[2]
+								if fieldname == "name" and str(operator).lower() == "in":
+									if isinstance(value, str):
+										docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
+									elif isinstance(value, (list, tuple)):
+										docnames = _json.dumps(list(value))
+
 				# Extract picked columns from form_dict fields
-				# Fields look like: ["`tabQuotation`.`name`", "`tabQuotation Item`.`item_code`", ...]
 				parent_fields = None
 				child_fields = None
 				raw_fields = frappe.form_dict.get("fields")
 				if raw_fields:
-					import json as _json
 					if isinstance(raw_fields, str):
 						try:
 							raw_fields = _json.loads(raw_fields)
@@ -1031,6 +1052,7 @@ def restricted_export_query():
 				return export_my_data(
 					doctype=doctype,
 					file_type=file_type,
+					docnames=docnames,
 					parent_fields_json=parent_fields,
 					child_fields_json=child_fields,
 				)

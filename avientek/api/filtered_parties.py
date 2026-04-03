@@ -16,6 +16,13 @@ def get_filtered_customers(company=None):
             filters={"company": company, "disabled": 0},
             pluck="name",
         )
+        # Also include customers with no company set (shared/inter-company)
+        shared = frappe.db.get_all(
+            "Customer",
+            filters={"company": ["in", ["", None]], "disabled": 0},
+            pluck="name",
+        )
+        customers = customers + shared
         allowed = frappe.db.get_all(
             "Allowed To Transact With",
             filters={
