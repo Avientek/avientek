@@ -432,7 +432,10 @@ doc_events = {
         "on_submit": "avientek.events.demo_unit_request_links.on_linked_doc_submit",
         "on_cancel": "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
     },
-    "Item": {"validate": "avientek.events.item.validate_brand_pn"},
+    "Item": {
+        "before_save": "avientek.events.item.auto_populate_defaults",
+        "validate": "avientek.events.item.validate_brand_pn",
+    },
     "Sales Order": {
         "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
         "validate": [
