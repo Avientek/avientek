@@ -863,54 +863,36 @@
 
 	// ── 5. Hide India GST fields for non-Indian companies ──
 	var INDIAN_COMPANY = "Avientek Electronics Trading PVT. LTD";
-	var GST_CHILD_DOCTYPES = [
-		"Quotation Item", "Sales Order Item", "Sales Invoice Item",
-		"Delivery Note Item", "POS Invoice Item",
-		"Purchase Order Item", "Purchase Invoice Item",
-		"Purchase Receipt Item", "Supplier Quotation Item",
-	];
 
-	GST_CHILD_DOCTYPES.forEach(function (cdt) {
-		frappe.ui.form.on(cdt, {
-			form_render: function (frm) {
-				if (frm.doc.company !== INDIAN_COMPANY) {
-					frm.fields_dict.items.grid.grid_rows.forEach(function (row) {
-						if (row.grid_form) {
-							$(row.grid_form.fields_dict.gst_treatment &&
-								row.grid_form.fields_dict.gst_treatment.wrapper).hide();
-						}
-					});
-				}
+	function toggle_gst_fields(frm) {
+		var hide = frm.doc.company !== INDIAN_COMPANY;
+		var grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+		if (!grid) return;
+
+		// Hide column in grid list view
+		grid.update_docfield_property("gst_treatment", "hidden", hide ? 1 : 0);
+
+		// Hide field inside every open row form
+		grid.grid_rows.forEach(function (row) {
+			if (row.grid_form && row.grid_form.fields_dict.gst_treatment) {
+				row.grid_form.fields_dict.gst_treatment.df.hidden = hide ? 1 : 0;
+				row.grid_form.fields_dict.gst_treatment.refresh();
 			}
 		});
-	});
+	}
 
-	// Also hide on parent form refresh for all transaction doctypes
 	["Quotation", "Sales Order", "Sales Invoice", "Delivery Note",
 	 "POS Invoice", "Purchase Order", "Purchase Invoice",
 	 "Purchase Receipt", "Supplier Quotation"].forEach(function (dt) {
 		frappe.ui.form.on(dt, {
-			refresh: function (frm) {
-				if (frm.doc.company !== INDIAN_COMPANY) {
-					frm.fields_dict.items && frm.fields_dict.items.grid.update_docfield_property(
-						"gst_treatment", "hidden", 1
-					);
-				} else {
-					frm.fields_dict.items && frm.fields_dict.items.grid.update_docfield_property(
-						"gst_treatment", "hidden", 0
-					);
-				}
-			},
-			company: function (frm) {
-				if (frm.doc.company !== INDIAN_COMPANY) {
-					frm.fields_dict.items && frm.fields_dict.items.grid.update_docfield_property(
-						"gst_treatment", "hidden", 1
-					);
-				} else {
-					frm.fields_dict.items && frm.fields_dict.items.grid.update_docfield_property(
-						"gst_treatment", "hidden", 0
-					);
-				}
+			refresh: toggle_gst_fields,
+			company: toggle_gst_fields,
+		});
+
+		// Also trigger when a child row form is opened
+		frappe.ui.form.on(dt + " Item", {
+			form_render: function (frm) {
+				toggle_gst_fields(frm);
 			}
 		});
 	});
