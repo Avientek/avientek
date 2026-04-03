@@ -815,10 +815,15 @@ def customer_permission_query(user):
 			")".format(sps=sps_sql)
 		)
 
-	# Company filter
-	company_cond = _company_permission_query(user, "Customer")
-	if company_cond:
-		parts.append(company_cond)
+	# Company filter — also allow customers with empty company (e.g. inter-company customers)
+	company_perms = _get_user_companies(user)
+	if company_perms:
+		companies_sql = ", ".join(frappe.db.escape(c) for c in company_perms)
+		parts.append(
+			"(`tabCustomer`.`company` IN ({companies}) "
+			"OR `tabCustomer`.`company` = '' "
+			"OR `tabCustomer`.`company` IS NULL)".format(companies=companies_sql)
+		)
 
 	return " AND ".join(parts)
 
@@ -1373,6 +1378,27 @@ def patch_shared_document_filter():
 	def patched_build_match_conditions(self, as_condition=True):
 		result = _original_build(self, as_condition=as_condition)
 
+		user = self.user or frappe.session.user
+		if user == "Administrator":
+			return result
+
+		# For Customer doctype: Frappe's standard match conditions filter
+		# company IN (user's companies), which hides customers with empty
+		# company (e.g. inter-company customers). Replace the strict company
+		# filter to also allow empty company values.
+		if as_condition and result and self.doctype == "Customer":
+			company_perms = _get_user_companies(user)
+			if company_perms:
+				import re
+				# Frappe generates: `tabCustomer`.`company` in ('X','Y',...)
+				pattern = r"`tabCustomer`\.`company`\s+in\s+\([^)]+\)"
+				replacement = (
+					"(`tabCustomer`.`company` in ({cos}) "
+					"OR `tabCustomer`.`company` = '' "
+					"OR `tabCustomer`.`company` IS NULL)"
+				).format(cos=", ".join(frappe.db.escape(c) for c in company_perms))
+				result = re.sub(pattern, replacement, result)
+
 		# For restricted doctypes, remove the shared doc OR bypass
 		# Frappe generates: ((conditions) or (name in (...shared...)))
 		# We strip the shared part so ALL docs must pass permission conditions
@@ -1380,7 +1406,7 @@ def patch_shared_document_filter():
 			as_condition
 			and result
 			and self.doctype in _RESTRICTED_DOCTYPES
-			and (self.user or frappe.session.user) != "Administrator"
+			and user != "Administrator"
 			and self.shared
 		):
 			share_cond = self.get_share_condition()
