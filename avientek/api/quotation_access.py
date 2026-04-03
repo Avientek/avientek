@@ -927,8 +927,10 @@ EXPORT_RESTRICTED_DOCTYPES = set(
 def restricted_export_query():
 	"""Override frappe.desk.reportview.export_query.
 
-	Block export for restricted users on restricted doctypes because Frappe's
-	export includes ALL child rows without child-level filtering.
+	For restricted users on restricted doctypes, automatically route to
+	filtered export (export_my_data) instead of blocking, because Frappe's
+	standard export includes ALL child rows without child-level filtering.
+	Unrestricted users get the standard export.
 	"""
 	from frappe.desk.reportview import export_query as original_export
 
@@ -945,13 +947,11 @@ def restricted_export_query():
 				or _get_user_companies(user)
 			)
 			if has_restriction:
-				frappe.respond_as_web_page(
-					_("Export Restricted"),
-					_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
-					http_status_code=403,
-					indicator_color="red",
+				file_type = frappe.form_dict.get("file_format_type", "CSV")
+				return export_my_data(
+					doctype=doctype,
+					file_type=file_type,
 				)
-				return
 
 	return original_export()
 
@@ -963,8 +963,8 @@ def restricted_download_template(
 ):
 	"""Override frappe.core.doctype.data_import.data_import.download_template.
 
-	Block export for restricted users on restricted doctypes because Frappe's
-	Exporter dumps ALL child rows (e.g. other Sales Persons) without filtering.
+	For restricted users on restricted doctypes, automatically route to
+	filtered export instead of blocking.
 	"""
 	from frappe.core.doctype.data_import.data_import import download_template as original_download
 
@@ -979,13 +979,10 @@ def restricted_download_template(
 			or _get_user_companies(user)
 		)
 		if has_restriction:
-			frappe.respond_as_web_page(
-				_("Export Restricted"),
-				_("You cannot export {0} data because you have restricted access. Contact your administrator.").format(_(doctype)),
-				http_status_code=403,
-				indicator_color="red",
+			return export_my_data(
+				doctype=doctype,
+				file_type=file_type,
 			)
-			return
 
 	return original_download(
 		doctype=doctype,

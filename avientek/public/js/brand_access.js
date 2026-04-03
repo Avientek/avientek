@@ -496,26 +496,12 @@
 		}, 500);
 	}
 
-	// ── 4. Block Export for restricted users on restricted doctypes ──
+	// ── 4. Relabel Export for restricted users on restricted doctypes ──
 
 	function setup_export_block() {
-		// Override DataExporter to block export before it even calls the server
-		if (frappe.data_import && frappe.data_import.DataExporter) {
-			let OrigExporter = frappe.data_import.DataExporter;
-			frappe.data_import.DataExporter = function (doctype, exporting_for) {
-				if (is_restricted_doctype(doctype)) {
-					frappe.msgprint({
-						title: __("Export Restricted"),
-						message: __("You cannot export {0} data because you have restricted access. Contact your administrator.", [__(doctype)]),
-						indicator: "red",
-					});
-					return { dialog: { show: function () {} } };
-				}
-				return new OrigExporter(doctype, exporting_for);
-			};
-		}
+		// Server-side now handles filtered export automatically,
+		// so we just relabel "Export" to "Export My Data" for clarity.
 
-		// Also watch for page changes to hide Export from Actions menu
 		$(document).on("page-change", block_export_on_page);
 		setTimeout(block_export_on_page, 1000);
 	}
@@ -548,58 +534,26 @@
 		}
 		if (!dt) return;
 
-		// Patch Actions dropdown (appears when rows are checked)
+		// Relabel "Export" → "Export My Data" in Actions dropdown
 		function patch_actions_menu() {
 			let $menu = $(".actions-btn-group .dropdown-menu");
 			if (!$menu.length) return;
 
-			// Hide standard Export
 			$menu.find("a").filter(function () {
 				return $(this).text().trim() === "Export";
-			}).closest("li").hide();
-
-			// Add "Export My Data" if not already there
-			if (!$menu.find("a:contains('Export My Data')").length) {
-				let $li = $('<li><a class="dropdown-item" href="#">'
-					+ __("Export My Data") + "</a></li>");
-				$li.on("click", function (e) {
-					e.preventDefault();
-					show_my_data_export_dialog(dt);
-				});
-				$menu.append($li);
-			}
+			}).text(__("Export My Data"));
 		}
 
-		// Patch ALL menus on the page — hide Export, add Export My Data
+		// Relabel "Export" → "Export My Data" in all other menus (e.g. "..." menu)
 		function patch_page_menu() {
-			// Target every dropdown-menu on the page (Menu "...", page actions, etc.)
 			$(".dropdown-menu").each(function () {
 				let $menu = $(this);
-				// Skip the Actions dropdown (handled separately by patch_actions_menu)
 				if ($menu.closest(".actions-btn-group").length) return;
 
-				// Find and hide "Export" items
-				let found_export = false;
 				$menu.find("a, button, .dropdown-item").filter(function () {
 					let txt = $(this).text().trim();
 					return txt === "Export" || txt === __("Export");
-				}).each(function () {
-					found_export = true;
-					$(this).closest("li").length
-						? $(this).closest("li").hide()
-						: $(this).hide();
-				});
-
-				// Add "Export My Data" if Export was found/hidden and our button isn't there
-				if (found_export && !$menu.find(".export-my-data-btn").length) {
-					let $item = $('<a class="dropdown-item export-my-data-btn" href="#">'
-						+ __("Export My Data") + "</a>");
-					$item.on("click", function (e) {
-						e.preventDefault();
-						show_my_data_export_dialog(dt);
-					});
-					$menu.append($item);
-				}
+				}).text(__("Export My Data"));
 			});
 		}
 
@@ -609,13 +563,12 @@
 			let $actions_group = $(".actions-btn-group");
 			let $page_container = $(".page-container, .frappe-control");
 
-			patch_page_menu(); // Always patch the "..." menu
+			patch_page_menu();
 
 			if ($actions_group.length && !observer_started) {
 				observer_started = true;
 				patch_actions_menu();
 
-				// Watch for Actions dropdown being rebuilt (on checkbox select/deselect)
 				let observer = new MutationObserver(function () {
 					setTimeout(function () {
 						patch_actions_menu();
@@ -625,7 +578,6 @@
 				observer.observe($actions_group[0], { childList: true, subtree: true });
 			}
 
-			// Also observe the page body for menu rebuilds
 			if ($page_container.length && !$page_container.data("export-observer")) {
 				$page_container.data("export-observer", true);
 				let pageObserver = new MutationObserver(function () {
