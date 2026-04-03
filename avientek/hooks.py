@@ -375,6 +375,7 @@ permission_query_conditions = {
     "Supplier Quotation": "avientek.api.quotation_access.supplier_quotation_permission_query",
     "Request for Quotation": "avientek.api.quotation_access.request_for_quotation_permission_query",
     "Opportunity": "avientek.api.quotation_access.opportunity_permission_query",
+    "Customer": "avientek.api.quotation_access.customer_permission_query",
     "Item": "avientek.api.quotation_access.item_permission_query",
     "Serial No": "avientek.api.quotation_access.serial_no_permission_query",
     "Item Price": "avientek.api.quotation_access.item_price_permission_query",

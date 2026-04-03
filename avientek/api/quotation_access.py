@@ -777,6 +777,52 @@ def request_for_quotation_permission_query(user):
 def opportunity_permission_query(user):
 	return _combined_permission_query(user, "Opportunity", "Opportunity Item")
 
+def customer_permission_query(user):
+	"""Permission query for Customer.
+
+	Users with Sales Person restriction can see:
+	  1. Customers assigned to their sales person(s)
+	  2. Customers with NO Sales Team at all (unassigned)
+	Other restrictions (Customer Group, Company) apply with AND logic.
+	"""
+	if user == "Administrator":
+		return ""
+
+	parts = []
+
+	# Customer Group filter
+	cg_perms = _get_user_customer_groups(user)
+	if cg_perms:
+		cgs_sql = ", ".join(frappe.db.escape(cg) for cg in cg_perms)
+		parts.append("`tabCustomer`.`customer_group` IN ({cgs})".format(cgs=cgs_sql))
+
+	# Sales Person filter — include customers with matching SP OR no Sales Team
+	sp_perms = _get_user_sales_persons(user)
+	if sp_perms:
+		sps_sql = ", ".join(frappe.db.escape(sp) for sp in sp_perms)
+		parts.append(
+			"("
+			"EXISTS ("
+			"SELECT 1 FROM `tabSales Team` st "
+			"WHERE st.parent = `tabCustomer`.name "
+			"AND st.parenttype = 'Customer' "
+			"AND st.sales_person IN ({sps})"
+			") OR NOT EXISTS ("
+			"SELECT 1 FROM `tabSales Team` st2 "
+			"WHERE st2.parent = `tabCustomer`.name "
+			"AND st2.parenttype = 'Customer'"
+			")"
+			")".format(sps=sps_sql)
+		)
+
+	# Company filter
+	company_cond = _company_permission_query(user, "Customer")
+	if company_cond:
+		parts.append(company_cond)
+
+	return " AND ".join(parts)
+
+
 def item_permission_query(user):
 	return _combined_parent_permission_query(user, "Item")
 
