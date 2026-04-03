@@ -38,6 +38,7 @@ COMPANY_DEFAULTS = [
 		"company": "Avientek Electronics Trading PVT. LTD",
 		"income_account": None,
 		"tax_template": "GST 18% - AETPL",
+		"tax_category": "Registered Regular",
 	},
 ]
 
@@ -57,7 +58,10 @@ def auto_populate_defaults(doc, method=None):
 
 		# Add Item Tax row if template is missing
 		if entry.get("tax_template") and entry["tax_template"] not in existing_templates:
-			doc.append("taxes", {"item_tax_template": entry["tax_template"]})
+			tax_row = {"item_tax_template": entry["tax_template"]}
+			if entry.get("tax_category"):
+				tax_row["tax_category"] = entry["tax_category"]
+			doc.append("taxes", tax_row)
 
 
 def validate_brand_pn(doc,method):
