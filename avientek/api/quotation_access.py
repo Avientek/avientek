@@ -999,9 +999,40 @@ def restricted_export_query():
 			)
 			if has_restriction:
 				file_type = frappe.form_dict.get("file_format_type", "CSV")
+				# Extract picked columns from form_dict fields
+				# Fields look like: ["`tabQuotation`.`name`", "`tabQuotation Item`.`item_code`", ...]
+				parent_fields = None
+				child_fields = None
+				raw_fields = frappe.form_dict.get("fields")
+				if raw_fields:
+					import json as _json
+					if isinstance(raw_fields, str):
+						try:
+							raw_fields = _json.loads(raw_fields)
+						except Exception:
+							raw_fields = []
+					if isinstance(raw_fields, (list, tuple)):
+						pf = []
+						cf = []
+						child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+						for f in raw_fields:
+							f = str(f).strip().strip("`")
+							if f.startswith(f"tab{doctype}."):
+								fn = f.split(".")[-1].strip("`").strip()
+								if fn:
+									pf.append(fn)
+							elif child_dt and f.startswith(f"tab{child_dt}."):
+								fn = f.split(".")[-1].strip("`").strip()
+								if fn:
+									cf.append(fn)
+						parent_fields = _json.dumps(pf) if pf else None
+						child_fields = _json.dumps(cf) if cf else None
+
 				return export_my_data(
 					doctype=doctype,
 					file_type=file_type,
+					parent_fields_json=parent_fields,
+					child_fields_json=child_fields,
 				)
 
 	return original_export()
