@@ -1301,12 +1301,28 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	))
 	if custom_child_fields:
 		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and fn in child_db_columns]
+	elif custom_parent_fields:
+		# User explicitly picked parent fields but no child fields — skip child data
+		child_fields = []
 	else:
 		child_fields = ["parent", "idx"]
 		for fn in ["item_code", "item_name", "brand", "item_group", "qty", "rate",
 				   "amount", "uom", "description", "warehouse"]:
 			if child_meta.has_field(fn):
 				child_fields.append(fn)
+
+	# If no child fields selected, export parent-only (one row per document)
+	if not child_fields:
+		output = io.StringIO()
+		writer = csv.writer(output)
+		header = ["Document"] + [fn for fn in parent_fields if fn != "name"]
+		writer.writerow(header)
+		for name in parent_names:
+			row_data = frappe.db.get_value(doctype, name, parent_fields, as_dict=True) or {}
+			data = [name] + [str(row_data.get(fn, "")) for fn in parent_fields if fn != "name"]
+			writer.writerow(data)
+		_send_csv_response(output.getvalue(), doctype, file_type)
+		return
 
 	# Fetch ALL child rows for permitted parents
 	# Filter by parenttype to avoid orphaned rows or rows from other parent doctypes
