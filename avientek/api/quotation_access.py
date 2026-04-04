@@ -1023,6 +1023,7 @@ def restricted_export_query():
 										docnames = _json.dumps(list(value))
 
 				# Extract picked columns from form_dict fields
+				# Frappe sends fields as: ["`tabSales Order`.`customer`", ...]
 				parent_fields = None
 				child_fields = None
 				raw_fields = frappe.form_dict.get("fields")
@@ -1033,19 +1034,23 @@ def restricted_export_query():
 						except Exception:
 							raw_fields = []
 					if isinstance(raw_fields, (list, tuple)):
+						import re
 						pf = []
 						cf = []
 						child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
 						for f in raw_fields:
-							f = str(f).strip().strip("`")
-							if f.startswith(f"tab{doctype}."):
-								fn = f.split(".")[-1].strip("`").strip()
-								if fn:
-									pf.append(fn)
-							elif child_dt and f.startswith(f"tab{child_dt}."):
-								fn = f.split(".")[-1].strip("`").strip()
-								if fn:
-									cf.append(fn)
+							# Parse "`tabDocType`.`fieldname`" or "tabDocType.fieldname"
+							match = re.match(r"`?tab([^`]+)`?\s*\.\s*`?([^`]+)`?", str(f).strip())
+							if not match:
+								continue
+							dt_name = match.group(1).strip()
+							fn = match.group(2).strip()
+							if not fn:
+								continue
+							if dt_name == doctype:
+								pf.append(fn)
+							elif child_dt and dt_name == child_dt:
+								cf.append(fn)
 						parent_fields = _json.dumps(pf) if pf else None
 						child_fields = _json.dumps(cf) if cf else None
 
