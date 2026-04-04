@@ -12,6 +12,7 @@ def after_migrate():
 	_deactivate_old_quotation_workflows()
 	_fix_quotation_item_calc_layout()
 	_fix_global_field_settings()
+	_enforce_custom_role_permissions()
 
 
 def _create_asset_dam_fields():
@@ -270,6 +271,19 @@ def _fix_global_field_settings():
 		if frappe.db.exists("Custom Field", cf_name):
 			frappe.delete_doc("Custom Field", cf_name, force=True)
 
+	frappe.db.commit()
+
+
+def _enforce_custom_role_permissions():
+	"""Ensure custom role permissions stay as intended after every migrate."""
+	# Sales Invoice - Custom role: export must stay disabled
+	frappe.db.sql("""
+		UPDATE `tabCustom DocPerm`
+		SET `export` = 0
+		WHERE parent = 'Sales Invoice'
+		AND role = 'Sales Invoice- Custom'
+		AND `export` = 1
+	""")
 	frappe.db.commit()
 
 

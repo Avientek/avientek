@@ -26,13 +26,6 @@ app_license = "mit"
 
 fixtures = [
 	{
-		"dt": "Custom DocPerm",
-		"filters": [
-			["role", "=", "Sales Invoice- Custom"],
-			["parent", "=", "Sales Invoice"],
-		]
-	},
-	{
 		"dt": "Print Format",
 		"filters": [
 			[
