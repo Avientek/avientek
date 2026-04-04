@@ -1088,9 +1088,46 @@ def restricted_download_template(
 			or _get_user_companies(user)
 		)
 		if has_restriction:
+			import json as _json
+			# Parse export_fields: {"Sales Order": ["customer"], "Sales Order Item": ["item_code"]}
+			parent_fields = None
+			child_fields = None
+			if export_fields:
+				if isinstance(export_fields, str):
+					try:
+						export_fields = _json.loads(export_fields)
+					except Exception:
+						export_fields = {}
+				if isinstance(export_fields, dict):
+					pf = export_fields.get(doctype, [])
+					if pf:
+						parent_fields = _json.dumps(pf)
+					# Find child table fields
+					child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+					if child_dt:
+						cf = export_fields.get(child_dt, [])
+						if cf:
+							child_fields = _json.dumps(cf)
+
+			# Parse export_filters for selected docnames
+			docnames = None
+			if export_filters:
+				if isinstance(export_filters, str):
+					try:
+						export_filters = _json.loads(export_filters)
+					except Exception:
+						export_filters = {}
+				if isinstance(export_filters, dict) and export_filters.get("name"):
+					names = export_filters["name"]
+					if isinstance(names, (list, tuple)):
+						docnames = _json.dumps(list(names))
+
 			return export_my_data(
 				doctype=doctype,
 				file_type=file_type,
+				docnames=docnames,
+				parent_fields_json=parent_fields,
+				child_fields_json=child_fields,
 			)
 
 	return original_download(
