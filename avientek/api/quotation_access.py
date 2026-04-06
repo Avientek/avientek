@@ -1110,14 +1110,26 @@ def restricted_download_template(
 							child_fields = _json.dumps(cf)
 
 			# Parse export_filters for selected docnames
+			# Frappe sends: [["Sales Order","name","in",["SO-1","SO-2"]]]
 			docnames = None
 			if export_filters:
 				if isinstance(export_filters, str):
 					try:
 						export_filters = _json.loads(export_filters)
 					except Exception:
-						export_filters = {}
-				if isinstance(export_filters, dict) and export_filters.get("name"):
+						export_filters = []
+				if isinstance(export_filters, (list, tuple)):
+					for f in export_filters:
+						if isinstance(f, (list, tuple)) and len(f) >= 3:
+							fieldname = f[1] if len(f) == 4 else f[0]
+							operator = f[2] if len(f) == 4 else f[1]
+							value = f[3] if len(f) == 4 else f[2]
+							if fieldname == "name" and str(operator).lower() == "in":
+								if isinstance(value, str):
+									docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
+								elif isinstance(value, (list, tuple)):
+									docnames = _json.dumps(list(value))
+				elif isinstance(export_filters, dict) and export_filters.get("name"):
 					names = export_filters["name"]
 					if isinstance(names, (list, tuple)):
 						docnames = _json.dumps(list(names))
