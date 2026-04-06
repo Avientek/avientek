@@ -110,5 +110,19 @@ def _patch_has_user_permission():
 	perms.has_user_permission = patched_has_user_permission
 
 
+def _patch_qb_get_query():
+	"""Fix Frappe bug where frappe.qb.get_query() receives ignore_permissions
+	kwarg which Engine.get_query() doesn't support. Strip it before passing."""
+	from frappe.query_builder.utils import get_query as _original_get_query
+
+	def _patched_get_query(*args, **kwargs):
+		kwargs.pop("ignore_permissions", None)
+		return _original_get_query(*args, **kwargs)
+
+	import frappe as _frappe
+	_frappe.qb.get_query = _patched_get_query
+
+
 _apply_patches()
+_patch_qb_get_query()
 
