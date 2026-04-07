@@ -276,7 +276,8 @@ def _fix_global_field_settings():
 
 def _enforce_custom_role_permissions():
 	"""Ensure custom role permissions stay as intended after every migrate.
-	Recreates the permission row if it was deleted, and enforces export=0."""
+	Recreates the permission row if it was deleted, and enforces export=0.
+	Also cleans up duplicate rows that cause ValidationError on migrate."""
 	ROLE = "Sales Invoice- Custom"
 	DT = "Sales Invoice"
 	EXPECTED = {
@@ -287,12 +288,23 @@ def _enforce_custom_role_permissions():
 		"if_owner": 0,
 	}
 
-	existing = frappe.db.exists("Custom DocPerm", {"parent": DT, "role": ROLE, "permlevel": 0})
-	if existing:
-		frappe.db.set_value("Custom DocPerm", existing, EXPECTED)
+	# Find ALL existing rows for this role (there may be duplicates)
+	all_rows = frappe.db.get_all(
+		"Custom DocPerm",
+		filters={"parent": DT, "role": ROLE, "permlevel": 0},
+		pluck="name",
+	)
+
+	if all_rows:
+		# Keep the first row, delete any duplicates
+		keep = all_rows[0]
+		for dup in all_rows[1:]:
+			frappe.db.sql("DELETE FROM `tabCustom DocPerm` WHERE name=%s", dup)
+		# Update the kept row with expected values
+		frappe.db.set_value("Custom DocPerm", keep, EXPECTED)
 	else:
 		# Insert directly via SQL to avoid DocType validation (duplicate role check)
-		import frappe.utils
+		now = frappe.utils.now()
 		frappe.db.sql("""
 			INSERT INTO `tabCustom DocPerm`
 			(name, parent, parentfield, parenttype, role, permlevel,
@@ -303,8 +315,7 @@ def _enforce_custom_role_permissions():
 			 1, 1, 1, 0, 1, 1, 1,
 			 1, 0, 1, 1, 1, 1, 1, 0,
 			 'Administrator', 'Administrator', %s, %s)
-		""", (frappe.generate_hash(length=10), DT, ROLE,
-			  frappe.utils.now(), frappe.utils.now()))
+		""", (frappe.generate_hash(length=10), DT, ROLE, now, now))
 
 	frappe.db.commit()
 
