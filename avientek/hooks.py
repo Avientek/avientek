@@ -436,7 +436,10 @@ doc_events = {
             "avientek.events.sales_order.validate_customer_company",
             "avientek.events.sales_order.validate_exchange_rate_v2",
         ],
-        "before_save": "avientek.events.sales_order.validate_item_tax_template",
+        "before_save": [
+            "avientek.events.sales_order.carry_forward_quotation_fields",
+            "avientek.events.sales_order.validate_item_tax_template",
+        ],
         "after_save": "avientek.events.sales_order.sync_delivery_date_to_items",
         "on_submit": "avientek.events.sales_order.set_sales_order_confirmation_date",
     },

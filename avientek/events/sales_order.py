@@ -4,6 +4,64 @@ from frappe.model.mapper import get_mapped_doc
 from frappe.utils import flt
 
 
+def carry_forward_quotation_fields(doc, method=None):
+    """Restore payment terms and other fields from source Quotation.
+
+    ERPNext's set_missing_values resets payment_terms_template based on the
+    customer's default, overwriting what was mapped from the Quotation.
+    This hook runs on before_save to restore those values.
+    """
+    if doc.docstatus != 0 or not doc.is_new():
+        return
+
+    # Find linked Quotation from items
+    quotation_name = None
+    for item in doc.items:
+        if item.prevdoc_docname:
+            quotation_name = item.prevdoc_docname
+            break
+
+    if not quotation_name:
+        return
+
+    qt = frappe.db.get_value(
+        "Quotation", quotation_name,
+        ["payment_terms_template", "tc_name", "terms"],
+        as_dict=True,
+    )
+    if not qt:
+        return
+
+    # Restore payment terms if the Quotation had them
+    if qt.payment_terms_template and not doc.payment_terms_template:
+        doc.payment_terms_template = qt.payment_terms_template
+        # Re-fetch payment schedule from the Quotation
+        qt_schedules = frappe.get_all(
+            "Payment Schedule",
+            filters={"parent": quotation_name, "parenttype": "Quotation"},
+            fields=["payment_term", "description", "due_date", "invoice_portion", "discount_type", "discount", "mode_of_payment"],
+            order_by="idx asc",
+        )
+        if qt_schedules:
+            doc.set("payment_schedule", [])
+            for ps in qt_schedules:
+                doc.append("payment_schedule", {
+                    "payment_term": ps.payment_term,
+                    "description": ps.description,
+                    "due_date": ps.due_date,
+                    "invoice_portion": ps.invoice_portion,
+                    "discount_type": ps.discount_type,
+                    "discount": ps.discount,
+                    "mode_of_payment": ps.mode_of_payment,
+                    "payment_amount": flt(doc.grand_total or doc.rounded_total) * flt(ps.invoice_portion) / 100,
+                })
+
+    # Restore terms and conditions if not already set
+    if qt.tc_name and not doc.tc_name:
+        doc.tc_name = qt.tc_name
+        doc.terms = qt.terms
+
+
 # ── Server Script: "Delivery Date" ──
 # DocType Event: Sales Order, After Save
 def sync_delivery_date_to_items(doc, method=None):
