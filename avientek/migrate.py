@@ -275,15 +275,26 @@ def _fix_global_field_settings():
 
 
 def _enforce_custom_role_permissions():
-	"""Ensure custom role permissions stay as intended after every migrate."""
-	# Sales Invoice - Custom role: export must stay disabled
-	frappe.db.sql("""
-		UPDATE `tabCustom DocPerm`
-		SET `export` = 0
-		WHERE parent = 'Sales Invoice'
-		AND role = 'Sales Invoice- Custom'
-		AND `export` = 1
-	""")
+	"""Ensure custom role permissions stay as intended after every migrate.
+	Recreates the permission row if it was deleted, and enforces export=0."""
+	ROLE = "Sales Invoice- Custom"
+	DT = "Sales Invoice"
+	EXPECTED = {
+		"read": 1, "write": 1, "create": 1, "delete": 0,
+		"submit": 1, "cancel": 1, "amend": 1,
+		"report": 1, "export": 0, "import": 1,
+		"share": 1, "print": 1, "email": 1, "select": 1,
+		"if_owner": 0,
+	}
+
+	existing = frappe.db.exists("Custom DocPerm", {"parent": DT, "role": ROLE, "permlevel": 0})
+	if existing:
+		frappe.db.set_value("Custom DocPerm", existing, EXPECTED)
+	else:
+		doc = frappe.get_doc("DocType", DT)
+		doc.append("permissions", {"role": ROLE, "permlevel": 0, **EXPECTED})
+		doc.save(ignore_permissions=True)
+
 	frappe.db.commit()
 
 
