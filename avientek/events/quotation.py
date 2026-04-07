@@ -787,7 +787,11 @@ def validate_item_tax_template(doc, method=None):
 # 5)  MASTER PIPELINE  (called from before_save hook)
 # ──────────────────────────────────────────────────────────────
 def run_calculation_pipeline(doc, method=None):
-    """Authoritative server-side calculation — runs on every save."""
+    """Authoritative server-side calculation — runs on every save.
+    Skip on submit/cancel/amend to preserve the previewed values."""
+    if doc.docstatus != 0:
+        return
+
     for it in doc.items:
         calc_item_totals(it)
 
