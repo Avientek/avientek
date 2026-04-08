@@ -303,19 +303,13 @@ def _enforce_custom_role_permissions():
 		# Update the kept row with expected values
 		frappe.db.set_value("Custom DocPerm", keep, EXPECTED)
 	else:
-		# Insert directly via SQL to avoid DocType validation (duplicate role check)
-		now = frappe.utils.now()
-		frappe.db.sql("""
-			INSERT INTO `tabCustom DocPerm`
-			(name, parent, parentfield, parenttype, role, permlevel,
-			 `read`, `write`, `create`, `delete`, submit, cancel, amend,
-			 report, export, import, share, print, email, `select`, if_owner,
-			 owner, modified_by, creation, modified)
-			VALUES (%s, %s, 'permissions', 'DocType', %s, 0,
-			 1, 1, 1, 0, 1, 1, 1,
-			 1, 0, 1, 1, 1, 1, 1, 0,
-			 'Administrator', 'Administrator', %s, %s)
-		""", (frappe.generate_hash(length=10), DT, ROLE, now, now))
+		# No existing row — safe to insert (no duplicate validation issue)
+		doc = frappe.new_doc("Custom DocPerm")
+		doc.parent = DT
+		doc.role = ROLE
+		doc.permlevel = 0
+		doc.update(EXPECTED)
+		doc.insert(ignore_permissions=True)
 
 	frappe.db.commit()
 
