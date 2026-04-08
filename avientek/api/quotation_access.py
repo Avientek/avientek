@@ -1390,13 +1390,15 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 
 	# ── Dynamic child-row filtering: AND logic ──
 	# Item must match ALL active restrictions that exist on the child table
+	# Blank values are allowed through — only reject rows with a non-matching value
 	filtered_children = []
 	for row in all_children:
 		ok = True
 		for fieldname, permitted_values in child_filter_map.items():
 			row_val = row.get(fieldname) or ""
-			# Strict: blank values are NOT permitted, must match exactly
-			if not row_val or row_val not in permitted_values:
+			# Allow blank values (item may not have brand/item_group set)
+			# Only reject if the field has a value that doesn't match
+			if row_val and row_val not in permitted_values:
 				ok = False
 				break
 		if ok:
