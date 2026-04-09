@@ -1013,9 +1013,10 @@ def restricted_export_query():
 					if isinstance(raw_filters, (list, tuple)):
 						for f in raw_filters:
 							if isinstance(f, (list, tuple)) and len(f) >= 3:
-								fieldname = f[1] if len(f) == 4 else f[0]
-								operator = f[2] if len(f) == 4 else f[1]
-								value = f[3] if len(f) == 4 else f[2]
+								# Frappe sends [doctype, field, op, value] or [doctype, field, op, value, hidden]
+								fieldname = f[1] if len(f) >= 4 else f[0]
+								operator = f[2] if len(f) >= 4 else f[1]
+								value = f[3] if len(f) >= 4 else f[2]
 								if fieldname == "name" and str(operator).lower() == "in":
 									if isinstance(value, str):
 										docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
@@ -1129,9 +1130,10 @@ def restricted_download_template(
 				if isinstance(export_filters, (list, tuple)):
 					for f in export_filters:
 						if isinstance(f, (list, tuple)) and len(f) >= 3:
-							fieldname = f[1] if len(f) == 4 else f[0]
-							operator = f[2] if len(f) == 4 else f[1]
-							value = f[3] if len(f) == 4 else f[2]
+							# Frappe sends [doctype, field, op, value] or [doctype, field, op, value, hidden]
+							fieldname = f[1] if len(f) >= 4 else f[0]
+							operator = f[2] if len(f) >= 4 else f[1]
+							value = f[3] if len(f) >= 4 else f[2]
 							if fieldname == "name" and str(operator).lower() == "in":
 								if isinstance(value, str):
 									docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
@@ -1334,7 +1336,8 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		# Parent-level doctype (Item, Serial No, etc.) - export directly
 		output = io.StringIO()
 		writer = csv.writer(output)
-		writer.writerow(parent_fields)
+		header_labels = [meta.get_field(fn).label if meta.get_field(fn) else fn for fn in parent_fields]
+		writer.writerow(header_labels)
 		for name in parent_names:
 			row_data = frappe.db.get_value(doctype, name, parent_fields, as_dict=True)
 			writer.writerow([row_data.get(fn, "") for fn in parent_fields])
@@ -1370,9 +1373,12 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 
 	# If no child fields selected, export parent-only (one row per document)
 	if not child_fields:
+		def _get_label_p(fieldname):
+			df = meta.get_field(fieldname)
+			return df.label if df else fieldname
 		output = io.StringIO()
 		writer = csv.writer(output)
-		header = ["Document"] + [fn for fn in parent_fields if fn != "name"]
+		header = [_get_label_p("name")] + [_get_label_p(fn) for fn in parent_fields if fn != "name"]
 		writer.writerow(header)
 		for name in parent_names:
 			row_data = frappe.db.get_value(doctype, name, parent_fields, as_dict=True) or {}
@@ -1436,12 +1442,18 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 			doctype, name, parent_fields, as_dict=True
 		) or {}
 
+	# Build label lookup for headers
+	def _get_label(fieldname, dt_meta):
+		df = dt_meta.get_field(fieldname)
+		return df.label if df else fieldname
+
 	# Generate CSV
 	output = io.StringIO()
 	writer = csv.writer(output)
 
-	header = ["Document"] + [fn for fn in parent_fields if fn != "name"]
-	header += [fn for fn in child_fields if fn not in ("parent",)]
+	header = [_get_label("name", meta)]
+	header += [_get_label(fn, meta) for fn in parent_fields if fn != "name"]
+	header += [_get_label(fn, child_meta) + " (Items)" for fn in child_fields if fn not in ("parent",)]
 	if sp_perms:
 		header.append("Sales Person")
 	writer.writerow(header)
