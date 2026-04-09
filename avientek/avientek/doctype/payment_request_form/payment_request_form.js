@@ -33,6 +33,34 @@ if (!document.getElementById('payment-ref-styles')) {
     $(row_styles).attr('id', 'payment-ref-styles').appendTo('head');
 }
 
+// Invoice drill-down link + View button styles
+if (!document.getElementById('inv-drilldown-styles')) {
+    $(`<style id="inv-drilldown-styles">
+        .inv-ref-link {
+            color: #2490EF !important;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .inv-ref-link:hover { color: #1a6fc4 !important; }
+        .inv-view-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 8px;
+            font-size: 11px;
+            color: #2490EF;
+            background: #f0f6ff;
+            border: 1px solid #b8d4f0;
+            border-radius: 4px;
+            cursor: pointer;
+            white-space: nowrap;
+            line-height: 1.4;
+        }
+        .inv-view-btn:hover { background: #d6e8fc; border-color: #2490EF; }
+        .inv-view-btn .view-icon { font-size: 12px; }
+    </style>`).appendTo('head');
+}
+
 // Invoice attachment preview popup styles
 if (!document.getElementById('inv-preview-styles')) {
     $(`<style id="inv-preview-styles">
@@ -225,7 +253,10 @@ frappe.ui.form.on('Payment Request Form', {
         // Apply debit note row styling
         frm.events.apply_debit_note_styling(frm);
 
-        // Setup invoice attachment preview on hover
+        // Setup invoice drill-down links and View buttons
+        frm.events.setup_invoice_drilldown(frm);
+
+        // Setup invoice attachment preview (View button click)
         frm.events.setup_invoice_attachment_preview(frm);
 
         // Update Type options based on party_type
@@ -487,19 +518,96 @@ frappe.ui.form.on('Payment Request Form', {
 		});
 	},
 
-    // Invoice attachment preview on hover over invoice cells in child table
+    // Map reference_doctype select values to actual Frappe DocType names
+    _get_actual_doctype: function(ref_doctype) {
+        const map = {
+            "Purchase Invoice": "Purchase Invoice",
+            "Debit Note": "Purchase Invoice",
+            "Credit Note": "Sales Invoice",
+            "Purchase Order": "Purchase Order",
+            "Sales Invoice": "Sales Invoice",
+            "Expense Claim": "Expense Claim",
+            "Employee Advance": "Employee Advance",
+            "Payment Entry": "Payment Entry",
+            "Journal Entry": "Journal Entry",
+        };
+        return map[ref_doctype] || null;
+    },
+
+    // Add clickable drill-down links on invoice names and View buttons
+    setup_invoice_drilldown: function(frm) {
+        setTimeout(function() {
+            let grid = frm.fields_dict.payment_references.grid;
+            if (!grid || !grid.grid_rows) return;
+
+            grid.grid_rows.forEach(function(row) {
+                if (!row.doc || !row.doc.reference_name) return;
+                if (row.doc.reference_doctype === "Manual") return;
+
+                let $row_el = $(row.row);
+
+                // --- Invoice drill-down link ---
+                let $ref_cell = $row_el.find(
+                    ".grid-static-col[data-fieldname='reference_name'] .static-area, " +
+                    "[data-field='reference_name'] .static-area"
+                );
+                if ($ref_cell.length && !$ref_cell.data("drilldown-bound")) {
+                    $ref_cell.data("drilldown-bound", true);
+                    $ref_cell.addClass("inv-ref-link");
+                    $ref_cell.on("click", function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        let actual_dt = frm.events._get_actual_doctype(row.doc.reference_doctype);
+                        if (actual_dt && row.doc.reference_name) {
+                            frappe.set_route("Form", actual_dt, row.doc.reference_name);
+                        }
+                    });
+                }
+
+                // --- View button ---
+                // Find the last visible cell (remarks) to append View button after it
+                let $remarks_cell = $row_el.find(
+                    ".grid-static-col[data-fieldname='remarks'] .static-area, " +
+                    "[data-field='remarks'] .static-area"
+                );
+                // Or append to the reference_name cell area
+                let $target = $remarks_cell.length ? $remarks_cell : $ref_cell;
+                if ($target.length && !$row_el.data("view-btn-bound")) {
+                    $row_el.data("view-btn-bound", true);
+                    let $btn = $('<span class="inv-view-btn" title="Preview document"><span class="view-icon">&#128065;</span> View</span>');
+                    // Place View button in the row actions area
+                    let $actions_cell = $row_el.find(".grid-static-col:last .static-area");
+                    if (!$actions_cell.length) $actions_cell = $target;
+                    $btn.appendTo($ref_cell.parent());
+                    $btn.on("click", function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        // Trigger preview popup
+                        frm.events._show_view_preview(frm, row.doc.reference_doctype, row.doc.reference_name);
+                    });
+                }
+            });
+        }, 200);
+    },
+
+    // Show preview popup triggered by View button click
+    _show_view_preview: function(frm, ref_doctype, ref_name) {
+        if (ref_doctype === "Manual" || !ref_name) return;
+        // Reuse the preview infrastructure from setup_invoice_attachment_preview
+        // Trigger via a custom event on the wrapper
+        $(frm.fields_dict.payment_references.$wrapper).trigger("view-btn-click", [ref_doctype, ref_name]);
+    },
+
+    // Invoice attachment preview (triggered by View button click)
     setup_invoice_attachment_preview: function(frm) {
         if (frm._inv_preview_bound) return;
         frm._inv_preview_bound = true;
 
-        let timer = null;
         let $popup = null;
         let active_key = null;
         const cache = {};
 
         function hide() {
-            clearTimeout(timer);
-            timer = null;
             if ($popup) {
                 $(document).off("mousemove.inv_drag mouseup.inv_drag");
                 $popup.remove();
@@ -508,58 +616,25 @@ frappe.ui.form.on('Payment Request Form', {
             }
         }
 
-        // Broad selector covering all Frappe grid cell rendering variants:
-        //  - .grid-static-col[data-fieldname] — v15 editable grid collapsed rows
-        //  - [data-field] — older Frappe grid layout
-        const CELL_SELECTOR = [
-            ".grid-static-col[data-fieldname='reference_name'] .static-area",
-            ".grid-static-col[data-fieldname='reference_name'] .like-disabled-input",
-            ".grid-static-col[data-fieldname='reference_name'] .field-area",
-            "[data-field='reference_name'] .static-area",
-            "[data-field='reference_name'] .like-disabled-input",
-        ].join(", ");
-
+        // Listen for View button clicks (custom event from setup_invoice_drilldown)
         frm.fields_dict.payment_references.$wrapper.on(
-            "mouseenter",
-            CELL_SELECTOR,
-            function () {
-                const $el = $(this);
-                // Walk up to the grid-row to get data-idx
-                const $grid_row = $el.closest(".grid-row, [data-idx]");
-                if (!$grid_row.length) return;
+            "view-btn-click",
+            function (e, ref_doctype, ref_name) {
+                if (!ref_name || ref_doctype === "Manual") return;
 
-                const idx = cint($grid_row.attr("data-idx") || $grid_row.data("idx"));
-                const refs = frm.doc.payment_references || [];
-                if (idx < 1 || idx > refs.length) return;
-
-                const row = refs[idx - 1];
-                if (!row.reference_name || row.reference_doctype === "Manual") return;
-
-                const key = row.reference_doctype + ":" + row.reference_name;
+                const key = ref_doctype + ":" + ref_name;
                 if (key === active_key) return;
 
-                clearTimeout(timer);
-                timer = setTimeout(() => {
-                    hide();
-                    active_key = key;
-                    show_preview($el, row.reference_doctype, row.reference_name, key);
-                }, 500);
+                hide();
+                active_key = key;
+
+                // Position near center of viewport
+                const $dummy = $(document.body);
+                show_preview($dummy, ref_doctype, ref_name, key);
             }
         );
 
-        frm.fields_dict.payment_references.$wrapper.on(
-            "mouseleave",
-            CELL_SELECTOR,
-            function () {
-                clearTimeout(timer);
-                timer = setTimeout(() => {
-                    if ($popup && !$popup.is(":hover")) hide();
-                }, 250);
-            }
-        );
-
-        // Hide on scroll or route change
-        $(window).on("scroll.inv_preview", hide);
+        // Hide on route change
         frappe.router.on("change", hide);
 
         function show_preview($el, ref_doctype, ref_name, key) {
@@ -580,30 +655,19 @@ frappe.ui.form.on('Payment Request Form', {
                 </div>
             `);
 
-            // Position near the hovered element
-            const rect = $el[0].getBoundingClientRect();
-            let top = rect.bottom + 8;
-            let left = Math.max(10, rect.left - 100);
-            if (top + 820 > window.innerHeight) top = Math.max(10, rect.top - 828);
-            if (left + 780 > window.innerWidth) left = Math.max(10, window.innerWidth - 790);
+            // Position centered in viewport
+            let top = Math.max(20, (window.innerHeight - 820) / 2);
+            let left = Math.max(20, (window.innerWidth - 780) / 2);
             $popup.css({ top, left });
 
             $("body").append($popup);
 
-            // Disable auto-hide once user interacts (maximize, drag, resize)
-            let pinned = false;
-            $popup.on("mouseleave", () => {
-                if (pinned) return;
-                timer = setTimeout(() => {
-                    if ($popup && !$popup.is(":hover")) hide();
-                }, 200);
-            });
+            // Close only via close button (no auto-hide since it's button-triggered)
             $popup.find(".inv-att-close").on("click", hide);
 
             // Maximize / restore toggle
             let prev_style = null;
             $popup.find(".inv-att-max").on("click", function () {
-                pinned = true;
                 if ($popup.hasClass("maximized")) {
                     $popup.removeClass("maximized");
                     if (prev_style) $popup.css(prev_style);
@@ -625,7 +689,6 @@ frappe.ui.form.on('Payment Request Form', {
             $popup.find(".inv-att-hdr").on("mousedown", function (e) {
                 if ($(e.target).closest(".inv-att-btn, .inv-att-close").length) return;
                 if ($popup.hasClass("maximized")) return;
-                pinned = true;
                 dragging = true;
                 dx = e.clientX - $popup[0].offsetLeft;
                 dy = e.clientY - $popup[0].offsetTop;
@@ -641,10 +704,6 @@ frappe.ui.form.on('Payment Request Form', {
             $(document).on("mouseup.inv_drag", function () {
                 dragging = false;
             });
-
-            // Pin on manual resize (CSS resize handle)
-            const ro = new ResizeObserver(() => { pinned = true; });
-            ro.observe($popup[0]);
 
             // Use cache if available
             if (cache[key]) {
