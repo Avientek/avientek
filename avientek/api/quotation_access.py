@@ -1102,10 +1102,18 @@ def restricted_download_template(
 					pf = export_fields.get(doctype, [])
 					if pf:
 						parent_fields = _json.dumps(pf)
-					# Find child table fields
+					# Find child table fields — Frappe uses the table fieldname
+					# (e.g. "items") as key, not the child doctype name
 					child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
 					if child_dt:
 						cf = export_fields.get(child_dt, [])
+						# Also check by table fieldname (Frappe's Export Data dialog uses this)
+						if not cf:
+							meta = frappe.get_meta(doctype)
+							for tf in meta.get("fields", {"fieldtype": "Table"}):
+								if tf.fieldtype == "Table" and tf.options == child_dt:
+									cf = export_fields.get(tf.fieldname, [])
+									break
 						if cf:
 							child_fields = _json.dumps(cf)
 
