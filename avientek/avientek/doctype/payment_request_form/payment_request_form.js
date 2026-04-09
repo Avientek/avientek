@@ -564,28 +564,6 @@ frappe.ui.form.on('Payment Request Form', {
                     });
                 }
 
-                // --- View button ---
-                // Find the last visible cell (remarks) to append View button after it
-                let $remarks_cell = $row_el.find(
-                    ".grid-static-col[data-fieldname='remarks'] .static-area, " +
-                    "[data-field='remarks'] .static-area"
-                );
-                // Or append to the reference_name cell area
-                let $target = $remarks_cell.length ? $remarks_cell : $ref_cell;
-                if ($target.length && !$row_el.data("view-btn-bound")) {
-                    $row_el.data("view-btn-bound", true);
-                    let $btn = $('<span class="inv-view-btn" title="Preview document"><span class="view-icon">&#128065;</span> View</span>');
-                    // Place View button in the row actions area
-                    let $actions_cell = $row_el.find(".grid-static-col:last .static-area");
-                    if (!$actions_cell.length) $actions_cell = $target;
-                    $btn.appendTo($ref_cell.parent());
-                    $btn.on("click", function(e) {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        // Trigger preview popup
-                        frm.events._show_view_preview(frm, row.doc.reference_doctype, row.doc.reference_name);
-                    });
-                }
             });
         }, 200);
     },
@@ -1332,6 +1310,13 @@ function fetch_supplier_details(frm, force_update) {
 let row_updating = {};
 
 frappe.ui.form.on('Payment Request Reference', {
+    view_document: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (row.reference_name && row.reference_doctype !== "Manual") {
+            frm.events._show_view_preview(frm, row.reference_doctype, row.reference_name);
+        }
+    },
+
     reference_doctype: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
 
