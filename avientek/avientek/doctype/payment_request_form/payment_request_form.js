@@ -256,6 +256,19 @@ frappe.ui.form.on('Payment Request Form', {
         // Setup invoice drill-down links and View buttons
         frm.events.setup_invoice_drilldown(frm);
 
+        // Re-render View buttons whenever the grid re-renders (row open/close)
+        if (!frm._grid_render_bound) {
+            frm._grid_render_bound = true;
+            let grid = frm.fields_dict.payment_references.grid;
+            if (grid) {
+                let _orig_refresh = grid.refresh.bind(grid);
+                grid.refresh = function() {
+                    _orig_refresh();
+                    setTimeout(function() { frm.events.setup_invoice_drilldown(frm); }, 250);
+                };
+            }
+        }
+
         // Setup invoice attachment preview (View button click)
         frm.events.setup_invoice_attachment_preview(frm);
 
@@ -534,7 +547,7 @@ frappe.ui.form.on('Payment Request Form', {
         return map[ref_doctype] || null;
     },
 
-    // Add clickable drill-down links on invoice names and View buttons
+    // Add clickable drill-down links on invoice names and render View buttons in static cells
     setup_invoice_drilldown: function(frm) {
         setTimeout(function() {
             let grid = frm.fields_dict.payment_references.grid;
@@ -564,6 +577,20 @@ frappe.ui.form.on('Payment Request Form', {
                     });
                 }
 
+                // --- Render View button in the view_document static cell ---
+                let $view_cell = $row_el.find(
+                    ".grid-static-col[data-fieldname='view_document'] .static-area, " +
+                    "[data-field='view_document'] .static-area"
+                );
+                if ($view_cell.length && !$view_cell.data("view-rendered")) {
+                    $view_cell.data("view-rendered", true);
+                    $view_cell.html('<span class="inv-view-btn" title="Preview document"><span class="view-icon">&#128065;</span> View</span>');
+                    $view_cell.find(".inv-view-btn").on("click", function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        frm.events._show_view_preview(frm, row.doc.reference_doctype, row.doc.reference_name);
+                    });
+                }
             });
         }, 200);
     },
