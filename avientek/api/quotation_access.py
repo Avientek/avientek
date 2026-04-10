@@ -966,11 +966,16 @@ def get_filtered_customers(doctype, txt, searchfield, start, page_len, filters):
 # ── Export restriction ──
 
 # All doctypes where export should be blocked for restricted users
+# Additional doctypes that need export restriction (no child-item brand/ig filter,
+# but need Company-based export handling to bypass export=0 role permissions)
+COMPANY_ONLY_EXPORT_DOCTYPES = ["Payment Entry", "Journal Entry"]
+
 EXPORT_RESTRICTED_DOCTYPES = set(
 	list(BRAND_DOCTYPES.keys()) + BRAND_PARENT_DOCTYPES +
 	list(ITEM_GROUP_DOCTYPES.keys()) + ITEM_GROUP_PARENT_DOCTYPES +
 	CUSTOMER_GROUP_PARENT_DOCTYPES + SUPPLIER_GROUP_PARENT_DOCTYPES +
-	SALES_PERSON_DOCTYPES + SALES_PERSON_PARENT_DOCTYPES
+	SALES_PERSON_DOCTYPES + SALES_PERSON_PARENT_DOCTYPES +
+	COMPANY_ONLY_EXPORT_DOCTYPES
 )
 
 
@@ -989,16 +994,16 @@ def restricted_export_query():
 	if user != "Administrator":
 		doctype = frappe.form_dict.get("doctype")
 		if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-			# Only intercept for item-level restrictions (Brand, Item Group, etc.)
-			# Company restrictions are handled natively by Frappe's User Permission system
-			has_item_restriction = (
+			# Check ALL restriction types — read permissions fresh from DB every time
+			has_restriction = (
 				_get_user_brands(user)
 				or _get_user_item_groups(user)
 				or _get_user_customer_groups(user)
 				or _get_user_supplier_groups(user)
 				or _get_user_sales_persons(user)
+				or _get_user_companies(user)
 			)
-			if has_item_restriction:
+			if has_restriction:
 				import json as _json
 				file_type = frappe.form_dict.get("file_format_type", "CSV")
 
@@ -1081,16 +1086,16 @@ def restricted_download_template(
 
 	user = frappe.session.user
 	if user != "Administrator" and doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-		# Only intercept for item-level restrictions (Brand, Item Group, etc.)
-		# Company restrictions are handled natively by Frappe's User Permission system
-		has_item_restriction = (
+		# Check ALL restriction types — read permissions fresh from DB every time
+		has_restriction = (
 			_get_user_brands(user)
 			or _get_user_item_groups(user)
 			or _get_user_customer_groups(user)
 			or _get_user_supplier_groups(user)
 			or _get_user_sales_persons(user)
+			or _get_user_companies(user)
 		)
-		if has_item_restriction:
+		if has_restriction:
 			import json as _json
 			# Parse export_fields: {"Sales Order": ["customer"], "Sales Order Item": ["item_code"]}
 			parent_fields = None
