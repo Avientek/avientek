@@ -1,6 +1,13 @@
 // ── Client Script: "Auto Share for Invoice" (List view) ──
-frappe.listview_settings['Sales Invoice'] = {
+// Extend ERPNext's existing listview_settings instead of replacing them
+const _si_orig = frappe.listview_settings['Sales Invoice'] || {};
+const _si_orig_onload = _si_orig.onload;
+
+Object.assign(_si_orig, {
     onload: function(listview) {
+        // Call ERPNext's original onload first (Delivery Note / Payment bulk actions)
+        if (_si_orig_onload) _si_orig_onload.call(this, listview);
+
         listview.page.add_actions_menu_item(__('Share with Sales Team Users'), async function() {
             const selected = listview.get_checked_items();
             if (!selected.length) {
@@ -19,7 +26,9 @@ frappe.listview_settings['Sales Invoice'] = {
             );
         });
     }
-};
+});
+
+frappe.listview_settings['Sales Invoice'] = _si_orig;
 
 async function share_sales_invoice_with_users(sales_invoice_name) {
     try {
