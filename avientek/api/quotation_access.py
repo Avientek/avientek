@@ -989,15 +989,16 @@ def restricted_export_query():
 	if user != "Administrator":
 		doctype = frappe.form_dict.get("doctype")
 		if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-			has_restriction = (
+			# Only intercept for item-level restrictions (Brand, Item Group, etc.)
+			# Company restrictions are handled natively by Frappe's User Permission system
+			has_item_restriction = (
 				_get_user_brands(user)
 				or _get_user_item_groups(user)
 				or _get_user_customer_groups(user)
 				or _get_user_supplier_groups(user)
 				or _get_user_sales_persons(user)
-				or _get_user_companies(user)
 			)
-			if has_restriction:
+			if has_item_restriction:
 				import json as _json
 				file_type = frappe.form_dict.get("file_format_type", "CSV")
 
@@ -1080,15 +1081,16 @@ def restricted_download_template(
 
 	user = frappe.session.user
 	if user != "Administrator" and doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-		has_restriction = (
+		# Only intercept for item-level restrictions (Brand, Item Group, etc.)
+		# Company restrictions are handled natively by Frappe's User Permission system
+		has_item_restriction = (
 			_get_user_brands(user)
 			or _get_user_item_groups(user)
 			or _get_user_customer_groups(user)
 			or _get_user_supplier_groups(user)
 			or _get_user_sales_persons(user)
-			or _get_user_companies(user)
 		)
-		if has_restriction:
+		if has_item_restriction:
 			import json as _json
 			# Parse export_fields: {"Sales Order": ["customer"], "Sales Order Item": ["item_code"]}
 			parent_fields = None
