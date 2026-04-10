@@ -326,3 +326,34 @@ def _deactivate_old_quotation_workflows():
 				wf.is_active = 0
 				wf.save(ignore_permissions=True)
 				frappe.logger().info(f"Deactivated old workflow: {wf_name}")
+
+
+@frappe.whitelist()
+def retry_failed_repost_item_valuation(company=None):
+	"""Retry all failed Repost Item Valuation entries for a company.
+	Sets status back to Queued so the scheduler picks them up."""
+	if frappe.session.user != "Administrator":
+		frappe.throw(_("Only Administrator can retry repost entries."))
+
+	filters = {"status": "Failed", "docstatus": 1}
+	if company:
+		filters["company"] = company
+
+	failed = frappe.get_all(
+		"Repost Item Valuation",
+		filters=filters,
+		fields=["name"],
+		pluck="name",
+	)
+
+	if not failed:
+		return {"message": "No failed entries found", "count": 0}
+
+	for name in failed:
+		frappe.db.set_value(
+			"Repost Item Valuation", name, "status", "Queued",
+			update_modified=False,
+		)
+
+	frappe.db.commit()
+	return {"message": f"Queued {len(failed)} entries for retry", "count": len(failed)}
