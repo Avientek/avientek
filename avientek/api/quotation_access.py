@@ -1004,72 +1004,83 @@ def restricted_export_query():
 				or _get_user_companies(user)
 			)
 			if has_restriction:
-				import json as _json
-				file_type = frappe.form_dict.get("file_format_type", "CSV")
-
-				# Extract selected docnames from filters (Report View sends name IN [...])
-				docnames = None
-				raw_filters = frappe.form_dict.get("filters")
-				if raw_filters:
-					if isinstance(raw_filters, str):
-						try:
-							raw_filters = _json.loads(raw_filters)
-						except Exception:
-							raw_filters = []
-					if isinstance(raw_filters, (list, tuple)):
-						for f in raw_filters:
-							if isinstance(f, (list, tuple)) and len(f) >= 3:
-								# Frappe sends [doctype, field, op, value] or [doctype, field, op, value, hidden]
-								fieldname = f[1] if len(f) >= 4 else f[0]
-								operator = f[2] if len(f) >= 4 else f[1]
-								value = f[3] if len(f) >= 4 else f[2]
-								if fieldname == "name" and str(operator).lower() == "in":
-									if isinstance(value, str):
-										docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
-									elif isinstance(value, (list, tuple)):
-										docnames = _json.dumps(list(value))
-
-				# Extract picked columns from form_dict fields
-				# Frappe sends fields as: ["`tabSales Order`.`customer`", ...]
-				parent_fields = None
-				child_fields = None
-				raw_fields = frappe.form_dict.get("fields")
-				if raw_fields:
-					if isinstance(raw_fields, str):
-						try:
-							raw_fields = _json.loads(raw_fields)
-						except Exception:
-							raw_fields = []
-					if isinstance(raw_fields, (list, tuple)):
-						import re
-						pf = []
-						cf = []
-						child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
-						for f in raw_fields:
-							# Parse "`tabDocType`.`fieldname`" or "tabDocType.fieldname"
-							match = re.match(r"`?tab([^`]+)`?\s*\.\s*`?([^`]+)`?", str(f).strip())
-							if not match:
-								continue
-							dt_name = match.group(1).strip()
-							fn = match.group(2).strip()
-							if not fn:
-								continue
-							if dt_name == doctype:
-								pf.append(fn)
-							elif child_dt and dt_name == child_dt:
-								cf.append(fn)
-						parent_fields = _json.dumps(pf) if pf else None
-						child_fields = _json.dumps(cf) if cf else None
-
-				return export_my_data(
-					doctype=doctype,
-					file_type=file_type,
-					docnames=docnames,
-					parent_fields_json=parent_fields,
-					child_fields_json=child_fields,
-				)
+				try:
+					return _do_restricted_report_export(doctype)
+				except Exception:
+					frappe.log_error(
+						title=f"Restricted Report Export Error ({doctype})",
+						message=frappe.get_traceback(),
+					)
+					# Fall through to standard export on error
 
 	return original_export()
+
+
+def _do_restricted_report_export(doctype):
+	"""Internal: parse Report View fields/filters and call export_my_data."""
+	import json as _json
+	import re
+
+	file_type = frappe.form_dict.get("file_format_type", "CSV")
+
+	# Extract selected docnames from filters (Report View sends name IN [...])
+	docnames = None
+	raw_filters = frappe.form_dict.get("filters")
+	if raw_filters:
+		if isinstance(raw_filters, str):
+			try:
+				raw_filters = _json.loads(raw_filters)
+			except Exception:
+				raw_filters = []
+		if isinstance(raw_filters, (list, tuple)):
+			for f in raw_filters:
+				if isinstance(f, (list, tuple)) and len(f) >= 3:
+					fieldname = f[1] if len(f) >= 4 else f[0]
+					operator = f[2] if len(f) >= 4 else f[1]
+					value = f[3] if len(f) >= 4 else f[2]
+					if fieldname == "name" and str(operator).lower() == "in":
+						if isinstance(value, str):
+							docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
+						elif isinstance(value, (list, tuple)):
+							docnames = _json.dumps(list(value))
+
+	# Extract picked columns from form_dict fields
+	# Frappe sends fields as: ["`tabSales Order`.`customer`", ...]
+	parent_fields = None
+	child_fields = None
+	raw_fields = frappe.form_dict.get("fields")
+	if raw_fields:
+		if isinstance(raw_fields, str):
+			try:
+				raw_fields = _json.loads(raw_fields)
+			except Exception:
+				raw_fields = []
+		if isinstance(raw_fields, (list, tuple)):
+			pf = []
+			cf = []
+			child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+			for f in raw_fields:
+				match = re.match(r"`?tab([^`]+)`?\s*\.\s*`?([^`]+)`?", str(f).strip())
+				if not match:
+					continue
+				dt_name = match.group(1).strip()
+				fn = match.group(2).strip()
+				if not fn:
+					continue
+				if dt_name == doctype:
+					pf.append(fn)
+				elif child_dt and dt_name == child_dt:
+					cf.append(fn)
+			parent_fields = _json.dumps(pf) if pf else None
+			child_fields = _json.dumps(cf) if cf else None
+
+	return export_my_data(
+		doctype=doctype,
+		file_type=file_type,
+		docnames=docnames,
+		parent_fields_json=parent_fields,
+		child_fields_json=child_fields,
+	)
 
 
 @frappe.whitelist()
@@ -1096,68 +1107,16 @@ def restricted_download_template(
 			or _get_user_companies(user)
 		)
 		if has_restriction:
-			import json as _json
-			# Parse export_fields: {"Sales Order": ["customer"], "Sales Order Item": ["item_code"]}
-			parent_fields = None
-			child_fields = None
-			if export_fields:
-				if isinstance(export_fields, str):
-					try:
-						export_fields = _json.loads(export_fields)
-					except Exception:
-						export_fields = {}
-				if isinstance(export_fields, dict):
-					pf = export_fields.get(doctype, [])
-					if pf:
-						parent_fields = _json.dumps(pf)
-					# Find child table fields — Frappe uses the table fieldname
-					# (e.g. "items") as key, not the child doctype name
-					child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
-					if child_dt:
-						cf = export_fields.get(child_dt, [])
-						# Also check by table fieldname (Frappe's Export Data dialog uses this)
-						if not cf:
-							meta = frappe.get_meta(doctype)
-							for tf in meta.get("fields", {"fieldtype": "Table"}):
-								if tf.fieldtype == "Table" and tf.options == child_dt:
-									cf = export_fields.get(tf.fieldname, [])
-									break
-						if cf:
-							child_fields = _json.dumps(cf)
-
-			# Parse export_filters for selected docnames
-			# Frappe sends: [["Sales Order","name","in",["SO-1","SO-2"]]]
-			docnames = None
-			if export_filters:
-				if isinstance(export_filters, str):
-					try:
-						export_filters = _json.loads(export_filters)
-					except Exception:
-						export_filters = []
-				if isinstance(export_filters, (list, tuple)):
-					for f in export_filters:
-						if isinstance(f, (list, tuple)) and len(f) >= 3:
-							# Frappe sends [doctype, field, op, value] or [doctype, field, op, value, hidden]
-							fieldname = f[1] if len(f) >= 4 else f[0]
-							operator = f[2] if len(f) >= 4 else f[1]
-							value = f[3] if len(f) >= 4 else f[2]
-							if fieldname == "name" and str(operator).lower() == "in":
-								if isinstance(value, str):
-									docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
-								elif isinstance(value, (list, tuple)):
-									docnames = _json.dumps(list(value))
-				elif isinstance(export_filters, dict) and export_filters.get("name"):
-					names = export_filters["name"]
-					if isinstance(names, (list, tuple)):
-						docnames = _json.dumps(list(names))
-
-			return export_my_data(
-				doctype=doctype,
-				file_type=file_type,
-				docnames=docnames,
-				parent_fields_json=parent_fields,
-				child_fields_json=child_fields,
-			)
+			try:
+				return _do_restricted_export(
+					doctype, export_fields, export_filters, file_type,
+				)
+			except Exception:
+				frappe.log_error(
+					title=f"Restricted Export Error ({doctype})",
+					message=frappe.get_traceback(),
+				)
+				# Fall through to standard export on error
 
 	return original_download(
 		doctype=doctype,
@@ -1165,6 +1124,73 @@ def restricted_download_template(
 		export_records=export_records,
 		export_filters=export_filters,
 		file_type=file_type,
+	)
+
+
+def _do_restricted_export(doctype, export_fields, export_filters, file_type):
+	"""Internal: parse fields/filters and call export_my_data."""
+	import json as _json
+
+	# Parse export_fields: {"Sales Order": ["customer"], "items": ["item_code"]}
+	parent_fields = None
+	child_fields = None
+	if export_fields:
+		if isinstance(export_fields, str):
+			try:
+				export_fields = _json.loads(export_fields)
+			except Exception:
+				export_fields = {}
+		if isinstance(export_fields, dict):
+			pf = export_fields.get(doctype, [])
+			if pf:
+				parent_fields = _json.dumps(pf)
+			# Find child table fields — Frappe uses the table fieldname
+			# (e.g. "items") as key, not the child doctype name
+			child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+			if child_dt:
+				cf = export_fields.get(child_dt, [])
+				# Also check by table fieldname (Frappe's Export Data dialog uses this)
+				if not cf:
+					meta = frappe.get_meta(doctype)
+					for tf in meta.get("fields", {"fieldtype": "Table"}):
+						if tf.fieldtype == "Table" and tf.options == child_dt:
+							cf = export_fields.get(tf.fieldname, [])
+							break
+				if cf:
+					child_fields = _json.dumps(cf)
+
+	# Parse export_filters for selected docnames
+	# Frappe sends: [["Sales Order","name","in",["SO-1","SO-2"]]]
+	# or [doctype, field, op, value, hidden] (5 elements)
+	docnames = None
+	if export_filters:
+		if isinstance(export_filters, str):
+			try:
+				export_filters = _json.loads(export_filters)
+			except Exception:
+				export_filters = []
+		if isinstance(export_filters, (list, tuple)):
+			for f in export_filters:
+				if isinstance(f, (list, tuple)) and len(f) >= 3:
+					fieldname = f[1] if len(f) >= 4 else f[0]
+					operator = f[2] if len(f) >= 4 else f[1]
+					value = f[3] if len(f) >= 4 else f[2]
+					if fieldname == "name" and str(operator).lower() == "in":
+						if isinstance(value, str):
+							docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
+						elif isinstance(value, (list, tuple)):
+							docnames = _json.dumps(list(value))
+		elif isinstance(export_filters, dict) and export_filters.get("name"):
+			names = export_filters["name"]
+			if isinstance(names, (list, tuple)):
+				docnames = _json.dumps(list(names))
+
+	return export_my_data(
+		doctype=doctype,
+		file_type=file_type,
+		docnames=docnames,
+		parent_fields_json=parent_fields,
+		child_fields_json=child_fields,
 	)
 
 # ── Script Report filter injection ──
