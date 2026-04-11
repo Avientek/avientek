@@ -3,3 +3,4 @@ avientek.patches.fix_quotation_item_layout_v2
 avientek.patches.remove_quotation_item_column_breaks
 avientek.patches.fix_quotation_and_invoice_fields
 avientek.patches.populate_item_defaults_and_taxes
+avientek.patches.repost_ksa_stock_gl
