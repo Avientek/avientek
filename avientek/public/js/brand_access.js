@@ -496,94 +496,77 @@
 		}, 500);
 	}
 
-	// ── 4. Relabel Export in Actions dropdown only (not "..." menu) ──
+	// ── 4. Remove duplicate Export from Report View "..." menu ──
+	// The Actions dropdown already has Export (standard Frappe).
+	// Report View adds its own Export to "..." menu — remove it.
+
+	// Store globally so prototype patches can access from outside the closure
+	frappe._restricted_doctypes = RESTRICTED_CHILD_DOCTYPES;
+
+	var _report_view_patched = false;
 
 	function setup_export_block() {
-		$(document).on("page-change", block_export_on_page);
-		setTimeout(block_export_on_page, 1000);
+		_try_patch_report_view();
+		$(document).on("page-change", function () {
+			_try_patch_report_view();
+			_relabel_actions_export();
+		});
+		setTimeout(_relabel_actions_export, 1000);
+	}
+
+	function _relabel_actions_export() {
+		var route = frappe.get_route();
+		if (!route || route.length < 2) return;
+
+		var slug = route[0] === "List" ? route[1] : route[0];
+		var is_restricted = RESTRICTED_CHILD_DOCTYPES.some(function (d) {
+			return frappe.router.slug(d) === slug || d === slug;
+		});
+		if (!is_restricted && route.length >= 3 && route[2] === "report") {
+			is_restricted = RESTRICTED_CHILD_DOCTYPES.some(function (d) {
+				return frappe.router.slug(d) === route[0] || d === route[0];
+			});
+		}
+		if (!is_restricted) return;
+
+		function patch() {
+			$(".actions-btn-group .dropdown-menu").find(".menu-item-label").each(function () {
+				var txt = $(this).text().trim();
+				if (txt === "Export" || txt === __("Export")) {
+					$(this).text(__("Export My Data"));
+				}
+			});
+		}
+		patch();
+
+		var $ag = $(".actions-btn-group");
+		if ($ag.length && !$ag.data("relabel-done")) {
+			$ag.data("relabel-done", true);
+			new MutationObserver(function () { setTimeout(patch, 100); })
+				.observe($ag[0], { childList: true, subtree: true });
+		}
+	}
+
+	function _try_patch_report_view() {
+		if (_report_view_patched) return;
+		if (!frappe.views || !frappe.views.ReportView) return;
+
+		_report_view_patched = true;
+		var _orig = frappe.views.ReportView.prototype.report_menu_items;
+		frappe.views.ReportView.prototype.report_menu_items = function () {
+			var items = _orig.call(this);
+			var restricted = frappe._restricted_doctypes || [];
+			if (restricted.includes(this.doctype)) {
+				items = items.filter(function (item) {
+					return item.label !== __("Export") && item.label !== "Export";
+				});
+			}
+			return items;
+		};
 	}
 
 	function is_restricted_doctype(doctype) {
 		return RESTRICTED_CHILD_DOCTYPES.includes(doctype);
-	}
-
-	function block_export_on_page() {
-		let route = frappe.get_route();
-		if (!route || route.length < 2) return;
-
-		let view_type = route[0];
-		let slug = view_type === "List" ? route[1] : route[0];
-		let dt = null;
-		RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
-			if (frappe.router.slug(d) === slug || d === slug) {
-				dt = d;
-			}
-		});
-		if (!dt && route.length >= 3 && route[2] === "report") {
-			RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
-				if (frappe.router.slug(d) === route[0] || d === route[0]) {
-					dt = d;
-				}
-			});
-		}
-		if (!dt) return;
-
-		// Only relabel "Export" → "Export My Data" in the Actions dropdown
-		function patch_actions_menu() {
-			let $menu = $(".actions-btn-group .dropdown-menu");
-			if (!$menu.length) return;
-			$menu.find("a").filter(function () {
-				return $(this).text().trim() === "Export";
-			}).text(__("Export My Data"));
-		}
-
-		// Hide "Export" from the "..." menu and any non-Actions dropdown to avoid duplicate
-		function hide_dotmenu_export() {
-			$(".dropdown-menu").each(function () {
-				let $menu = $(this);
-				// Skip the Actions dropdown — that's where we WANT Export My Data
-				if ($menu.closest(".actions-btn-group").length) return;
-
-				$menu.find("a, button, .dropdown-item").each(function () {
-					let txt = $(this).text().trim();
-					if (txt === "Export" || txt === __("Export") || txt === "Export My Data" || txt === __("Export My Data")) {
-						$(this).closest("li").length
-							? $(this).closest("li").hide()
-							: $(this).hide();
-					}
-				});
-			});
-		}
-
-		let observer_started = false;
-		let check_interval = setInterval(function () {
-			let $actions_group = $(".actions-btn-group");
-
-			hide_dotmenu_export();
-
-			if ($actions_group.length && !observer_started) {
-				observer_started = true;
-				patch_actions_menu();
-
-				let observer = new MutationObserver(function () {
-					setTimeout(function () {
-						patch_actions_menu();
-						hide_dotmenu_export();
-					}, 100);
-				});
-				observer.observe($actions_group[0], { childList: true, subtree: true });
-			}
-
-			let $page_container = $(".page-container, .frappe-control");
-			if ($page_container.length && !$page_container.data("export-observer")) {
-				$page_container.data("export-observer", true);
-				let pageObserver = new MutationObserver(function () {
-					setTimeout(hide_dotmenu_export, 200);
-				});
-				pageObserver.observe($page_container[0], { childList: true, subtree: true });
-				clearInterval(check_interval);
-			}
-		}, 500);
 	}
 
 	function show_my_data_export_dialog(doctype) {
