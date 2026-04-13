@@ -515,14 +515,15 @@ def _sales_person_permission_query(user, parent_dt):
 	parent_table = "`tab{}`".format(parent_dt)
 
 	# Strict: only show documents that have at least one matching sales person
+	escaped_parent_dt = frappe.db.escape(parent_dt)
 	return (
 		"EXISTS ("
 		"SELECT 1 FROM `tabSales Team` st "
 		"WHERE st.parent = {parent}.name "
-		"AND st.parenttype = '{parent_dt}' "
+		"AND st.parenttype = {parent_dt} "
 		"AND st.sales_person IN ({sps})"
 		")"
-	).format(parent=parent_table, parent_dt=parent_dt, sps=sps_sql)
+	).format(parent=parent_table, parent_dt=escaped_parent_dt, sps=sps_sql)
 
 
 def _sales_person_parent_permission_query(user, parent_dt):
@@ -1160,8 +1161,8 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 				# Also check by table fieldname (Frappe's Export Data dialog uses this)
 				if not cf:
 					meta = frappe.get_meta(doctype)
-					for tf in meta.get("fields", {"fieldtype": "Table"}):
-						if tf.fieldtype == "Table" and tf.options == child_dt:
+					for tf in meta.get_table_fields():
+						if tf.options == child_dt:
 							cf = export_fields.get(tf.fieldname, [])
 							break
 				if cf:
@@ -1463,10 +1464,10 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	sp_perms = perm_map.get("Sales Person", [])
 	sales_team_data = {}
 	if sp_perms and doctype in SALES_PERSON_DOCTYPES:
+		sp_list = ", ".join(frappe.db.escape(s) for s in sp_perms)
 		for i in range(0, len(parent_names), batch_size):
 			batch = parent_names[i:i + batch_size]
 			ph = ", ".join(["%s"] * len(batch))
-			sp_list = ", ".join(frappe.db.escape(s) for s in sp_perms)
 			st_rows = frappe.db.sql(
 				"SELECT parent, sales_person FROM `tabSales Team` "
 				"WHERE parent IN ({ph}) AND parenttype = %s "
