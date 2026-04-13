@@ -537,13 +537,21 @@
 			}).text(__("Export My Data"));
 		}
 
-		// Hide "Export" from the "..." menu to avoid duplicate
+		// Hide "Export" from the "..." menu and any non-Actions dropdown to avoid duplicate
 		function hide_dotmenu_export() {
-			$(".page-actions .menu-btn-group .dropdown-menu").find("a, button, .dropdown-item").each(function () {
-				let txt = $(this).text().trim();
-				if (txt === "Export" || txt === __("Export") || txt === "Export My Data" || txt === __("Export My Data")) {
-					$(this).closest("li, .dropdown-item").hide();
-				}
+			$(".dropdown-menu").each(function () {
+				let $menu = $(this);
+				// Skip the Actions dropdown — that's where we WANT Export My Data
+				if ($menu.closest(".actions-btn-group").length) return;
+
+				$menu.find("a, button, .dropdown-item").each(function () {
+					let txt = $(this).text().trim();
+					if (txt === "Export" || txt === __("Export") || txt === "Export My Data" || txt === __("Export My Data")) {
+						$(this).closest("li").length
+							? $(this).closest("li").hide()
+							: $(this).hide();
+					}
+				});
 			});
 		}
 
