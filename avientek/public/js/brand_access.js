@@ -33,6 +33,45 @@
 		SLUG_MAP[frappe.router.slug(dt)] = dt;
 	});
 
+	// Store globally for prototype patches
+	frappe._restricted_doctypes = RESTRICTED_CHILD_DOCTYPES;
+
+	// ── Immediate patches (run at script load, before any async) ──
+
+	// 1. Rename "Export" → "Export My Data" in Actions dropdown for restricted doctypes
+	// Patch ListView.get_actions_menu_items to rename the label at source
+	$(document).on("page-change", function () {
+		setTimeout(function () {
+			if (typeof cur_list === "undefined" || !cur_list) return;
+			if (!RESTRICTED_CHILD_DOCTYPES.includes(cur_list.doctype)) return;
+			// Find and rename Export in the rendered Actions dropdown
+			$(".actions-btn-group .dropdown-menu .menu-item-label").each(function () {
+				if ($(this).text().trim().indexOf("Export") === 0 && $(this).text().trim() !== __("Export My Data")) {
+					$(this).text(__("Export My Data"));
+				}
+			});
+		}, 500);
+	});
+
+	// 2. Remove Export from Report View "..." menu (deferred until class loads)
+	var _rv_patched = false;
+	function _patch_report_view() {
+		if (_rv_patched || !frappe.views || !frappe.views.ReportView) return;
+		_rv_patched = true;
+		var _orig = frappe.views.ReportView.prototype.report_menu_items;
+		frappe.views.ReportView.prototype.report_menu_items = function () {
+			var items = _orig.call(this);
+			if (RESTRICTED_CHILD_DOCTYPES.includes(this.doctype)) {
+				items = items.filter(function (item) {
+					return item.label !== __("Export") && item.label !== "Export";
+				});
+			}
+			return items;
+		};
+	}
+	_patch_report_view();
+	$(document).on("page-change", _patch_report_view);
+
 	// Cache
 	let _brand_checked = false;
 	let _brand_restricted = false;
@@ -500,69 +539,8 @@
 	// The Actions dropdown already has Export (standard Frappe).
 	// Report View adds its own Export to "..." menu — remove it.
 
-	// Store globally so prototype patches can access from outside the closure
-	frappe._restricted_doctypes = RESTRICTED_CHILD_DOCTYPES;
-
-	var _report_view_patched = false;
-
 	function setup_export_block() {
-		_try_patch_report_view();
-		$(document).on("page-change", function () {
-			_try_patch_report_view();
-			_relabel_actions_export();
-		});
-		setTimeout(_relabel_actions_export, 1000);
-	}
-
-	function _relabel_actions_export() {
-		var route = frappe.get_route();
-		if (!route || route.length < 2) return;
-
-		var slug = route[0] === "List" ? route[1] : route[0];
-		var is_restricted = RESTRICTED_CHILD_DOCTYPES.some(function (d) {
-			return frappe.router.slug(d) === slug || d === slug;
-		});
-		if (!is_restricted && route.length >= 3 && route[2] === "report") {
-			is_restricted = RESTRICTED_CHILD_DOCTYPES.some(function (d) {
-				return frappe.router.slug(d) === route[0] || d === route[0];
-			});
-		}
-		if (!is_restricted) return;
-
-		function patch() {
-			$(".actions-btn-group .dropdown-menu").find(".menu-item-label").each(function () {
-				var txt = $(this).text().trim();
-				if (txt === "Export" || txt === __("Export")) {
-					$(this).text(__("Export My Data"));
-				}
-			});
-		}
-		patch();
-
-		var $ag = $(".actions-btn-group");
-		if ($ag.length && !$ag.data("relabel-done")) {
-			$ag.data("relabel-done", true);
-			new MutationObserver(function () { setTimeout(patch, 100); })
-				.observe($ag[0], { childList: true, subtree: true });
-		}
-	}
-
-	function _try_patch_report_view() {
-		if (_report_view_patched) return;
-		if (!frappe.views || !frappe.views.ReportView) return;
-
-		_report_view_patched = true;
-		var _orig = frappe.views.ReportView.prototype.report_menu_items;
-		frappe.views.ReportView.prototype.report_menu_items = function () {
-			var items = _orig.call(this);
-			var restricted = frappe._restricted_doctypes || [];
-			if (restricted.includes(this.doctype)) {
-				items = items.filter(function (item) {
-					return item.label !== __("Export") && item.label !== "Export";
-				});
-			}
-			return items;
-		};
+		// Patches already applied at script load above — nothing to do here
 	}
 
 	function is_restricted_doctype(doctype) {
@@ -837,8 +815,10 @@
 		if (has_restriction) {
 			setup_route_intercept();
 			setup_report_filters();
-			setup_export_block();
 		}
+
+		// Export block runs for ALL users — relabels and removes duplicate export
+		setup_export_block();
 	});
 
 	// ── 5. Hide India GST fields for non-Indian companies ──
