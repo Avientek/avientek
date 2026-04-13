@@ -38,7 +38,21 @@
 
 	// ── Immediate patches (run at script load, before any async) ──
 
-	// 1. Keep "Export" label as-is in Actions dropdown — no renaming needed
+	// 1. Rename "Export" → "Export My Data" in Actions dropdown for restricted users
+	// Patch at the point where Frappe creates the menu item
+	(function () {
+		var _orig = frappe.ui.Page.prototype.add_actions_menu_item;
+		frappe.ui.Page.prototype.add_actions_menu_item = function (label, click, standard, shortcut) {
+			if ((label === "Export" || label === __("Export") || label === __("Export", null, "Button in list view actions menu"))
+				&& frappe.session.user !== "Administrator") {
+				// Check if user has any restriction (async-cached from earlier check)
+				if (frappe._user_has_restriction) {
+					label = __("Export My Data");
+				}
+			}
+			return _orig.call(this, label, click, standard, shortcut);
+		};
+	})();
 
 	// 2. Remove Export from Report View "..." menu (deferred until class loads)
 	var _rv_patched = false;
@@ -788,6 +802,8 @@
 				if (r.message) has_restriction = true;
 			},
 		});
+		// Store globally for prototype patches (Export My Data relabel)
+		frappe._user_has_restriction = has_restriction;
 
 		// Pre-warm individual restriction caches (used by route intercept & report filters)
 		if (has_restriction) {

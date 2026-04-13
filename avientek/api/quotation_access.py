@@ -1085,6 +1085,7 @@ def _do_restricted_report_export(doctype):
 		docnames=docnames,
 		parent_fields_json=parent_fields,
 		child_fields_json=child_fields,
+		extra_child_tables_json=_json.dumps(extra_child_fields) if extra_child_fields else None,
 	)
 
 
@@ -1150,23 +1151,32 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 			except Exception:
 				export_fields = {}
 		if isinstance(export_fields, dict):
+			# Separate parent fields from ALL child table fields
 			pf = export_fields.get(doctype, [])
 			if pf:
 				parent_fields = _json.dumps(pf)
-			# Find child table fields — Frappe uses the table fieldname
-			# (e.g. "items") as key, not the child doctype name
-			child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
-			if child_dt:
-				cf = export_fields.get(child_dt, [])
-				# Also check by table fieldname (Frappe's Export Data dialog uses this)
-				if not cf:
-					meta = frappe.get_meta(doctype)
-					for tf in meta.get_table_fields():
-						if tf.options == child_dt:
-							cf = export_fields.get(tf.fieldname, [])
-							break
+
+			# Collect fields from ALL child tables (items, Sales Team, Payment Schedule, etc.)
+			# Frappe's Export Data dialog uses fieldname as key (e.g., "items", "sales_team")
+			all_child_fields = {}  # {child_doctype: [fieldnames]}
+			meta = frappe.get_meta(doctype)
+			for tf in meta.get_table_fields():
+				# Check by table fieldname (Frappe dialog key) and by child doctype name
+				cf = export_fields.get(tf.fieldname, []) or export_fields.get(tf.options, [])
 				if cf:
-					child_fields = _json.dumps(cf)
+					all_child_fields[tf.options] = cf
+
+			# For backward compat, pass the primary item child table fields separately
+			primary_child_dt = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
+			if primary_child_dt and primary_child_dt in all_child_fields:
+				child_fields = _json.dumps(all_child_fields[primary_child_dt])
+
+			# Merge non-primary child table fields into parent_fields
+			# (they'll be fetched via get_doc and added as extra columns)
+			extra_child_fields = {}
+			for cdt, cfields in all_child_fields.items():
+				if cdt != primary_child_dt:
+					extra_child_fields[cdt] = cfields
 
 	# Parse export_filters for selected docnames
 	# Frappe sends: [["Sales Order","name","in",["SO-1","SO-2"]]]
@@ -1271,7 +1281,7 @@ def restricted_query_report_run(
 # ── Custom filtered export for restricted users ──
 
 @frappe.whitelist()
-def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=None, child_fields_json=None):
+def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=None, child_fields_json=None, extra_child_tables_json=None):
 	"""Export only the user's permitted data with dynamic child-row filtering.
 
 	Dynamically reads ALL User Permissions for the current user and filters
@@ -1323,6 +1333,11 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		custom_parent_fields = json_mod.loads(parent_fields_json) if isinstance(parent_fields_json, str) else list(parent_fields_json)
 	if child_fields_json:
 		custom_child_fields = json_mod.loads(child_fields_json) if isinstance(child_fields_json, str) else list(child_fields_json)
+
+	# Parse extra child tables (Sales Team, Payment Schedule, etc.)
+	extra_child_tables = {}
+	if extra_child_tables_json:
+		extra_child_tables = json_mod.loads(extra_child_tables_json) if isinstance(extra_child_tables_json, str) else dict(extra_child_tables_json)
 
 	# Build parent fields list — validate against meta fields (includes virtual)
 	db_columns = set(frappe.db.sql(
@@ -1510,11 +1525,34 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	output = io.StringIO()
 	writer = csv.writer(output)
 
+	# Build extra child table data and headers
+	extra_child_headers = []
+	extra_child_data = {}  # {parent_name: {child_dt: [{field: value}]}}
+	for extra_cdt, extra_cfields in extra_child_tables.items():
+		extra_meta = frappe.get_meta(extra_cdt)
+		for fn in extra_cfields:
+			label = _get_label(fn, extra_meta)
+			short_dt = extra_cdt.replace(doctype + " ", "")  # "Sales Order Item" → "Item"
+			extra_child_headers.append(f"{label} ({short_dt})")
+		# Fetch data for all parents
+		for name in parent_names:
+			rows = frappe.get_all(extra_cdt,
+				filters={"parent": name, "parenttype": doctype},
+				fields=extra_cfields,
+				order_by="idx",
+			)
+			# Flatten to comma-separated values per field
+			extra_child_data.setdefault(name, {})
+			for fn in extra_cfields:
+				vals = [str(r.get(fn, "")) for r in rows if r.get(fn)]
+				extra_child_data[name][f"{extra_cdt}.{fn}"] = ", ".join(vals)
+
 	header = [_get_label("name", meta)]
 	header += [_get_label(fn, meta) for fn in parent_fields if fn != "name"]
 	header += [_get_label(fn, child_meta) + " (Items)" for fn in child_fields if fn not in ("parent",)]
 	if sp_perms:
 		header.append("Sales Person")
+	header += extra_child_headers
 	writer.writerow(header)
 
 	for row in filtered_children:
@@ -1524,6 +1562,11 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		data += [str(row.get(fn, "")) for fn in child_fields if fn not in ("parent",)]
 		if sp_perms:
 			data.append(", ".join(sales_team_data.get(row.parent, [])))
+		# Add extra child table values
+		extra = extra_child_data.get(row.parent, {})
+		for extra_cdt, extra_cfields in extra_child_tables.items():
+			for fn in extra_cfields:
+				data.append(extra.get(f"{extra_cdt}.{fn}", ""))
 		writer.writerow(data)
 
 	csv_content = output.getvalue()
