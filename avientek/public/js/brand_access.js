@@ -38,20 +38,7 @@
 
 	// ── Immediate patches (run at script load, before any async) ──
 
-	// 1. Rename "Export" → "Export My Data" in Actions dropdown for restricted doctypes
-	// Patch ListView.get_actions_menu_items to rename the label at source
-	$(document).on("page-change", function () {
-		setTimeout(function () {
-			if (typeof cur_list === "undefined" || !cur_list) return;
-			if (!RESTRICTED_CHILD_DOCTYPES.includes(cur_list.doctype)) return;
-			// Find and rename Export in the rendered Actions dropdown
-			$(".actions-btn-group .dropdown-menu .menu-item-label").each(function () {
-				if ($(this).text().trim().indexOf("Export") === 0 && $(this).text().trim() !== __("Export My Data")) {
-					$(this).text(__("Export My Data"));
-				}
-			});
-		}, 500);
-	});
+	// 1. Keep "Export" label as-is in Actions dropdown — no renaming needed
 
 	// 2. Remove Export from Report View "..." menu (deferred until class loads)
 	var _rv_patched = false;

@@ -1324,13 +1324,13 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	if child_fields_json:
 		custom_child_fields = json_mod.loads(child_fields_json) if isinstance(child_fields_json, str) else list(child_fields_json)
 
-	# Build parent fields list — query actual DB columns (only reliable method)
+	# Build parent fields list — validate against meta fields (includes virtual)
 	db_columns = set(frappe.db.sql(
 		"SELECT column_name FROM information_schema.columns WHERE table_name=%s",
 		f"tab{doctype}", pluck="column_name",
 	))
 	if custom_parent_fields:
-		parent_fields = ["name"] + [fn for fn in custom_parent_fields if fn != "name" and fn in db_columns]
+		parent_fields = ["name"] + [fn for fn in custom_parent_fields if fn != "name" and (fn in db_columns or meta.has_field(fn))]
 	else:
 		parent_fields = ["name"]
 		for fn in ["customer", "customer_name", "supplier", "supplier_name", "party_name",
@@ -1338,6 +1338,9 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 				   "company", "currency", "customer_group", "sales_person"]:
 			if meta.has_field(fn):
 				parent_fields.append(fn)
+	# Split into DB fields (for SQL query) and virtual fields (need get_doc)
+	db_parent_fields = [fn for fn in parent_fields if fn in db_columns]
+	virtual_parent_fields = [fn for fn in parent_fields if fn not in db_columns and fn != "name"]
 
 	# Build permission query for parent docs (uses all restriction types)
 	child_dt_for_query = BRAND_DOCTYPES.get(doctype) or ITEM_GROUP_DOCTYPES.get(doctype)
@@ -1402,7 +1405,7 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		f"tab{child_dt}", pluck="column_name",
 	))
 	if custom_child_fields:
-		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and fn in child_db_columns]
+		child_fields = ["parent", "idx"] + [fn for fn in custom_child_fields if fn not in ("parent", "idx", "name") and (fn in child_db_columns or child_meta.has_field(fn))]
 	elif custom_parent_fields:
 		# User explicitly picked parent fields but no child fields — skip child data
 		child_fields = []
@@ -1416,6 +1419,8 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	# If no child fields selected, export parent-only (one row per document)
 	if not child_fields:
 		def _get_label_p(fieldname):
+			if fieldname == "name":
+				return "ID"
 			df = meta.get_field(fieldname)
 			return df.label if df else fieldname
 		output = io.StringIO()
@@ -1423,7 +1428,11 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		header = [_get_label_p("name")] + [_get_label_p(fn) for fn in parent_fields if fn != "name"]
 		writer.writerow(header)
 		for name in parent_names:
-			row_data = frappe.db.get_value(doctype, name, parent_fields, as_dict=True) or {}
+			if virtual_parent_fields:
+				doc = frappe.get_doc(doctype, name)
+				row_data = {fn: doc.get(fn, "") for fn in parent_fields}
+			else:
+				row_data = frappe.db.get_value(doctype, name, db_parent_fields, as_dict=True) or {}
 			data = [name] + [str(row_data.get(fn, "")) for fn in parent_fields if fn != "name"]
 			writer.writerow(data)
 		_send_csv_response(output.getvalue(), doctype, file_type)
@@ -1480,9 +1489,13 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	# Build parent data lookup
 	parent_data = {}
 	for name in parent_names:
-		parent_data[name] = frappe.db.get_value(
-			doctype, name, parent_fields, as_dict=True
-		) or {}
+		if virtual_parent_fields:
+			# Use get_doc for virtual fields (computed fields not in DB)
+			doc = frappe.get_doc(doctype, name)
+			row = {fn: doc.get(fn, "") for fn in parent_fields}
+		else:
+			row = frappe.db.get_value(doctype, name, db_parent_fields, as_dict=True) or {}
+		parent_data[name] = row
 
 	# Build label lookup for headers
 	def _get_label(fieldname, dt_meta):
