@@ -496,12 +496,9 @@
 		}, 500);
 	}
 
-	// ── 4. Relabel Export for restricted users on restricted doctypes ──
+	// ── 4. Relabel Export in Actions dropdown only (not "..." menu) ──
 
 	function setup_export_block() {
-		// Server-side now handles filtered export automatically,
-		// so we just relabel "Export" to "Export My Data" for clarity.
-
 		$(document).on("page-change", block_export_on_page);
 		setTimeout(block_export_on_page, 1000);
 	}
@@ -511,12 +508,10 @@
 	}
 
 	function block_export_on_page() {
-
 		let route = frappe.get_route();
 		if (!route || route.length < 2) return;
 
-		// Detect doctype from List View or Report View route
-		let view_type = route[0]; // "List" or "query-report" or slug
+		let view_type = route[0];
 		let slug = view_type === "List" ? route[1] : route[0];
 		let dt = null;
 		RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
@@ -524,7 +519,6 @@
 				dt = d;
 			}
 		});
-		// Also detect Report View: /app/quotation/view/report
 		if (!dt && route.length >= 3 && route[2] === "report") {
 			RESTRICTED_CHILD_DOCTYPES.forEach(function (d) {
 				if (frappe.router.slug(d) === route[0] || d === route[0]) {
@@ -534,36 +528,30 @@
 		}
 		if (!dt) return;
 
-		// Relabel "Export" → "Export My Data" in Actions dropdown
+		// Only relabel "Export" → "Export My Data" in the Actions dropdown
 		function patch_actions_menu() {
 			let $menu = $(".actions-btn-group .dropdown-menu");
 			if (!$menu.length) return;
-
 			$menu.find("a").filter(function () {
 				return $(this).text().trim() === "Export";
 			}).text(__("Export My Data"));
 		}
 
-		// Relabel "Export" → "Export My Data" in all other menus (e.g. "..." menu)
-		function patch_page_menu() {
-			$(".dropdown-menu").each(function () {
-				let $menu = $(this);
-				if ($menu.closest(".actions-btn-group").length) return;
-
-				$menu.find("a, button, .dropdown-item").filter(function () {
-					let txt = $(this).text().trim();
-					return txt === "Export" || txt === __("Export");
-				}).text(__("Export My Data"));
+		// Hide "Export" from the "..." menu to avoid duplicate
+		function hide_dotmenu_export() {
+			$(".page-actions .menu-btn-group .dropdown-menu").find("a, button, .dropdown-item").each(function () {
+				let txt = $(this).text().trim();
+				if (txt === "Export" || txt === __("Export") || txt === "Export My Data" || txt === __("Export My Data")) {
+					$(this).closest("li, .dropdown-item").hide();
+				}
 			});
 		}
 
-		// Run immediately and on every DOM change
 		let observer_started = false;
 		let check_interval = setInterval(function () {
 			let $actions_group = $(".actions-btn-group");
-			let $page_container = $(".page-container, .frappe-control");
 
-			patch_page_menu();
+			hide_dotmenu_export();
 
 			if ($actions_group.length && !observer_started) {
 				observer_started = true;
@@ -572,16 +560,17 @@
 				let observer = new MutationObserver(function () {
 					setTimeout(function () {
 						patch_actions_menu();
-						patch_page_menu();
+						hide_dotmenu_export();
 					}, 100);
 				});
 				observer.observe($actions_group[0], { childList: true, subtree: true });
 			}
 
+			let $page_container = $(".page-container, .frappe-control");
 			if ($page_container.length && !$page_container.data("export-observer")) {
 				$page_container.data("export-observer", true);
 				let pageObserver = new MutationObserver(function () {
-					setTimeout(patch_page_menu, 200);
+					setTimeout(hide_dotmenu_export, 200);
 				});
 				pageObserver.observe($page_container[0], { childList: true, subtree: true });
 				clearInterval(check_interval);
