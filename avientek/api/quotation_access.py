@@ -1023,6 +1023,10 @@ def _do_restricted_report_export(doctype):
 
 	file_type = frappe.form_dict.get("file_format_type", "CSV")
 
+	# Save and clear form_dict fields so _combined_permission_query doesn't
+	# add report-view-specific child table conditions that break export_my_data's SQL
+	saved_fields = frappe.form_dict.pop("fields", None)
+
 	# Extract selected docnames from filters (Report View sends name IN [...])
 	docnames = None
 	raw_filters = frappe.form_dict.get("filters")
@@ -1044,11 +1048,11 @@ def _do_restricted_report_export(doctype):
 						elif isinstance(value, (list, tuple)):
 							docnames = _json.dumps(list(value))
 
-	# Extract picked columns from form_dict fields
+	# Extract picked columns from saved fields
 	# Frappe sends fields as: ["`tabSales Order`.`customer`", ...]
 	parent_fields = None
 	child_fields = None
-	raw_fields = frappe.form_dict.get("fields")
+	raw_fields = saved_fields
 	if raw_fields:
 		if isinstance(raw_fields, str):
 			try:
@@ -1130,6 +1134,10 @@ def restricted_download_template(
 def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 	"""Internal: parse fields/filters and call export_my_data."""
 	import json as _json
+
+	# Clear form_dict fields so _combined_permission_query doesn't add
+	# report-view-specific child table conditions that break export_my_data's SQL
+	frappe.form_dict.pop("fields", None)
 
 	# Parse export_fields: {"Sales Order": ["customer"], "items": ["item_code"]}
 	parent_fields = None
