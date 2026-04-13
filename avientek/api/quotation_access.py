@@ -1486,6 +1486,10 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 
 	# Build label lookup for headers
 	def _get_label(fieldname, dt_meta):
+		if fieldname == "name":
+			return "ID"
+		if fieldname == "idx":
+			return "Row"
 		df = dt_meta.get_field(fieldname)
 		return df.label if df else fieldname
 
