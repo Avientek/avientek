@@ -221,7 +221,7 @@ fixtures = [
 # app_include_css = "/assets/avientek/css/avientek.css"
 app_include_js = [
     "/assets/avientek/js/workflow_confirm.js?v=5",
-    "/assets/avientek/js/brand_access.js?v=9",
+    "/assets/avientek/js/brand_access.js?v=10",
 ]
 
 # include js, css files in header of web template

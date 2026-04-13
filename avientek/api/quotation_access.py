@@ -1144,6 +1144,7 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 	# Parse export_fields: {"Sales Order": ["customer"], "items": ["item_code"]}
 	parent_fields = None
 	child_fields = None
+	extra_child_fields = {}
 	if export_fields:
 		if isinstance(export_fields, str):
 			try:
@@ -1210,6 +1211,7 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 		docnames=docnames,
 		parent_fields_json=parent_fields,
 		child_fields_json=child_fields,
+		extra_child_tables_json=_json.dumps(extra_child_fields) if extra_child_fields else None,
 	)
 
 # ── Script Report filter injection ──
