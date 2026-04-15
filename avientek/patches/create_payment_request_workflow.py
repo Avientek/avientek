@@ -113,8 +113,9 @@ def execute():
 		"state": "Approved Level 2", "action": "Release Payment", "next_state": "Released",
 		"allowed": "Finance Controller", "allow_self_approval": 1,
 	})
-	# Rejection transitions
-	for from_state in ["Authorised", "Approved Level 1", "Approved Level 2"]:
+	# Rejection transitions — only from unsubmitted states (Authorised, Approved Level 1)
+	# Approved Level 2 is already submitted (doc_status=1), so cannot be reverted to Rejected (doc_status=0)
+	for from_state in ["Authorised", "Approved Level 1"]:
 		for role in ["Accounts Manager", "Finance Manager", "General Manager", "Director"]:
 			wf.append("transitions", {
 				"state": from_state, "action": "Reject", "next_state": "Rejected",
