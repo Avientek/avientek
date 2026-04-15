@@ -58,13 +58,18 @@ def execute():
 			doc.role_name = role
 			doc.insert(ignore_permissions=True)
 
-	# Ensure required Workflow Action Master records exist (link target for transitions)
+	# Ensure required Workflow Action Master records exist via direct SQL
+	# (avoids autoname/validation issues with insert during patch context)
 	for action in ["Authorise", "Approve Level 1", "Approve Level 2",
 				   "Release Payment", "Reject", "Revise"]:
 		if not frappe.db.exists("Workflow Action Master", action):
-			doc = frappe.new_doc("Workflow Action Master")
-			doc.workflow_action_name = action
-			doc.insert(ignore_permissions=True)
+			frappe.db.sql(
+				"""INSERT INTO `tabWorkflow Action Master`
+				(name, workflow_action_name, owner, modified_by, creation, modified, docstatus, idx)
+				VALUES (%s, %s, 'Administrator', 'Administrator', NOW(), NOW(), 0, 0)""",
+				(action, action),
+			)
+	frappe.db.commit()
 
 	# Create workflow
 	wf = frappe.new_doc("Workflow")
