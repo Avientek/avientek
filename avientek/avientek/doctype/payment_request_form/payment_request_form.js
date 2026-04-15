@@ -549,8 +549,8 @@ frappe.ui.form.on('Payment Request Form', {
 
     // Add clickable drill-down links on invoice names and render View buttons in static cells
     setup_invoice_drilldown: function(frm) {
-        setTimeout(function() {
-            let grid = frm.fields_dict.payment_references.grid;
+        function apply_drilldown() {
+            let grid = frm.fields_dict.payment_references && frm.fields_dict.payment_references.grid;
             if (!grid || !grid.grid_rows) return;
 
             grid.grid_rows.forEach(function(row) {
@@ -559,20 +559,25 @@ frappe.ui.form.on('Payment Request Form', {
 
                 let $row_el = $(row.row);
 
-                // --- Invoice drill-down link ---
+                // --- Invoice drill-down link — wider selector for all Frappe v15 variants ---
                 let $ref_cell = $row_el.find(
-                    ".grid-static-col[data-fieldname='reference_name'] .static-area, " +
-                    "[data-field='reference_name'] .static-area"
-                );
+                    ".grid-static-col[data-fieldname='reference_name'], " +
+                    "[data-fieldname='reference_name'] .static-area, " +
+                    "[data-field='reference_name'] .static-area, " +
+                    "[data-fieldname='reference_name']"
+                ).first();
                 if ($ref_cell.length && !$ref_cell.data("drilldown-bound")) {
                     $ref_cell.data("drilldown-bound", true);
                     $ref_cell.addClass("inv-ref-link");
-                    $ref_cell.on("click", function(e) {
+                    $ref_cell.css("cursor", "pointer");
+                    $ref_cell.on("click.drilldown", function(e) {
                         e.stopPropagation();
                         e.preventDefault();
                         let actual_dt = frm.events._get_actual_doctype(row.doc.reference_doctype);
                         if (actual_dt && row.doc.reference_name) {
                             frappe.set_route("Form", actual_dt, row.doc.reference_name);
+                        } else {
+                            frappe.msgprint(__("Cannot navigate - reference doctype or name missing"));
                         }
                     });
                 }
@@ -580,27 +585,30 @@ frappe.ui.form.on('Payment Request Form', {
                 // --- Render View button in the view_document static cell ---
                 let $view_cell = $row_el.find(
                     ".grid-static-col[data-fieldname='view_document'] .static-area, " +
-                    "[data-field='view_document'] .static-area"
-                );
+                    "[data-field='view_document'] .static-area, " +
+                    ".grid-static-col[data-fieldname='view_document']"
+                ).first();
                 if ($view_cell.length && !$view_cell.data("view-rendered")) {
                     $view_cell.data("view-rendered", true);
                     $view_cell.html('<span class="inv-view-btn" title="Preview document"><span class="view-icon">&#128065;</span> View</span>');
                     $view_cell.find(".inv-view-btn").on("click", function(e) {
                         e.stopPropagation();
                         e.preventDefault();
-                        frm.events._show_view_preview(frm, row.doc.reference_doctype, row.doc.reference_name);
+                        frm.events._show_view_preview(frm, row.doc.reference_doctype, row.doc.reference_name, row.doc.idx);
                     });
                 }
             });
-        }, 200);
+        }
+        // Run multiple times to catch grid re-renders
+        setTimeout(apply_drilldown, 200);
+        setTimeout(apply_drilldown, 800);
+        setTimeout(apply_drilldown, 2000);
     },
 
     // Show preview popup triggered by View button click
-    _show_view_preview: function(frm, ref_doctype, ref_name) {
+    _show_view_preview: function(frm, ref_doctype, ref_name, row_idx) {
         if (ref_doctype === "Manual" || !ref_name) return;
-        // Reuse the preview infrastructure from setup_invoice_attachment_preview
-        // Trigger via a custom event on the wrapper
-        $(frm.fields_dict.payment_references.$wrapper).trigger("view-btn-click", [ref_doctype, ref_name]);
+        $(frm.fields_dict.payment_references.$wrapper).trigger("view-btn-click", [ref_doctype, ref_name, row_idx]);
     },
 
     // Invoice attachment preview (triggered by View button click)
@@ -624,25 +632,24 @@ frappe.ui.form.on('Payment Request Form', {
         // Listen for View button clicks (custom event from setup_invoice_drilldown)
         frm.fields_dict.payment_references.$wrapper.on(
             "view-btn-click",
-            function (e, ref_doctype, ref_name) {
+            function (e, ref_doctype, ref_name, row_idx) {
                 if (!ref_name || ref_doctype === "Manual") return;
 
-                const key = ref_doctype + ":" + ref_name;
+                const key = ref_doctype + ":" + ref_name + ":" + (row_idx || "");
                 if (key === active_key) return;
 
                 hide();
                 active_key = key;
 
-                // Position near center of viewport
                 const $dummy = $(document.body);
-                show_preview($dummy, ref_doctype, ref_name, key);
+                show_preview($dummy, ref_doctype, ref_name, key, row_idx);
             }
         );
 
         // Hide on route change
         frappe.router.on("change", hide);
 
-        function show_preview($el, ref_doctype, ref_name, key) {
+        function show_preview($el, ref_doctype, ref_name, key, row_idx) {
             $popup = $(`
                 <div class="inv-att-preview">
                     <div class="inv-att-hdr">
@@ -718,7 +725,13 @@ frappe.ui.form.on('Payment Request Form', {
 
             frappe.xcall(
                 "avientek.avientek.doctype.payment_request_form.payment_request_form.get_invoice_preview_data",
-                { reference_doctype: ref_doctype, reference_name: ref_name, max_pages: 3 }
+                {
+                    reference_doctype: ref_doctype,
+                    reference_name: ref_name,
+                    max_pages: 3,
+                    parent_docname: frm.doc.name,
+                    row_idx: row_idx || "",
+                }
             ).then((data) => {
                 if (!$popup) return;
                 cache[key] = data || {};
@@ -746,7 +759,7 @@ frappe.ui.form.on('Payment Request Form', {
                     html += `<img src="${img}" loading="lazy" />`;
                 }
             } else if (file_list.length) {
-                // Render PDFs as embedded viewers, images inline, others as links
+                // Issue 11: Render PDFs inline, images inline, Excel/other as styled badge with download icon
                 html += '<div class="inv-att-section-title">Attached Documents</div>';
                 for (const f of file_list) {
                     const name = (f.file_name || "").toLowerCase();
@@ -756,7 +769,19 @@ frappe.ui.form.on('Payment Request Form', {
                     } else if (/\.(jpe?g|png|gif|webp)$/i.test(name)) {
                         html += `<img src="${url}" loading="lazy" />`;
                     } else {
-                        html += `<a href="${url}" target="_blank" class="inv-att-file-link">${frappe.utils.escape_html(f.file_name)}</a>`;
+                        // Excel, Word, CSV, other — show as clickable file badge
+                        let icon = "📄";
+                        if (/\.(xlsx?|csv)$/i.test(name)) icon = "📊";
+                        else if (/\.(docx?)$/i.test(name)) icon = "📝";
+                        else if (/\.(zip|rar|7z)$/i.test(name)) icon = "🗜";
+                        html += `<div style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #d6dde5;border-radius:6px;margin-bottom:8px;background:#f8f9fb;">
+                            <span style="font-size:24px;">${icon}</span>
+                            <div style="flex:1;">
+                                <div style="font-weight:500;color:#1f2a38;">${frappe.utils.escape_html(f.file_name)}</div>
+                                <div style="font-size:11px;color:#6c757d;">Click to open or download</div>
+                            </div>
+                            <a href="${url}" target="_blank" class="btn btn-xs btn-default">Open</a>
+                        </div>`;
                     }
                 }
             } else {
@@ -770,6 +795,29 @@ frappe.ui.form.on('Payment Request Form', {
                 for (const img of print_images) {
                     html += `<img src="${img}" loading="lazy" />`;
                 }
+            }
+
+            // Section 3 (Issue 4): Linked Purchase Order preview
+            const po_images = data.po_images || [];
+            const po_name = data.po_name || "";
+            if (po_images.length && po_name) {
+                html += `<div class="inv-att-section-title" style="margin-top:16px;">Linked Purchase Order: ${frappe.utils.escape_html(po_name)}</div>`;
+                for (const img of po_images) {
+                    html += `<img src="${img}" loading="lazy" />`;
+                }
+            }
+
+            // Section 4 (Issue 4): Costing Sheet attached on PRF row
+            const costing_images = data.costing_images || [];
+            const costing_url = data.costing_url || "";
+            if (costing_images.length) {
+                html += `<div class="inv-att-section-title" style="margin-top:16px;">Costing Sheet</div>`;
+                for (const img of costing_images) {
+                    html += `<img src="${img}" loading="lazy" />`;
+                }
+            } else if (costing_url) {
+                html += `<div class="inv-att-section-title" style="margin-top:16px;">Costing Sheet</div>`;
+                html += `<a href="${costing_url}" target="_blank" class="inv-att-file-link">Open Costing Sheet</a>`;
             }
 
             $body.html(html || `<div class="inv-att-empty">No data found for this ${frappe.utils.escape_html(doc_label)}</div>`);
@@ -1340,7 +1388,7 @@ frappe.ui.form.on('Payment Request Reference', {
     view_document: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
         if (row.reference_name && row.reference_doctype !== "Manual") {
-            frm.events._show_view_preview(frm, row.reference_doctype, row.reference_name);
+            frm.events._show_view_preview(frm, row.reference_doctype, row.reference_name, row.idx);
         }
     },
 

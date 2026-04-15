@@ -237,7 +237,11 @@ def _get_customer_credit_documents(args):
 
 
 def _get_outstanding_employee_journal_entries(args):
-    """Fetch outstanding Journal Entries with credit for an employee (company owes the employee)."""
+    """Fetch outstanding Journal Entries with credit for an employee (company owes the employee).
+
+    Issue 10: Filter out JEs that have been fully paid via Payment Ledger Entry
+    or offset by a corresponding debit entry.
+    """
     from frappe.utils import flt
 
     if not args.get("party") or not args.get("company"):
@@ -267,6 +271,24 @@ def _get_outstanding_employee_journal_entries(args):
         if je.company != args.get("company") or je.docstatus != 1:
             continue
 
+        # Issue 10: Skip if this JE is already referenced (paid) via Payment Ledger Entry
+        # Check if there are DEBIT PLE entries against this JE that offset the credit
+        try:
+            ple_outstanding = frappe.db.sql(
+                """
+                SELECT COALESCE(SUM(amount), 0)
+                FROM `tabPayment Ledger Entry`
+                WHERE against_voucher_type = 'Journal Entry'
+                AND against_voucher_no = %s
+                AND party_type = 'Employee'
+                AND party = %s
+                AND delinked = 0
+                """,
+                (je.name, args.get("party")),
+            )[0][0] or 0
+        except Exception:
+            ple_outstanding = None
+
         currency_groups = {}
         for acc in je.accounts:
             if acc.party_type == "Employee" and acc.party == args.get("party") and flt(acc.credit_in_account_currency) > 0:
@@ -275,6 +297,16 @@ def _get_outstanding_employee_journal_entries(args):
                     currency_groups[curr] = {"credit": 0, "base_credit": 0, "exchange_rate": flt(acc.exchange_rate) or 1}
                 currency_groups[curr]["credit"] += flt(acc.credit_in_account_currency)
                 currency_groups[curr]["base_credit"] += flt(acc.credit)
+
+        # If PLE shows fully paid/zero outstanding for this JE, skip it
+        if ple_outstanding is not None and abs(ple_outstanding) < 0.01:
+            # Only skip if we're sure PLE tracks this JE — i.e., it had entries originally
+            ple_has_entries = frappe.db.exists(
+                "Payment Ledger Entry",
+                {"voucher_no": je.name, "party": args.get("party"), "delinked": 0},
+            )
+            if ple_has_entries:
+                continue
 
         for curr, data in currency_groups.items():
             if data["credit"] <= 0:
@@ -769,7 +801,23 @@ def get_outstanding_reference_documents(args):
         po_rows = _get_outstanding_purchase_orders(args)
         filtered_rows.extend(po_rows)
 
-    return filtered_rows
+    # Deduplicate by (voucher_type, voucher_no) — Issue 3 fix
+    # Keep only the first occurrence of each voucher to prevent duplicates
+    seen = set()
+    deduped = []
+    for row in filtered_rows:
+        key = (row.get("voucher_type"), row.get("voucher_no"))
+        if key in seen:
+            continue
+        seen.add(key)
+        # Final filter: only include rows with positive outstanding
+        # (except debit notes which have negative outstanding)
+        os_amt = row.get("outstanding") or row.get("outstanding_in_account_currency") or 0
+        if os_amt == 0 and not row.get("is_return"):
+            continue
+        deduped.append(row)
+
+    return deduped
 
 
 def get_formatted_supplier_address(address_name):
@@ -1353,16 +1401,34 @@ def get_payment_voucher_context(docname):
             ["bank", "bank_account_no", "iban"], as_dict=True
         ) or {}
 
-    # Supplier/party bank details
+    # Supplier/party bank details — Issue 13: show for Supplier, Employee, Customer
     supplier_bank = {}
     supplier_swift = ""
     if doc.payment_type != "Internal Transfer" and doc.party and doc.party_type:
-        supplier_bank = frappe.db.get_value(
-            "Bank Account",
-            {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
-            ["name", "bank", "bank_account_no", "iban", "branch_code"],
-            as_dict=True
-        ) or {}
+        # 1. Prefer the bank account explicitly selected on the PRF
+        if doc.get("supplier_bank_account"):
+            supplier_bank = frappe.db.get_value(
+                "Bank Account",
+                doc.supplier_bank_account,
+                ["name", "bank", "bank_account_no", "iban", "branch_code"],
+                as_dict=True,
+            ) or {}
+        # 2. Default bank account for this party
+        if not supplier_bank:
+            supplier_bank = frappe.db.get_value(
+                "Bank Account",
+                {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
+                ["name", "bank", "bank_account_no", "iban", "branch_code"],
+                as_dict=True,
+            ) or {}
+        # 3. Any bank account for this party (fallback for Employees without default)
+        if not supplier_bank:
+            supplier_bank = frappe.db.get_value(
+                "Bank Account",
+                {"party_type": doc.party_type, "party": doc.party},
+                ["name", "bank", "bank_account_no", "iban", "branch_code"],
+                as_dict=True,
+            ) or {}
         if supplier_bank and supplier_bank.get("bank"):
             supplier_swift = frappe.db.get_value("Bank", supplier_bank["bank"], "swift_number") or ""
 
@@ -1695,10 +1761,14 @@ REFERENCE_DOCTYPE_MAP = {
 
 
 @frappe.whitelist()
-def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3):
-    """Return attachment images, file list, and print preview separately for the hover popup."""
+def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, parent_docname=None, row_idx=None):
+    """Return attachment images, file list, and print preview separately for the hover popup.
+
+    Enhanced (Issue 4): Also returns linked Purchase Order and Costing Sheet attachment
+    when the parent PRF docname and row index are provided.
+    """
     if not reference_doctype or not reference_name:
-        return {"attachment_images": [], "file_list": [], "print_images": []}
+        return {"attachment_images": [], "file_list": [], "print_images": [], "po_images": [], "po_name": "", "costing_images": [], "costing_url": ""}
 
     actual_doctype = REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
     max_pages = int(max_pages) if max_pages else 3
@@ -1751,11 +1821,59 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3):
     # 5) Print format preview (always generate)
     print_images = get_print_format_as_images(actual_doctype, reference_name, max_pages=max_pages) or []
 
+    # 6) Issue 4 — Linked Purchase Order preview (for Purchase Invoice references)
+    po_images = []
+    po_name = ""
+    if actual_doctype == "Purchase Invoice":
+        po_name = frappe.db.get_value(
+            "Purchase Invoice Item",
+            {"parent": reference_name},
+            "purchase_order",
+            order_by="idx asc",
+        ) or ""
+        if po_name:
+            po_images = get_print_format_as_images("Purchase Order", po_name, max_pages=max_pages, print_format="Avientek PO") or []
+
+    # 7) Issue 4 — Costing Sheet attachment from the PRF row
+    costing_images = []
+    costing_url = ""
+    if parent_docname and row_idx:
+        try:
+            row_data = frappe.db.get_value(
+                "Payment Request Reference",
+                {"parent": parent_docname, "idx": int(row_idx)},
+                ["costing_sheet_attachment", "previous_payment_details"],
+                as_dict=True,
+            )
+            if row_data:
+                costing_url = row_data.get("costing_sheet_attachment") or row_data.get("previous_payment_details") or ""
+                if costing_url and costing_url.lower().endswith(".pdf"):
+                    costing_images = _pdf_url_to_images(costing_url, max_pages=max_pages) or []
+        except Exception:
+            pass
+
     return {
         "attachment_images": att_images,
         "file_list": file_list,
         "print_images": print_images,
+        "po_images": po_images,
+        "po_name": po_name,
+        "costing_images": costing_images,
+        "costing_url": costing_url,
     }
+
+
+def _pdf_url_to_images(file_url, max_pages=3):
+    """Helper: convert a PDF file URL to base64 image list."""
+    try:
+        file_path = _get_file_path_from_url(file_url)
+        if not file_path or not os.path.exists(file_path):
+            return []
+        with open(file_path, "rb") as f:
+            pdf_bytes = f.read()
+        return _convert_pdf_to_images_optimized(pdf_bytes, max_pages=max_pages)
+    except Exception:
+        return []
 
 
 @frappe.whitelist()

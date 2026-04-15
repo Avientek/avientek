@@ -6,3 +6,4 @@ avientek.patches.populate_item_defaults_and_taxes
 avientek.patches.repost_ksa_stock_gl
 avientek.patches.repost_ksa_stock_gl_v2
 avientek.patches.repost_ksa_full_gl_rebuild
+avientek.patches.create_payment_request_workflow

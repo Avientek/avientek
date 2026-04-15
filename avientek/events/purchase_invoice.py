@@ -32,6 +32,13 @@ def validate_item_tax_template(doc, method=None):
 @frappe.whitelist()
 def create_payment_request(source_name, target_doc=None, args=None):
     def set_single_reference(source, target):
+        # Set required party fields (previously missing — caused errors on save)
+        target.payment_type = "Pay"
+        target.party_type = "Supplier"
+        target.party = source.supplier
+        target.party_name = source.supplier_name or source.supplier
+        target.posting_date = frappe.utils.nowdate()
+
         purchase_order = source.items[0].purchase_order if source.items else ""
         attachment_html = ""
 
@@ -98,7 +105,7 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "outstanding_amount": os_invoice,
             "base_outstanding_amount": os_company,
             "payment_amount": 0,
-            "invoice_date": source.bill_date,
+            "invoice_date": source.bill_date or source.posting_date,
             "document_reference": purchase_order,
             "currency": source.currency,
             "due_date": source.due_date,
