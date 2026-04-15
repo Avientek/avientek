@@ -58,6 +58,14 @@ def execute():
 			doc.role_name = role
 			doc.insert(ignore_permissions=True)
 
+	# Ensure required Workflow Action Master records exist (link target for transitions)
+	for action in ["Authorise", "Approve Level 1", "Approve Level 2",
+				   "Release Payment", "Reject", "Revise"]:
+		if not frappe.db.exists("Workflow Action Master", action):
+			doc = frappe.new_doc("Workflow Action Master")
+			doc.workflow_action_name = action
+			doc.insert(ignore_permissions=True)
+
 	# Create workflow
 	wf = frappe.new_doc("Workflow")
 	wf.workflow_name = WORKFLOW_NAME
