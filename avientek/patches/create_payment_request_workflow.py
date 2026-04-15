@@ -88,7 +88,7 @@ def execute():
 	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "General Manager"})
 	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "Director"})
 	wf.append("states", {"state": "Released", "doc_status": "1", "allow_edit": "Finance Controller"})
-	wf.append("states", {"state": "Rejected", "doc_status": "2", "allow_edit": "Accounts Manager"})
+	wf.append("states", {"state": "Rejected", "doc_status": "0", "allow_edit": "Accounts Manager"})
 
 	# Transitions
 	# Authorise
