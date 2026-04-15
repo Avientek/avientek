@@ -28,9 +28,12 @@ def execute():
 		if wf != WORKFLOW_NAME:
 			frappe.db.set_value("Workflow", wf, "is_active", 0)
 
-	# Delete old if exists (so we can recreate cleanly)
-	if frappe.db.exists("Workflow", WORKFLOW_NAME):
-		frappe.delete_doc("Workflow", WORKFLOW_NAME, force=True, ignore_permissions=True)
+	# Force delete any existing workflow + orphaned child rows via direct SQL
+	# (previous failed patch attempts may have left partial records)
+	frappe.db.sql("DELETE FROM `tabWorkflow` WHERE name = %s", WORKFLOW_NAME)
+	frappe.db.sql("DELETE FROM `tabWorkflow Document State` WHERE parent = %s", WORKFLOW_NAME)
+	frappe.db.sql("DELETE FROM `tabWorkflow Transition` WHERE parent = %s", WORKFLOW_NAME)
+	frappe.db.commit()
 
 	# Ensure required Workflow States exist
 	required_states = [
