@@ -13,6 +13,7 @@ def after_migrate():
 	_fix_quotation_item_calc_layout()
 	_fix_global_field_settings()
 	_enforce_custom_role_permissions()
+	_enforce_export_permissions()
 
 
 def _create_asset_dam_fields():
@@ -311,6 +312,18 @@ def _enforce_custom_role_permissions():
 		doc.update(EXPECTED)
 		doc.insert(ignore_permissions=True)
 
+	frappe.db.commit()
+
+
+def _enforce_export_permissions():
+	"""Ensure Accounts Manager and Accounts User always have export=1 on Sales Invoice.
+	Migrations can reset Custom DocPerm export to 0 — this restores it every time."""
+	for role in ["Accounts Manager", "Accounts User"]:
+		existing = frappe.db.exists("Custom DocPerm", {
+			"parent": "Sales Invoice", "role": role, "permlevel": 0,
+		})
+		if existing:
+			frappe.db.set_value("Custom DocPerm", existing, "export", 1)
 	frappe.db.commit()
 
 
