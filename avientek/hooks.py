@@ -221,7 +221,7 @@ fixtures = [
 # app_include_css = "/assets/avientek/css/avientek.css"
 app_include_js = [
     "/assets/avientek/js/workflow_confirm.js?v=5",
-    "/assets/avientek/js/brand_access.js?v=10",
+    "/assets/avientek/js/brand_access.js?v=11",
 ]
 
 # include js, css files in header of web template
@@ -260,10 +260,19 @@ doctype_js = {
 	"Delivery Note": "public/js/delivery_note.js",
 }
 doctype_list_js = {
-	"Sales Order": "public/js/sales_order_list.js",
-	"Quotation": "public/js/quotation_list.js",
-	"Asset": "public/js/asset_list.js",
-	"Sales Invoice": "public/js/sales_invoice_list.js",
+	"Sales Order": ["public/js/sales_order_list.js", "public/js/report_download.js"],
+	"Quotation": ["public/js/quotation_list.js", "public/js/report_download.js"],
+	"Asset": ["public/js/asset_list.js"],
+	"Sales Invoice": ["public/js/sales_invoice_list.js", "public/js/report_download.js"],
+	"Purchase Order": "public/js/report_download.js",
+	"Purchase Invoice": "public/js/report_download.js",
+	"Delivery Note": "public/js/report_download.js",
+	"Purchase Receipt": "public/js/report_download.js",
+	"Material Request": "public/js/report_download.js",
+	"Stock Entry": "public/js/report_download.js",
+	"Payment Entry": "public/js/report_download.js",
+	"Journal Entry": "public/js/report_download.js",
+	"Item": "public/js/report_download.js",
 }
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

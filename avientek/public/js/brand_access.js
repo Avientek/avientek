@@ -73,6 +73,8 @@
 	_patch_report_view();
 	$(document).on("page-change", _patch_report_view);
 
+	// 3. "Report Download" button — see standalone IIFE at end of file
+
 	// Cache
 	let _brand_checked = false;
 	let _brand_restricted = false;
@@ -864,3 +866,4 @@
 	window.show_brand_preview = show_restricted_preview;
 })();
 
+// Report Download Button — moved to separate file: report_download.js
