@@ -1115,7 +1115,9 @@ function rebuild_brand_summary_preview(frm, addl_discount) {
         row.customs_         = flt(d.customs_pct / n, 4);
         row.total_cost       = flt(tc, 4);
         row.total_selling    = flt(eff_ts, 4);
-        row.margin           = flt(eff_ts - tc, 4);
+        // Clamp margin to prevent decimal(21,9) overflow on save
+        var raw_margin = flt(eff_ts - tc, 4);
+        row.margin           = Math.max(-999999999999, Math.min(999999999999, raw_margin));
         row.margin_percent   = margin_pct;
     });
 }
