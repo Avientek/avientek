@@ -1674,3 +1674,17 @@ def patch_shared_document_filter():
 
 
 
+
+
+@frappe.whitelist()
+def export_report_as_excel(data, doctype):
+	"""Generate Excel file from Report Download data and return as download."""
+	import json as json_mod
+	from frappe.utils.xlsxutils import make_xlsx
+
+	rows = json_mod.loads(data)
+	xlsx_file = make_xlsx(rows, doctype)
+
+	frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
+	frappe.response["filecontent"] = xlsx_file.getvalue()
+	frappe.response["type"] = "download"
