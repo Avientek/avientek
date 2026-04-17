@@ -1062,6 +1062,14 @@ def set_margin_flags(doc, method=None):
         bs_row.approval_status = "LEVEL_2"
         level_2_required = True
 
+    # Additional Level 2 triggers (probability-based — Finance Manager request):
+    #   A. Probability drops below 75% (from any higher value) → LEVEL_2
+    #   B. Probability stays at 75% but Expected Closing Date *month* changes → LEVEL_2
+    prob_reason = _probability_change_requires_level_2(doc)
+    if prob_reason:
+        level_2_required = True
+        warnings.append(_("Level 2 approval required: {0}").format(prob_reason))
+
     # Worst case wins
     if level_2_required:
         doc.custom_auto_approve_ok = 0
@@ -1074,6 +1082,71 @@ def set_margin_flags(doc, method=None):
     if warnings:
         msg = "<br><br>".join(warnings)
         frappe.msgprint(msg, title=_("Margin Warning"), indicator="orange", alert=True)
+
+
+def _probability_change_requires_level_2(doc):
+    """Detect probability-based Level 2 triggers.
+
+    Returns a human-readable reason string if a trigger fires, else None.
+
+    Trigger A — any change that *lands below* 75%
+        If the new probability is < 75% and it changed from whatever it was
+        before, Level 2 approval is needed. Catches 100% → 50%, 75% → 10%,
+        etc. An already-below-75% save that doesn't change the value is not
+        a trigger (prevents every subsequent save from re-prompting).
+
+    Trigger B — closing-date *month* change while at 75%
+        If the probability was 75% before and still is, but the
+        Expected Closing Date moved to a different calendar month, that's
+        a schedule slip worth reviewing at Level 2.
+    """
+    if doc.is_new():
+        return None
+
+    old_prob = None
+    old_ecd = None
+    before = None
+    try:
+        before = doc.get_doc_before_save()
+    except Exception:
+        before = None
+
+    if before:
+        old_prob = before.get("probabilities") or ""
+        old_ecd = before.get("expected_closing_dates")
+    else:
+        row = frappe.db.get_value(
+            "Quotation", doc.name,
+            ["probabilities", "expected_closing_dates"], as_dict=True,
+        )
+        if not row:
+            return None
+        old_prob = row.get("probabilities") or ""
+        old_ecd = row.get("expected_closing_dates")
+
+    new_prob = doc.get("probabilities") or ""
+    new_ecd = doc.get("expected_closing_dates")
+
+    def _pct(v):
+        try:
+            return int(str(v or "").rstrip("%").strip() or 0)
+        except (ValueError, TypeError):
+            return 0
+
+    op, np = _pct(old_prob), _pct(new_prob)
+
+    # Trigger A
+    if np < 75 and np != op:
+        return _("Probability changed from {0} to {1}").format(old_prob or "-", new_prob or "-")
+
+    # Trigger B
+    if op == 75 and np == 75 and old_ecd and new_ecd:
+        if str(old_ecd)[:7] != str(new_ecd)[:7]:
+            return _("Expected Closing Date month changed from {0} to {1} at 75% probability").format(
+                old_ecd, new_ecd
+            )
+
+    return None
 
 
 @frappe.whitelist()
