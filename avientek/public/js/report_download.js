@@ -84,34 +84,34 @@ window.setTimeout(function() {
 }, 1000);
 
 /**
- * Fetch ALL rows matching the current Report View filters (bypassing the
- * in-memory 20-row pagination) and export them. Fixes the "reports not
- * pulling full data" complaint — previously we exported whatever rv.data
- * happened to have in memory, which was capped by page_length.
+ * Export the Report View's data, respecting the user's row selection:
+ *   - If rows are checked via the list-view checkboxes → export only
+ *     those parent docs (and all their child rows).
+ *   - Otherwise → bump page_length and refresh to fetch every row
+ *     matching the current filters, then export.
+ *
+ * Fixes two complaints:
+ *   - "I selected 20 but downloaded 41" (selection was ignored)
+ *   - "reports is not pulling the full data" (export was capped at the
+ *     visible page_length of ~20 when no selection was made)
  */
 function _rd_export_all(rv, dt, headers, keys, parent_keys, file_type) {
-	var prev_pl = rv.page_length;
-	rv.page_length = 9999;
+	// Collect selected parent-doc names (if any).
+	var selected_names = [];
+	try {
+		var checked = (rv.get_checked_items && rv.get_checked_items()) || [];
+		selected_names = checked
+			.map(function(r) { return r && r.name; })
+			.filter(Boolean);
+	} catch (e) {
+		selected_names = [];
+	}
 
-	frappe.show_alert({
-		message: __("Fetching all rows for export…"),
-		indicator: "blue",
-	}, 8);
-
-	// rv.refresh() may return a Promise (Frappe 15+); normalize either way
-	var refresh_result = rv.refresh();
-	var p = (refresh_result && typeof refresh_result.then === "function")
-		? refresh_result
-		: new Promise(function(resolve) { setTimeout(resolve, 1500); });
-
-	p.then(function() {
-		rv.page_length = prev_pl;
-		var data = (rv.data || []).slice();  // copy so we don't mutate rv
-		if (!data.length) {
+	var proceed = function(data) {
+		if (!data || !data.length) {
 			frappe.msgprint(__("No data to download"));
 			return;
 		}
-
 		_rd_denormalize_parent_fields(data, parent_keys);
 
 		var rows = [headers];
@@ -130,6 +130,42 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, file_type) {
 		} else {
 			_rd_download_csv(rows, dt);
 		}
+	};
+
+	if (selected_names.length) {
+		// Checkbox selection wins — export exactly those parents, nothing
+		// more. rv.data already has their rows (user ticked them from the
+		// visible list), so we filter client-side; no extra round-trip.
+		var selected_set = {};
+		selected_names.forEach(function(n) { selected_set[n] = true; });
+		var data = (rv.data || []).filter(function(r) {
+			return r && selected_set[r.name];
+		}).slice();
+		frappe.show_alert({
+			message: __("Exporting {0} selected records…", [selected_names.length]),
+			indicator: "blue",
+		}, 5);
+		proceed(data);
+		return;
+	}
+
+	// No selection — fetch every row matching the current filters.
+	var prev_pl = rv.page_length;
+	rv.page_length = 9999;
+
+	frappe.show_alert({
+		message: __("Fetching all rows for export…"),
+		indicator: "blue",
+	}, 8);
+
+	var refresh_result = rv.refresh();
+	var p = (refresh_result && typeof refresh_result.then === "function")
+		? refresh_result
+		: new Promise(function(resolve) { setTimeout(resolve, 1500); });
+
+	p.then(function() {
+		rv.page_length = prev_pl;
+		proceed((rv.data || []).slice());
 	}).catch(function(err) {
 		rv.page_length = prev_pl;
 		frappe.msgprint(__("Failed to fetch all rows: {0}", [err || "unknown error"]));
