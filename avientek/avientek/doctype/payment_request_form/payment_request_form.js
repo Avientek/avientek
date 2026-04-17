@@ -1344,6 +1344,7 @@ function fetch_supplier_details(frm, force_update) {
                     if (r.message) {
                         set_if_changed(frm, "supplier_bank_account", r.message.supplier_bank_account);
                         set_if_changed(frm, "account_number", r.message.bank_account_no);
+                        set_if_changed(frm, "iban", r.message.iban || "");
                         set_if_changed(frm, "bank", r.message.bank);
                         set_if_changed(frm, "swift_code", r.message.swift_code);
                     }

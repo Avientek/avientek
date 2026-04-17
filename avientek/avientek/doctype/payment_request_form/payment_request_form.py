@@ -852,29 +852,36 @@ def get_supplier_bank_details(supplier_name, party_type="Supplier"):
     if not supplier_name:
         return {}
 
-    # Get default (or first) bank account linked to the party
-    bank_account = frappe.get_all("Bank Account",
-        filters={
-            "party_type": party_type,
-            "party": supplier_name
-        },
-        fields=["name", "bank", "bank_account_no"],
-        limit=1
+    # Prefer the party's default bank account; fall back to any enabled one.
+    # Finance reported the wrong account flowing in when a supplier had more
+    # than one; is_default=1 fixes that.
+    bank_account = frappe.get_all(
+        "Bank Account",
+        filters={"party_type": party_type, "party": supplier_name, "is_default": 1, "disabled": 0},
+        fields=["name", "bank", "bank_account_no", "iban", "branch_code"],
+        limit=1,
+    ) or frappe.get_all(
+        "Bank Account",
+        filters={"party_type": party_type, "party": supplier_name, "disabled": 0},
+        fields=["name", "bank", "bank_account_no", "iban", "branch_code"],
+        limit=1,
     )
 
     if not bank_account:
         return {}
 
     bank_data = bank_account[0]
-
-    # Step 2: Fetch the SWIFT code from the linked Bank doctype
-    swift_code = frappe.db.get_value("Bank", bank_data.bank, "swift_number") if bank_data.get("bank") else None
+    swift_code = ""
+    if bank_data.get("bank"):
+        swift_code = frappe.db.get_value("Bank", bank_data.bank, "swift_number") or ""
 
     return {
-        "bank_account_no": bank_data.get("bank_account_no"),
-        "bank": bank_data.get("bank"),
+        "bank_account_no": bank_data.get("bank_account_no") or "",
+        "iban": bank_data.get("iban") or "",
+        "bank": bank_data.get("bank") or "",
+        "branch_code": bank_data.get("branch_code") or "",
         "swift_code": swift_code,
-        "supplier_bank_account": bank_data.get("name")
+        "supplier_bank_account": bank_data.get("name") or "",
     }
 
 @frappe.whitelist()
@@ -999,8 +1006,13 @@ def download_payment_pdf(docname):
 
     # Merge Payment Request Form
     try:
-        # Try the new professional print format first, fall back to old one
-        print_format_name = "Payment Voucher Professional"
+        # Use "Payment Voucher Fast" as the primary format — it's the complete
+        # voucher (bank details, IBAN, supplier address, dynamic columns, Doc
+        # Reference label, TR/LC application on page 2). Falls back to the
+        # older formats only if Fast is missing.
+        print_format_name = "Payment Voucher Fast"
+        if not frappe.db.exists("Print Format", print_format_name):
+            print_format_name = "Payment Voucher Professional"
         if not frappe.db.exists("Print Format", print_format_name):
             print_format_name = "PAYMENT VOUCHER"
 
@@ -1506,7 +1518,14 @@ def get_payment_voucher_context(docname):
         "receiving_bank_currency": doc.receiving_currency or company_currency,
         "party_name": doc.party_name or doc.party or "",
         "party_label": doc.party_type or "Party",
-        "party_address": doc.address_display or "",
+        # Address fallback — doc.address_display can be empty if the user
+        # picked a Supplier Address but the fetch didn't run. Regenerate from
+        # the linked Address record so the print always shows the address.
+        "party_address": (
+            doc.address_display
+            or (get_formatted_supplier_address(doc.supplier_address) if doc.get("supplier_address") else "")
+            or ""
+        ),
         "rows_data": rows_data,
         "formatted_currency_totals": formatted_currency_totals,
         "total_base_formatted": fmt_money(total_base, currency=company_currency),
