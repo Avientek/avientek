@@ -429,6 +429,49 @@ def undo_repair(since=None, company=None, doctype=None):
 
 
 @frappe.whitelist()
+def refresh_stale_statuses(company=None):
+    """Recompute status on Sales/Purchase Invoices whose status field is out
+    of sync with their current outstanding_amount (common after the PLE
+    dedup: outstanding dropped to 0 but 'Overdue' stuck). Calls ERPNext's
+    official `set_status(update=True)` which is safe on submitted docs —
+    it bypasses the field's allow_on_submit rule because that's what the
+    method is designed to do.
+
+    Returns {checked, updated, details}.
+    """
+    stale_terminal_statuses = ("Paid", "Credit Note Issued", "Return", "Closed")
+    result = {"checked": 0, "updated": 0, "details": []}
+
+    for dt in ("Sales Invoice", "Purchase Invoice"):
+        filters = {"docstatus": 1, "outstanding_amount": 0}
+        if company:
+            filters["company"] = company
+
+        candidates = frappe.get_all(dt, filters=filters,
+                                    fields=["name", "status"])
+        for inv in candidates:
+            result["checked"] += 1
+            if inv.status in stale_terminal_statuses:
+                continue
+            try:
+                doc = frappe.get_doc(dt, inv.name)
+                old_status = doc.status
+                doc.set_status(update=True)
+                new_status = frappe.db.get_value(dt, inv.name, "status")
+                if new_status != old_status:
+                    result["updated"] += 1
+                    result["details"].append({
+                        "doctype": dt, "name": inv.name,
+                        "old": old_status, "new": new_status,
+                    })
+            except Exception as e:
+                result["details"].append({"doctype": dt, "name": inv.name, "error": str(e)})
+
+    frappe.db.commit()
+    return result
+
+
+@frappe.whitelist()
 def demo_on_local(voucher_no=None):
     """Demo the repair on a local site: pick (or accept) one open Sales Invoice,
     inject a duplicate PLE row + set outstanding to 2× to simulate the prod bug,
