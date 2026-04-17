@@ -1028,8 +1028,11 @@ def _do_restricted_report_export(doctype):
 	# add report-view-specific child table conditions that break export_my_data's SQL
 	saved_fields = frappe.form_dict.pop("fields", None)
 
-	# Extract selected docnames from filters (Report View sends name IN [...])
+	# Extract filters from Report View: docnames + any column filters.
+	# Without this, every list filter (status, company, date) is silently
+	# dropped and the user receives all permitted records, not the filtered set.
 	docnames = None
+	list_filters = {}
 	raw_filters = frappe.form_dict.get("filters")
 	if raw_filters:
 		if isinstance(raw_filters, str):
@@ -1043,11 +1046,14 @@ def _do_restricted_report_export(doctype):
 					fieldname = f[1] if len(f) >= 4 else f[0]
 					operator = f[2] if len(f) >= 4 else f[1]
 					value = f[3] if len(f) >= 4 else f[2]
-					if fieldname == "name" and str(operator).lower() == "in":
+					op = str(operator).lower()
+					if fieldname == "name" and op == "in":
 						if isinstance(value, str):
 							docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
 						elif isinstance(value, (list, tuple)):
 							docnames = _json.dumps(list(value))
+					else:
+						list_filters[fieldname] = [operator, value]
 
 	# Extract picked columns from saved fields
 	# Frappe sends fields as: ["`tabSales Order`.`customer`", ...]
@@ -1085,7 +1091,7 @@ def _do_restricted_report_export(doctype):
 		docnames=docnames,
 		parent_fields_json=parent_fields,
 		child_fields_json=child_fields,
-		extra_child_tables_json=_json.dumps(extra_child_fields) if extra_child_fields else None,
+		filters_json=_json.dumps(list_filters) if list_filters else None,
 	)
 
 
@@ -1179,10 +1185,13 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 				if cdt != primary_child_dt:
 					extra_child_fields[cdt] = cfields
 
-	# Parse export_filters for selected docnames
-	# Frappe sends: [["Sales Order","name","in",["SO-1","SO-2"]]]
-	# or [doctype, field, op, value, hidden] (5 elements)
+	# Parse export_filters into (docnames, list_filters).
+	# Frappe sends: [["Sales Order","status","=","Overdue",0], ["Sales Order","name","in",["SO-1","SO-2"]]]
+	# The user's list-view filters (status, company, date range, etc.) MUST be
+	# honored — otherwise "All Records" exports every permitted record, not the
+	# filtered subset the user was looking at.
 	docnames = None
+	list_filters = {}
 	if export_filters:
 		if isinstance(export_filters, str):
 			try:
@@ -1195,15 +1204,20 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 					fieldname = f[1] if len(f) >= 4 else f[0]
 					operator = f[2] if len(f) >= 4 else f[1]
 					value = f[3] if len(f) >= 4 else f[2]
-					if fieldname == "name" and str(operator).lower() == "in":
+					op = str(operator).lower()
+					if fieldname == "name" and op == "in":
 						if isinstance(value, str):
 							docnames = _json.dumps([v.strip() for v in value.split(",") if v.strip()])
 						elif isinstance(value, (list, tuple)):
 							docnames = _json.dumps(list(value))
-		elif isinstance(export_filters, dict) and export_filters.get("name"):
-			names = export_filters["name"]
-			if isinstance(names, (list, tuple)):
-				docnames = _json.dumps(list(names))
+					else:
+						list_filters[fieldname] = [operator, value]
+		elif isinstance(export_filters, dict):
+			for k, v in export_filters.items():
+				if k == "name" and isinstance(v, (list, tuple)):
+					docnames = _json.dumps(list(v))
+				else:
+					list_filters[k] = v
 
 	return export_my_data(
 		doctype=doctype,
@@ -1212,6 +1226,7 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 		parent_fields_json=parent_fields,
 		child_fields_json=child_fields,
 		extra_child_tables_json=_json.dumps(extra_child_fields) if extra_child_fields else None,
+		filters_json=_json.dumps(list_filters) if list_filters else None,
 	)
 
 # ── Script Report filter injection ──
@@ -1283,7 +1298,7 @@ def restricted_query_report_run(
 # ── Custom filtered export for restricted users ──
 
 @frappe.whitelist()
-def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=None, child_fields_json=None, extra_child_tables_json=None):
+def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=None, child_fields_json=None, extra_child_tables_json=None, filters_json=None):
 	"""Export only the user's permitted data with dynamic child-row filtering.
 
 	Dynamically reads ALL User Permissions for the current user and filters
@@ -1341,6 +1356,13 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	if extra_child_tables_json:
 		extra_child_tables = json_mod.loads(extra_child_tables_json) if isinstance(extra_child_tables_json, str) else dict(extra_child_tables_json)
 
+	# Parse list-view filters (status, company, date range, etc.).
+	# Without this, "All Records" exports every permitted record, not the
+	# subset the user was actually looking at in the list.
+	list_filters = {}
+	if filters_json:
+		list_filters = json_mod.loads(filters_json) if isinstance(filters_json, str) else dict(filters_json)
+
 	# Build parent fields list — validate against meta fields (includes virtual)
 	db_columns = set(frappe.db.sql(
 		"SELECT column_name FROM information_schema.columns WHERE table_name=%s",
@@ -1366,19 +1388,37 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	else:
 		perm_cond = ""
 
+	# Combine selected_names and list_filters into a single filters dict that
+	# frappe.get_list can apply. frappe.get_list handles all operators (=, in,
+	# like, between, >, <, etc.) safely — avoiding SQL injection risk of
+	# hand-building WHERE clauses.
+	filters = {}
+	if list_filters:
+		for fieldname, spec in list_filters.items():
+			# Skip fields that aren't on the parent doctype (e.g. child-table
+			# filters from Report View) — they'd raise an error in get_list.
+			if fieldname != "name" and not meta.has_field(fieldname) and fieldname not in db_columns:
+				continue
+			filters[fieldname] = spec
+	if selected_names:
+		filters["name"] = ["in", selected_names]
+
 	if perm_cond:
-		sql = "SELECT name FROM `tab{dt}` WHERE {cond}".format(dt=doctype, cond=perm_cond)
-		# If specific docs selected, intersect with permission query
-		if selected_names:
-			ph = ", ".join(["%s"] * len(selected_names))
-			sql += " AND name IN ({ph})".format(ph=ph)
-			parent_names = frappe.db.sql(sql + " ORDER BY modified DESC LIMIT 5000", selected_names, pluck="name")
+		# Fetch names matching list filters, then intersect with perm_cond.
+		filtered_names = frappe.get_list(
+			doctype, fields=["name"], filters=filters,
+			limit_page_length=5000, order_by="modified desc",
+			ignore_permissions=True, pluck="name",
+		)
+		if filtered_names:
+			ph = ", ".join(["%s"] * len(filtered_names))
+			sql = "SELECT name FROM `tab{dt}` WHERE {cond} AND name IN ({ph}) ORDER BY modified DESC LIMIT 5000".format(
+				dt=doctype, cond=perm_cond, ph=ph,
+			)
+			parent_names = frappe.db.sql(sql, filtered_names, pluck="name")
 		else:
-			parent_names = frappe.db.sql(sql + " ORDER BY modified DESC LIMIT 5000", pluck="name")
+			parent_names = []
 	else:
-		filters = {}
-		if selected_names:
-			filters["name"] = ["in", selected_names]
 		parent_names = frappe.get_list(
 			doctype, fields=["name"], filters=filters,
 			limit_page_length=5000, order_by="modified desc", pluck="name",
