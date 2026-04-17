@@ -670,6 +670,16 @@ def has_permission_check(doc, ptype, user):
 	if user == "Administrator":
 		return None
 
+	doctype = doc.doctype if hasattr(doc, "doctype") else doc.get("doctype")
+
+	# Quotation visibility rule — independent of User Permissions. A restricted
+	# user only sees a Quotation when the visibility rule's OR-chain matches
+	# (approved+100%, owner, or a sales_team entry under their Sales Person
+	# subtree). Roles in QUOTATION_VISIBILITY_BYPASS_ROLES skip this check.
+	if doctype == "Quotation" and not _user_has_visibility_bypass(user):
+		if not _quotation_doc_visible_to_user(doc, user):
+			return False
+
 	brand_perms = _get_user_brands(user)
 	ig_perms = _get_user_item_groups(user)
 	cg_perms = _get_user_customer_groups(user)
@@ -679,7 +689,6 @@ def has_permission_check(doc, ptype, user):
 	if not brand_perms and not ig_perms and not cg_perms and not sp_perms and not company_perms:
 		return None  # No restrictions
 
-	doctype = doc.doctype if hasattr(doc, "doctype") else doc.get("doctype")
 	if not doctype:
 		return None
 
@@ -740,10 +749,99 @@ def has_permission_check(doc, ptype, user):
 	return True  # Explicitly allow — our permission_query_conditions already filtered the list
 
 
+# ── Quotation visibility restriction ──
+# Per Finance Manager's requirement (email 2026-04-10):
+#   Quotations that are NOT (workflow_state='Approved' AND probabilities='100%')
+#   are hidden, EXCEPT for:
+#     - users with role System Manager / Finance Controller / Sales Director
+#     - the doc's owner (user who created it)
+#     - users whose Sales Person (or any descendant of it in the Sales Person
+#       tree) is in the doc's sales_team
+
+QUOTATION_VISIBILITY_BYPASS_ROLES = ("System Manager", "Finance Controller", "Sales Director")
+
+
+def _user_has_visibility_bypass(user):
+	if user == "Administrator":
+		return True
+	try:
+		user_roles = set(frappe.get_roles(user))
+	except Exception:
+		user_roles = set()
+	return any(r in user_roles for r in QUOTATION_VISIBILITY_BYPASS_ROLES)
+
+
+def _get_user_sales_person_subtree(user):
+	"""Return the set of Sales Person names the user can 'own' — their own
+	Sales Person records plus every descendant via parent_sales_person.
+	Empty set if the user has no linked Sales Person."""
+	roots = frappe.db.sql(
+		"SELECT name FROM `tabSales Person` WHERE `user`=%s AND `enabled`=1",
+		user, pluck="name",
+	) or []
+	if not roots:
+		return []
+	collected = set(roots)
+	frontier = list(roots)
+	while frontier:
+		ph = ", ".join(["%s"] * len(frontier))
+		children = frappe.db.sql(
+			f"SELECT name FROM `tabSales Person` WHERE parent_sales_person IN ({ph})",
+			frontier, pluck="name",
+		) or []
+		fresh = [c for c in children if c not in collected]
+		if not fresh:
+			break
+		collected.update(fresh)
+		frontier = fresh
+	return list(collected)
+
+
+def _quotation_visibility_condition(user):
+	"""Return SQL that a restricted user must satisfy to see a Quotation."""
+	clauses = [
+		"(`tabQuotation`.`workflow_state` = 'Approved' "
+		"AND `tabQuotation`.`probabilities` = '100%')",
+		f"`tabQuotation`.`owner` = {frappe.db.escape(user)}",
+	]
+	sps = _get_user_sales_person_subtree(user)
+	if sps:
+		sp_list = ", ".join(frappe.db.escape(s) for s in sps)
+		clauses.append(
+			f"EXISTS (SELECT 1 FROM `tabSales Team` st "
+			f"WHERE st.parent = `tabQuotation`.name "
+			f"AND st.parenttype = 'Quotation' "
+			f"AND st.sales_person IN ({sp_list}))"
+		)
+	return "(" + " OR ".join(clauses) + ")"
+
+
+def _quotation_doc_visible_to_user(doc, user):
+	"""Mirror of _quotation_visibility_condition for has_permission_check.
+	Returns True if the user may read this specific Quotation under the
+	visibility rule."""
+	if doc.get("workflow_state") == "Approved" and doc.get("probabilities") == "100%":
+		return True
+	if (doc.get("owner") or "") == user:
+		return True
+	sps = set(_get_user_sales_person_subtree(user))
+	if sps:
+		doc_sps = {st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person}
+		if doc_sps & sps:
+			return True
+	return False
+
+
 # ── Individual permission query functions (referenced from hooks.py) ──
 
 def quotation_permission_query(user):
-	return _combined_permission_query(user, "Quotation", "Quotation Item")
+	existing = _combined_permission_query(user, "Quotation", "Quotation Item")
+	if _user_has_visibility_bypass(user):
+		return existing
+	visibility = _quotation_visibility_condition(user)
+	if existing:
+		return f"({existing}) AND {visibility}"
+	return visibility
 
 def sales_order_permission_query(user):
 	return _combined_permission_query(user, "Sales Order", "Sales Order Item")
