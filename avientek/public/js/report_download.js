@@ -57,14 +57,8 @@ window.setTimeout(function() {
 
 			if (!keys.length) { frappe.msgprint(__("No columns to export")); return; }
 
-			// Denormalize: Frappe Report View returns parent fields (ID, title,
-			// series, posting date, etc.) only on the first row of each parent
-			// group — subsequent child-item rows have those columns blank, so
-			// the exported CSV looks like the Purchase Order export Jithin
-			// flagged (rows 4-9 missing ID + Title). Fill forward per-parent.
-			_rd_denormalize_parent_fields(data, parent_keys);
-
-			// Ask file type
+			// Ask file type — the heavy "fetch all rows" only runs after the
+			// user commits to downloading (so Cancel is cheap).
 			var d = new frappe.ui.Dialog({
 				title: __("Report Download"),
 				fields: [{
@@ -77,23 +71,7 @@ window.setTimeout(function() {
 				primary_action_label: __("Download"),
 				primary_action: function(values) {
 					d.hide();
-
-					var rows = [headers];
-					data.forEach(function(r) {
-						rows.push(keys.map(function(k) {
-							var v = r[k];
-							return v == null ? "" : String(v);
-						}));
-					});
-
-					if (values.file_type === "Excel") {
-						open_url_post(
-							"/api/method/avientek.api.quotation_access.export_report_as_excel",
-							{ data: JSON.stringify(rows), doctype: dt }
-						);
-					} else {
-						_rd_download_csv(rows, dt);
-					}
+					_rd_export_all(rv, dt, headers, keys, parent_keys, values.file_type);
 				}
 			});
 			d.show();
@@ -104,6 +82,60 @@ window.setTimeout(function() {
 		$btn.css({"border": "1px solid #c0c6cc", "font-weight": "500"});
 	}
 }, 1000);
+
+/**
+ * Fetch ALL rows matching the current Report View filters (bypassing the
+ * in-memory 20-row pagination) and export them. Fixes the "reports not
+ * pulling full data" complaint — previously we exported whatever rv.data
+ * happened to have in memory, which was capped by page_length.
+ */
+function _rd_export_all(rv, dt, headers, keys, parent_keys, file_type) {
+	var prev_pl = rv.page_length;
+	rv.page_length = 9999;
+
+	frappe.show_alert({
+		message: __("Fetching all rows for export…"),
+		indicator: "blue",
+	}, 8);
+
+	// rv.refresh() may return a Promise (Frappe 15+); normalize either way
+	var refresh_result = rv.refresh();
+	var p = (refresh_result && typeof refresh_result.then === "function")
+		? refresh_result
+		: new Promise(function(resolve) { setTimeout(resolve, 1500); });
+
+	p.then(function() {
+		rv.page_length = prev_pl;
+		var data = (rv.data || []).slice();  // copy so we don't mutate rv
+		if (!data.length) {
+			frappe.msgprint(__("No data to download"));
+			return;
+		}
+
+		_rd_denormalize_parent_fields(data, parent_keys);
+
+		var rows = [headers];
+		data.forEach(function(r) {
+			rows.push(keys.map(function(k) {
+				var v = r[k];
+				return v == null ? "" : String(v);
+			}));
+		});
+
+		if (file_type === "Excel") {
+			open_url_post(
+				"/api/method/avientek.api.quotation_access.export_report_as_excel",
+				{ data: JSON.stringify(rows), doctype: dt }
+			);
+		} else {
+			_rd_download_csv(rows, dt);
+		}
+	}).catch(function(err) {
+		rv.page_length = prev_pl;
+		frappe.msgprint(__("Failed to fetch all rows: {0}", [err || "unknown error"]));
+	});
+}
+
 
 /**
  * Fill every child/item row with the parent's field values.
