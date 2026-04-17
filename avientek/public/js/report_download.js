@@ -18,24 +18,29 @@ window.setTimeout(function() {
 			var data = rv.data || [];
 			if (!data.length) { frappe.msgprint(__("No data to download")); return; }
 
-			// Build columns from the datatable's visible columns
-			// The datatable header has the labels, data keys match column IDs
+			// Build columns from the datatable's visible columns.
+			// The datatable header has the labels, data keys match column IDs.
+			// Track which keys belong to the PARENT doctype vs a child table so
+			// we can denormalize parent fields across every child row later.
 			var cols = rv.columns || [];
 			var headers = [];
 			var keys = [];
+			var parent_keys = [];  // keys that come from the parent doctype
 
 			if (cols.length) {
 				cols.forEach(function(c) {
 					var id = c.id || (c.df && c.df.fieldname) || "";
 					if (!id || id === "_checkbox" || id === "_liked_by" || id === "name:no_display") return;
 					var label = (c.df && c.df.label) || c.name || id;
+					var is_child_field = (c.docfield && c.docfield.parent && c.docfield.parent !== dt);
 					// Data key: for child fields it's "Child DocType:fieldname"
 					// For parent fields it's just "fieldname"
-					var key = (c.docfield && c.docfield.parent && c.docfield.parent !== dt)
+					var key = is_child_field
 						? c.docfield.parent + ":" + (c.df ? c.df.fieldname : id)
 						: (c.df ? c.df.fieldname : id);
 					headers.push(label);
 					keys.push(key);
+					if (!is_child_field) parent_keys.push(key);
 				});
 			}
 
@@ -45,10 +50,19 @@ window.setTimeout(function() {
 					if (k === "_comment_count" || k === "docstatus") return;
 					headers.push(k.replace(/.*:/, "")); // "Quotation Item:item_code" → "item_code"
 					keys.push(k);
+					// Keys without ":" are parent fields (ERPNext's RV convention)
+					if (k.indexOf(":") === -1) parent_keys.push(k);
 				});
 			}
 
 			if (!keys.length) { frappe.msgprint(__("No columns to export")); return; }
+
+			// Denormalize: Frappe Report View returns parent fields (ID, title,
+			// series, posting date, etc.) only on the first row of each parent
+			// group — subsequent child-item rows have those columns blank, so
+			// the exported CSV looks like the Purchase Order export Jithin
+			// flagged (rows 4-9 missing ID + Title). Fill forward per-parent.
+			_rd_denormalize_parent_fields(data, parent_keys);
 
 			// Ask file type
 			var d = new frappe.ui.Dialog({
@@ -90,6 +104,54 @@ window.setTimeout(function() {
 		$btn.css({"border": "1px solid #c0c6cc", "font-weight": "500"});
 	}
 }, 1000);
+
+/**
+ * Fill every child/item row with the parent's field values.
+ *
+ * Frappe's Report View groups rows by parent and returns parent fields
+ * only on the first row of each group. We walk the data in order, and
+ * whenever a row has a non-empty `name`, we remember it as the current
+ * parent and cache that row's parent-field values. Subsequent rows with
+ * a blank `name` inherit the current parent's name AND any blank
+ * parent-field values. First-seen non-blank values win, so parent field
+ * changes within a group don't clobber the original.
+ */
+function _rd_denormalize_parent_fields(data, parent_keys) {
+	if (!data || !data.length || !parent_keys || !parent_keys.length) return;
+	var current_name = null;
+	var parent_values_by_name = {};
+
+	data.forEach(function(r) {
+		var name = r["name"];
+		if (name) {
+			current_name = name;
+			if (!parent_values_by_name[name]) {
+				var cached = {};
+				parent_keys.forEach(function(k) {
+					if (r[k] != null && r[k] !== "") cached[k] = r[k];
+				});
+				parent_values_by_name[name] = cached;
+			} else {
+				// Top up any parent key we hadn't seen yet for this parent
+				parent_keys.forEach(function(k) {
+					if ((parent_values_by_name[name][k] == null || parent_values_by_name[name][k] === "") &&
+						r[k] != null && r[k] !== "") {
+						parent_values_by_name[name][k] = r[k];
+					}
+				});
+			}
+		} else if (current_name) {
+			r["name"] = current_name;
+		}
+		var pvals = parent_values_by_name[current_name] || {};
+		parent_keys.forEach(function(k) {
+			if ((r[k] == null || r[k] === "") && pvals[k] != null) {
+				r[k] = pvals[k];
+			}
+		});
+	});
+}
+
 
 function _rd_download_csv(rows, dt) {
 	var csv = rows.map(function(r) {
