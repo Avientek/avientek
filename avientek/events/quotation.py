@@ -312,6 +312,22 @@ def _to_flt(v) -> float:
     return flt(v)
 
 
+# Brand Summary columns margin / margin_percent / std_margin_percent are
+# decimal(21,9) → max ±999,999,999,999.999999999. Unbounded arithmetic on
+# very small denominators (e.g. effective_ts near 0) produces values that
+# blow past that range and raise MySQL 1264 "Out of range value" on save.
+_DEC_21_9_MAX = 999_999_999_999.0
+
+def _clamp_21_9(v) -> float:
+    """Clamp to the representable range of a decimal(21,9) column."""
+    n = flt(v)
+    if n > _DEC_21_9_MAX:
+        return _DEC_21_9_MAX
+    if n < -_DEC_21_9_MAX:
+        return -_DEC_21_9_MAX
+    return n
+
+
 # ──────────────────────────────────────────────────────────────
 # 1)  PER-ITEM CALCULATION  (server-side — single source of truth)
 #     Verified formula from client spreadsheet (ERP_Next.ods)
@@ -468,9 +484,9 @@ def rebuild_brand_summary(doc):
             "customs_":           flt(d["customs_percent"] / n, 4),
             "total_cost":         flt(tc, 4),
             "total_selling":      flt(effective_ts, 4),
-            "margin":             flt(effective_ts - tc, 4),
-            "margin_percent":     brand_margin_pct,
-            "std_margin_percent": flt(std_margin_percent, 2),
+            "margin":             _clamp_21_9(flt(effective_ts - tc, 4)),
+            "margin_percent":     _clamp_21_9(brand_margin_pct),
+            "std_margin_percent": _clamp_21_9(flt(std_margin_percent, 2)),
             "approval_status":    "",
         })
 
