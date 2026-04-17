@@ -222,6 +222,7 @@ fixtures = [
 app_include_js = [
     "/assets/avientek/js/workflow_confirm.js?v=5",
     "/assets/avientek/js/brand_access.js?v=11",
+    "/assets/avientek/js/item_defaults_filler.js?v=1",
 ]
 
 # include js, css files in header of web template
@@ -426,6 +427,7 @@ doc_events = {
         "validate": "avientek.events.customer.validate_alias",
     },
     "Purchase Order": {
+        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "before_update_after_submit": "avientek.events.purchase_order.po_validate",
         "validate": [
             "avientek.events.purchase_order.check_exchange_rate",
@@ -440,6 +442,7 @@ doc_events = {
         "validate": "avientek.events.item.validate_brand_pn",
     },
     "Sales Order": {
+        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
         "validate": [
             "avientek.events.sales_order.validate_customer_company",
@@ -453,6 +456,7 @@ doc_events = {
         "on_submit": "avientek.events.sales_order.set_sales_order_confirmation_date",
     },
     "Quotation": {
+        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "validate": "avientek.events.quotation.validate_item_tax_template",
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
@@ -460,6 +464,7 @@ doc_events = {
         ],
     },
     "Purchase Receipt": {
+        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "validate": [
             "avientek.events.purchase_receipt.validate_supplier_company",
             "avientek.events.purchase_receipt.validate_item_tax_template",
@@ -470,12 +475,14 @@ doc_events = {
         ],
     },
     "Purchase Invoice": {
+        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "validate": [
             "avientek.events.purchase_invoice.validate_supplier_company",
             "avientek.events.purchase_invoice.validate_item_tax_template",
         ],
     },
     "Sales Invoice": {
+        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "validate": [
             "avientek.events.sales_invoice.validate_item_tax_template",
             "avientek.events.sales_invoice.validate_customer_company",
@@ -484,6 +491,7 @@ doc_events = {
         "on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry",
     },
     "Delivery Note": {
+        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "validate": "avientek.events.delivery_note.validate_item_tax_template",
         "on_submit": "avientek.events.warranty.on_delivery_note_submit",
         "on_cancel": "avientek.events.warranty.on_delivery_note_cancel",
