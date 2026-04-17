@@ -31,8 +31,93 @@ from erpnext.controllers.accounts_controller import (
 # class PaymentRequestForm(Document):
 # 	def setUp(self):
 # 		create_workflow()
+
+
+# Fields protected against post-submit edits — only Finance Manager /
+# Finance Controller / System Manager may change them once the doc has
+# been submitted. Everyone else has to Cancel and Amend, so the change
+# is recorded in the audit trail.
+_PRF_LOCKED_FIELDS_AFTER_SUBMIT = (
+	# party block
+	"party_type", "party", "party_name",
+	"supplier_address", "address_display", "email", "telephone",
+	# issued bank block
+	"issued_bank", "account", "account_no",
+	# beneficiary bank block
+	"supplier_bank_account", "account_number", "iban", "bank",
+	"swift_code", "bank_letter",
+)
+_PRF_BANK_EDIT_ROLES = {"Finance Manager", "Finance Controller", "System Manager"}
+
+
 class PaymentRequestForm(Document):
-	pass
+	def validate(self):
+		self._guard_bank_edits_after_submit()
+
+	def _guard_bank_edits_after_submit(self):
+		if self.is_new() or self.docstatus != 1:
+			return
+		before = self.get_doc_before_save()
+		if not before or getattr(before, "docstatus", 0) != 1:
+			return  # first-time submit, not an update-after-submit
+		user_roles = set(frappe.get_roles(frappe.session.user))
+		if user_roles & _PRF_BANK_EDIT_ROLES:
+			return  # privileged — skip
+		changed = []
+		for fn in _PRF_LOCKED_FIELDS_AFTER_SUBMIT:
+			before_val = before.get(fn) or ""
+			after_val = self.get(fn) or ""
+			if before_val != after_val:
+				changed.append(fn)
+		if changed:
+			frappe.throw(
+				_("Only Finance Manager or Finance Controller can change {0} "
+				  "on a submitted Payment Request Form. "
+				  "Cancel and Amend the document to revise these fields.").format(
+					", ".join(changed)
+				)
+			)
+
+
+def _get_workflow_signers(doc):
+	"""For #10 — build a dict of workflow_state → {full_name, user, date}
+	by walking the Version history. Only the FIRST time each state was
+	entered counts (so a Reject → Revise → Authorise cycle keeps the
+	current Authorised signer, not the old cancelled one)."""
+	signers = {}
+	if not doc or not doc.get("name"):
+		return signers
+	try:
+		versions = frappe.get_all(
+			"Version",
+			filters={"ref_doctype": "Payment Request Form", "docname": doc.name},
+			fields=["owner", "data", "creation"],
+			order_by="creation asc",
+		)
+	except Exception:
+		return signers
+	for v in versions:
+		try:
+			payload = frappe.parse_json(v.data or "{}")
+		except Exception:
+			continue
+		for change in (payload.get("changed") or []):
+			if not isinstance(change, (list, tuple)) or len(change) < 3:
+				continue
+			if change[0] != "workflow_state":
+				continue
+			new_state = change[2]
+			if not new_state:
+				continue
+			# Keep the MOST RECENT entry per state so rejections/revisions
+			# don't show a stale signer
+			full_name = frappe.db.get_value("User", v.owner, "full_name") or v.owner
+			signers[new_state] = {
+				"user": v.owner,
+				"full_name": full_name,
+				"date": v.creation,
+			}
+	return signers
 def create_workflow():
 
 	if not frappe.db.exists("Workflow", "Payment Request Form"):
@@ -1508,12 +1593,20 @@ def get_payment_voucher_context(docname):
 
         row_attachments.append(row_data)
 
+    # Signers for the signature block in print (#10)
+    signers = _get_workflow_signers(doc)
+    prepared_by_name = (
+        frappe.db.get_value("User", doc.owner, "full_name") if doc.owner else ""
+    ) or (doc.owner or "")
+
     return {
         "company_currency": company_currency,
         "issued_bank_details": issued_bank_details,
         "receiving_bank_details": receiving_bank_details,
         "supplier_bank": supplier_bank,
         "supplier_swift": supplier_swift,
+        "signers": signers,
+        "prepared_by_name": prepared_by_name,
         "issued_bank_currency": doc.issued_currency or company_currency,
         "receiving_bank_currency": doc.receiving_currency or company_currency,
         "party_name": doc.party_name or doc.party or "",
