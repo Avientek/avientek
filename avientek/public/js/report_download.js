@@ -10,7 +10,7 @@
  */
 
 (function () {
-	var POLL_INTERVAL_MS = 800;
+	var POLL_INTERVAL_MS = 600;
 	var BUTTON_TEXT = "Report Download";
 
 	setInterval(ensure_button, POLL_INTERVAL_MS);
@@ -19,27 +19,33 @@
 		var route = (typeof frappe !== "undefined" && frappe.get_route && frappe.get_route()) || [];
 		if (!route || route.length < 3 || String(route[2]).toLowerCase() !== "report") return;
 		if (typeof cur_list === "undefined" || !cur_list || !cur_list.page) return;
-		if (!cur_list.page.$wrapper || !cur_list.page.$wrapper.length) return;
+		if (typeof cur_list.page.add_button !== "function") return;
 
-		// Dedupe by scanning the actual button text in the page's actions area.
-		// An earlier version tagged a custom class but Frappe's page.add_button
-		// sometimes swallowed extra classes, so the check missed and the poller
-		// kept adding copies.
-		var $page = cur_list.page.$wrapper;
-		var $actions = $page.find(".page-actions").first();
-		if (!$actions.length) $actions = $page;
+		// Dedupe by walking visible buttons near the page head. We use a
+		// wide selector because Frappe's page action container differs a
+		// little across versions (.page-actions / .standard-actions /
+		// page-head .btn-group). If we find ANY button that renders the
+		// exact text "Report Download" in the top area, skip — otherwise
+		// the poller would stack a new button on every tick.
 		var already = false;
-		$actions.find("button").each(function () {
+		$('.page-head button, .page-actions button, .standard-actions button').each(function () {
 			var txt = (this.textContent || "").trim();
 			if (txt === BUTTON_TEXT) { already = true; return false; }
 		});
 		if (already) return;
 
-		var $btn = cur_list.page.add_button(
-			__(BUTTON_TEXT),
-			function () { open_download_dialog(cur_list); },
-			{ btn_class: "btn-default btn-sm", icon: "download" }
-		);
+		var $btn;
+		try {
+			$btn = cur_list.page.add_button(
+				BUTTON_TEXT,
+				function () { open_download_dialog(cur_list); },
+				{ btn_class: "btn-default btn-sm", icon: "download" }
+			);
+		} catch (e) {
+			// Frappe add_button occasionally throws before the page is ready;
+			// the poller will retry on the next tick.
+			return;
+		}
 		if ($btn && $btn.length) {
 			$btn.attr("data-rpt-dl", "1");
 			$btn.css({ border: "1px solid #c0c6cc", "font-weight": "500" });
