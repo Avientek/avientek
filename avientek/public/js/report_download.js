@@ -10,31 +10,38 @@
  */
 
 (function () {
-	var POLL_INTERVAL_MS = 600;   // how often we re-check the page
-	var BUTTON_LABEL = __("Report Download");
+	var POLL_INTERVAL_MS = 800;
+	var BUTTON_TEXT = "Report Download";
 
-	// Keep trying every POLL_INTERVAL_MS. The button is idempotent — it won't
-	// double-add. This works across SPA navigation (List → Report → Dashboard →
-	// back to Report) because we don't rely on a single onload event that fires
-	// only once per page reload.
 	setInterval(ensure_button, POLL_INTERVAL_MS);
 
 	function ensure_button() {
 		var route = (typeof frappe !== "undefined" && frappe.get_route && frappe.get_route()) || [];
 		if (!route || route.length < 3 || String(route[2]).toLowerCase() !== "report") return;
 		if (typeof cur_list === "undefined" || !cur_list || !cur_list.page) return;
+		if (!cur_list.page.$wrapper || !cur_list.page.$wrapper.length) return;
 
-		// If the button already exists in this page's toolbar, nothing to do.
-		var $wrap = cur_list.page && cur_list.page.$wrapper;
-		if ($wrap && $wrap.find('.btn-rpt-dl').length) return;
+		// Dedupe by scanning the actual button text in the page's actions area.
+		// An earlier version tagged a custom class but Frappe's page.add_button
+		// sometimes swallowed extra classes, so the check missed and the poller
+		// kept adding copies.
+		var $page = cur_list.page.$wrapper;
+		var $actions = $page.find(".page-actions").first();
+		if (!$actions.length) $actions = $page;
+		var already = false;
+		$actions.find("button").each(function () {
+			var txt = (this.textContent || "").trim();
+			if (txt === BUTTON_TEXT) { already = true; return false; }
+		});
+		if (already) return;
 
 		var $btn = cur_list.page.add_button(
-			BUTTON_LABEL,
+			__(BUTTON_TEXT),
 			function () { open_download_dialog(cur_list); },
-			{ btn_class: "btn-default btn-sm btn-rpt-dl", icon: "download" }
+			{ btn_class: "btn-default btn-sm", icon: "download" }
 		);
 		if ($btn && $btn.length) {
-			$btn.addClass("btn-rpt-dl");
+			$btn.attr("data-rpt-dl", "1");
 			$btn.css({ border: "1px solid #c0c6cc", "font-weight": "500" });
 		}
 	}
