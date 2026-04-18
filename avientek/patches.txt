@@ -10,3 +10,4 @@ avientek.patches.create_payment_request_workflow
 avientek.patches.lock_quotation_probability_after_submit
 avientek.patches.add_payment_modes_tr_lc
 avientek.patches.ensure_prf_draft_state_roles
+avientek.patches.unlock_quotation_item_selling_price

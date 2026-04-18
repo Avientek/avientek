@@ -740,6 +740,62 @@ frappe.ui.form.on('Quotation Item', {
         }
     },
 
+    // Selling Price is now user-editable. When the user types a target
+    // selling amount, back-solve the markup % that reproduces it against
+    // the current COGS, then write both the markup and the margin fields
+    // so the server recalc (calc_item_totals) stays consistent on save.
+    //
+    // calculate_all_preview() writes custom_selling_price via direct row
+    // assignment, not set_value, so internal cascades don't retrigger this
+    // handler. Only actual user edits fire it.
+    custom_selling_price(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (!row) return;
+        let qty = flt(row.qty) || 1;
+        let cogs = flt(row.custom_cogs) || 0;
+        let selling_price = flt(row.custom_selling_price) || 0;
+        if (selling_price <= 0) return;
+
+        // Back-solve: markup on COGS such that cogs + markup = selling_price
+        let markup_value = selling_price - cogs;
+        let markup_percent = cogs > 0 ? (markup_value / cogs) * 100 : 0;
+
+        // Margin is on selling price
+        let margin_value = markup_value;
+        let margin_percent = selling_price > 0 ? (margin_value / selling_price) * 100 : 0;
+
+        let per_unit_selling = selling_price / qty;
+        let conversion_rate = flt(frm.doc.conversion_rate) || 1;
+
+        // Direct row assignment so we don't bounce back into this handler
+        row.custom_markup_value  = markup_value;
+        row.custom_markup_       = markup_percent;
+        row.custom_margin_value  = margin_value;
+        row.custom_margin_       = margin_percent;
+        row.custom_total_        = selling_price;
+        row.custom_special_rate  = per_unit_selling;
+
+        row.price_list_rate       = per_unit_selling;
+        row.base_price_list_rate  = flt(per_unit_selling * conversion_rate);
+        row.rate                  = per_unit_selling;
+        row.base_rate             = flt(per_unit_selling * conversion_rate);
+        row.net_rate              = per_unit_selling;
+        row.base_net_rate         = flt(per_unit_selling * conversion_rate);
+        row.amount                = selling_price;
+        row.base_amount           = flt(selling_price * conversion_rate);
+        row.net_amount            = selling_price;
+        row.base_net_amount       = flt(selling_price * conversion_rate);
+
+        frm.refresh_field("items");
+        update_doc_totals_preview(frm);
+        sync_shipment_margin_percent(frm, cdt, cdn);
+
+        if (row.parentfield === 'custom_service_items') {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+        }
+    },
+
     custom_customs_(frm, cdt, cdn) {
         calculate_all_preview(frm, cdt, cdn);
         update_doc_totals_preview(frm);
