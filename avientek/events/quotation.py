@@ -554,20 +554,25 @@ def recalc_doc_totals(doc):
 
     effective_selling = flt(ts - addl_discount, 4)
 
-    # Derive Total Margin from Brand Summary for consistency with per-brand values.
-    # Total Margin % = SUM of each brand's Margin (%) from Brand Summary table.
+    # Total Margin amount comes from the Brand Summary if it has rows
+    # (keeps it consistent with the per-brand values shown to the user),
+    # otherwise we compute from selling - cost. EITHER way, the margin
+    # PERCENT must be derived as (margin / effective_selling × 100).
+    # The previous version added each brand's margin_percent which is
+    # mathematically wrong — percents on different bases don't sum to a
+    # meaningful percent. For a quote with 7 brands at ~21% each it
+    # produced ~147% (customer reported 151.05% on QN-LLC-26-00316).
     bs_margin = 0
-    bs_margin_pct_sum = 0
+    has_brand_summary = False
     for bs_row in (doc.get("custom_quotation_brand_summary") or []):
         bs_margin += flt(bs_row.margin)
-        bs_margin_pct_sum += flt(bs_row.margin_percent)
+        has_brand_summary = True
 
-    if bs_margin_pct_sum:
+    if has_brand_summary:
         margin = flt(bs_margin, 4)
-        margin_pct = flt(bs_margin_pct_sum, 4)
     else:
         margin = flt(effective_selling - tc, 4)
-        margin_pct = flt(margin / effective_selling * 100, 4) if effective_selling else 0
+    margin_pct = flt(margin / effective_selling * 100, 4) if effective_selling else 0
 
     doc.custom_total_shipping_new       = flt(totals["shipping"], 4)
     doc.custom_total_finance_new        = flt(totals["finance"], 4)
