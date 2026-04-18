@@ -559,7 +559,8 @@ frappe.ui.form.on('Quotation', {
             "custom_cogs",
             "custom_total_",
             "custom_customs_value",
-            "custom_selling_price",
+            // custom_selling_price is now user-editable — see the
+            // custom_selling_price handler which back-solves markup %.
             "custom_margin_",
             "custom_margin_value",
             "custom_special_rate",
