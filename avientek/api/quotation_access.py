@@ -774,9 +774,16 @@ def _user_has_visibility_bypass(user):
 def _get_user_sales_person_subtree(user):
 	"""Return the set of Sales Person names the user can 'own' — their own
 	Sales Person records plus every descendant via parent_sales_person.
-	Empty set if the user has no linked Sales Person."""
+	Empty set if the user has no linked Sales Person.
+
+	Sales Person links to User via Employee.user_id (no direct `user` column),
+	so the root lookup joins tabSales Person → tabEmployee → user_id.
+	"""
 	roots = frappe.db.sql(
-		"SELECT name FROM `tabSales Person` WHERE `user`=%s AND `enabled`=1",
+		"""SELECT sp.name
+		   FROM `tabSales Person` sp
+		   INNER JOIN `tabEmployee` e ON sp.employee = e.name
+		   WHERE e.user_id = %s AND IFNULL(sp.enabled, 1) = 1""",
 		user, pluck="name",
 	) or []
 	if not roots:
