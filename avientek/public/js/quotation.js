@@ -559,11 +559,12 @@ frappe.ui.form.on('Quotation', {
             "custom_cogs",
             "custom_total_",
             "custom_customs_value",
-            // custom_selling_price is now user-editable — see the
-            // custom_selling_price handler which back-solves markup %.
+            "custom_selling_price",
             "custom_margin_",
             "custom_margin_value",
-            "custom_special_rate",
+            // custom_special_rate (label "Selling Price", per-unit) is now
+            // user-editable — see the handler below which back-solves the
+            // markup % so every derived field cascades correctly.
             "custom_discount_amount_value",  // controlled at parent level
             "custom_discount_amount_qty",    // controlled at parent level
         ];
@@ -741,23 +742,29 @@ frappe.ui.form.on('Quotation Item', {
         }
     },
 
-    // Selling Price is now user-editable. When the user types a target
-    // selling amount, back-solve the markup % that reproduces it against
-    // the current COGS, then write both the markup and the margin fields
-    // so the server recalc (calc_item_totals) stays consistent on save.
+    // "Selling Price" (custom_special_rate, label "Selling Price") is the
+    // PER-UNIT rate. When the user types a new per-unit price, we compute
+    // the new line total (rate * qty), then back-solve the markup % that
+    // reproduces it against the current COGS. Every derived field cascades:
+    // Markup %, Markup Value, Margin %, Margin Value, Selling Amount, line
+    // Total, and the standard ERPNext rate / amount / net_* pairs so taxes
+    // + parent totals recompute. The same markup % is written so the server
+    // calc_item_totals reproduces the same number on save.
     //
-    // calculate_all_preview() writes custom_selling_price via direct row
-    // assignment, not set_value, so internal cascades don't retrigger this
-    // handler. Only actual user edits fire it.
-    custom_selling_price(frm, cdt, cdn) {
+    // calculate_all_preview() writes custom_special_rate via direct row
+    // assignment (not set_value), so internal cascades don't retrigger this
+    // handler — only actual user edits fire it.
+    custom_special_rate(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
         if (!row) return;
         let qty = flt(row.qty) || 1;
         let cogs = flt(row.custom_cogs) || 0;
-        let selling_price = flt(row.custom_selling_price) || 0;
-        if (selling_price <= 0) return;
+        let per_unit_selling = flt(row.custom_special_rate) || 0;
+        if (per_unit_selling <= 0) return;
 
-        // Back-solve: markup on COGS such that cogs + markup = selling_price
+        let selling_price = per_unit_selling * qty;
+
+        // Back-solve: markup on COGS such that cogs + markup == selling_price
         let markup_value = selling_price - cogs;
         let markup_percent = cogs > 0 ? (markup_value / cogs) * 100 : 0;
 
@@ -765,7 +772,6 @@ frappe.ui.form.on('Quotation Item', {
         let margin_value = markup_value;
         let margin_percent = selling_price > 0 ? (margin_value / selling_price) * 100 : 0;
 
-        let per_unit_selling = selling_price / qty;
         let conversion_rate = flt(frm.doc.conversion_rate) || 1;
 
         // Direct row assignment so we don't bounce back into this handler
@@ -774,7 +780,7 @@ frappe.ui.form.on('Quotation Item', {
         row.custom_margin_value  = margin_value;
         row.custom_margin_       = margin_percent;
         row.custom_total_        = selling_price;
-        row.custom_special_rate  = per_unit_selling;
+        row.custom_selling_price = selling_price;
 
         row.price_list_rate       = per_unit_selling;
         row.base_price_list_rate  = flt(per_unit_selling * conversion_rate);
