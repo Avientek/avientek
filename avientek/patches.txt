@@ -14,3 +14,4 @@ avientek.patches.unlock_quotation_item_selling_price
 avientek.patches.fix_quotation_item_selling_price_editable_v2
 avientek.patches.backfill_sales_invoice_custom_sales_person
 avientek.patches.backfill_quotation_total_margin_percent
+avientek.patches.ensure_sales_user_sales_invoice_perm
