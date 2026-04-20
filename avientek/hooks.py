@@ -487,7 +487,10 @@ doc_events = {
             "avientek.events.sales_invoice.validate_item_tax_template",
             "avientek.events.sales_invoice.validate_customer_company",
         ],
-        "before_save": "avientek.events.sales_invoice.set_vat_emirate",
+        "before_save": [
+            "avientek.events.sales_invoice.set_vat_emirate",
+            "avientek.events.sales_invoice.sync_custom_sales_person",
+        ],
         "on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry",
     },
     "Delivery Note": {

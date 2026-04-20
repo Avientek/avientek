@@ -38,6 +38,36 @@ def set_vat_emirate(doc, method=None):
             doc.db_set("vat_emirate", emirate)
 
 
+def sync_custom_sales_person(doc, method=None):
+    """Mirror the first sales_team row's sales_person onto the parent
+    custom_sales_person field.
+
+    Why: Sales Invoice has a custom parent-level Link field
+    `custom_sales_person` (label "Sales Person") that users use in the
+    list/report filter. The field wasn't being auto-populated, so
+    ~10,700 existing SIs had it blank and filtering by "Sales Person =
+    MIDHUN" returned just the handful where someone had set it manually
+    — even though MIDHUN was actually allocated on 1,000+ invoices via
+    the Sales Team child. This helper syncs the parent field on every
+    save so the UI filter matches user expectations going forward.
+
+    Only touches the value when it's genuinely out of sync — respects
+    a manual override where sales_team is empty."""
+    if not doc.get("sales_team"):
+        return
+    primary = None
+    for row in doc.sales_team:
+        sp = getattr(row, "sales_person", None)
+        if not sp:
+            continue
+        primary = sp
+        break
+    if not primary:
+        return
+    if (doc.get("custom_sales_person") or "") != primary:
+        doc.custom_sales_person = primary
+
+
 # ── Server Script: "Sales Invoice" (DISABLED) ──
 # DocType Event: Sales Invoice, Before Validate
 # NOTE: This script was disabled in the site.
