@@ -90,15 +90,19 @@ def validate_customer_company(doc, method=None):
 # ── Server Script: "SO - Item Tax Template" ──
 # DocType Event: Sales Order, Before Save
 def validate_item_tax_template(doc, method=None):
-    """Require Item Tax Template for items when company is Avientek India and not Overseas."""
+    """Auto-fill Item Tax Template from the Item's configured taxes, then
+    hard-require it for Avientek Electronics Trading PVT. LTD (non-Overseas).
+
+    The old version only threw an error if the field was blank — but most
+    items have 6+ valid templates configured on the Item master already.
+    Now we try to auto-pick the right one (matching the company
+    abbreviation, e.g. 'GST 18% - AETPL' for AETPL) and only throw when
+    the Item genuinely has no tax template to pick from."""
+    from avientek.events.utils import autofill_item_tax_template
+    required = None
     if doc.company == "Avientek Electronics Trading PVT. LTD" and doc.tax_category != "Overseas":
-        for item in doc.items:
-            if not item.item_tax_template:
-                frappe.throw(
-                    _("Kindly choose Item Tax template for item: {0} in Row# {1}").format(
-                        item.item_code, item.idx
-                    )
-                )
+        required = "Avientek Electronics Trading PVT. LTD"
+    autofill_item_tax_template(doc, required_company=required)
 
 
 # ── Server Script: "Validate exchange rate v2" ──

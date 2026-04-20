@@ -7,15 +7,12 @@ from frappe.model.mapper import get_mapped_doc
 # ── Server Script: "SI - Item Tax Template" ──
 # DocType Event: Sales Invoice, Before Validate
 def validate_item_tax_template(doc, method=None):
-    """Require Item Tax Template for all items when company is Avientek Electronics Trading PVT. LTD."""
-    if doc.company == "Avientek Electronics Trading PVT. LTD":
-        for item in doc.items:
-            if not item.item_tax_template:
-                frappe.throw(
-                    _("Kindly choose Item Tax template for item: {0} in Row# {1}").format(
-                        item.item_code, item.idx
-                    )
-                )
+    """Auto-fill Item Tax Template from Item master, then hard-require
+    it for Avientek Electronics Trading PVT. LTD. See
+    avientek.events.utils.autofill_item_tax_template."""
+    from avientek.events.utils import autofill_item_tax_template
+    required = "Avientek Electronics Trading PVT. LTD" if doc.company == "Avientek Electronics Trading PVT. LTD" else None
+    autofill_item_tax_template(doc, required_company=required)
 
 
 # ── Server Script: "SI validate customer company" ──

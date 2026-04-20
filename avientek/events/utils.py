@@ -46,6 +46,80 @@ def fill_missing_item_defaults(doc, method=None):
             it.conversion_factor = 1
 
 
+def autofill_item_tax_template(doc, required_company=None):
+    """Try to auto-populate `item_tax_template` on every items row that
+    has it blank, picking from the Item's own Item Tax child table.
+
+    Preference order per item:
+      1. A tax_template whose name suffix matches the Company abbreviation
+         (e.g. "GST 18% - AETPL" for Avientek Electronics Trading PVT. LTD)
+      2. First entry in the Item's taxes child table
+      3. Leave blank
+
+    If `required_company` is supplied and matches doc.company, any row
+    still blank after auto-fill will raise frappe.throw — replicating the
+    old behaviour but only when we truly couldn't resolve a template.
+    Other companies skip the hard check.
+
+    Called from validate_item_tax_template on Quotation, SO, SI, DN, PI,
+    PR, PO. Fires BEFORE the legacy throw so Finance's repeated
+    "Kindly choose Item Tax template for item X" errors on items that
+    already have configured taxes simply stop appearing.
+    """
+    if not getattr(doc, "items", None):
+        return
+
+    abbr = ""
+    if doc.get("company"):
+        abbr = frappe.db.get_value("Company", doc.company, "abbr") or ""
+
+    rows_to_fill = [it for it in doc.items if not getattr(it, "item_tax_template", None)]
+    if not rows_to_fill:
+        return
+
+    codes = list({it.item_code for it in rows_to_fill if getattr(it, "item_code", None)})
+    if not codes:
+        return
+
+    tax_rows = frappe.get_all(
+        "Item Tax",
+        filters={"parent": ["in", codes], "parenttype": "Item"},
+        fields=["parent", "item_tax_template", "idx"],
+        order_by="parent asc, idx asc",
+    )
+    tax_by_item = {}
+    for tr in tax_rows:
+        tax_by_item.setdefault(tr["parent"], []).append(tr["item_tax_template"])
+
+    for it in rows_to_fill:
+        candidates = tax_by_item.get(it.item_code) or []
+        if not candidates:
+            continue
+        picked = None
+        if abbr:
+            for t in candidates:
+                if not t:
+                    continue
+                if t.endswith(f" - {abbr}") or t.endswith(f"-{abbr}"):
+                    picked = t
+                    break
+        if not picked:
+            picked = candidates[0]
+        if picked:
+            it.item_tax_template = picked
+
+    # Hard gate, only for the company that used to throw.
+    if required_company and doc.get("company") == required_company:
+        missing = [it for it in doc.items if not getattr(it, "item_tax_template", None)]
+        if missing:
+            row = missing[0]
+            frappe.throw(
+                frappe._("Kindly choose Item Tax template for item: {0} in Row# {1}").format(
+                    row.item_code, row.idx
+                )
+            )
+
+
 # @frappe.whitelist()
 # def get_previous_doc_rate_and_currency(doctype, child):
 # 	po_details = []
