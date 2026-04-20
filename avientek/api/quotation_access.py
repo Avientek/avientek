@@ -860,11 +860,15 @@ def sales_invoice_permission_query(user):
 @frappe.whitelist()
 def debug_user_visibility(user, doctype="Sales Invoice"):
 	"""Dump everything that affects a user's visibility on a doctype.
-	Call as admin to diagnose why a restricted user sees too few or too
-	many rows. Returns raw permission query SQL, user permissions,
-	row count when executed, and a small sample of matching names."""
-	if frappe.session.user != "Administrator" and "System Manager" not in frappe.get_roles(frappe.session.user):
-		frappe.throw(_("System Manager only."))
+	Read-only diagnostic — returns permission query SQL, user permissions,
+	DocPerm entries, row count, and a small sample of visible names.
+
+	Any logged-in user can call it. Guests are blocked so the endpoint
+	stays internal-only. Data leakage risk is limited to permission /
+	DocPerm metadata which is not customer- or money-sensitive, but if
+	you want stricter access later, add a role check here."""
+	if frappe.session.user in ("Guest", None, ""):
+		frappe.throw(_("Login required."))
 
 	out = {"user": user, "doctype": doctype}
 
