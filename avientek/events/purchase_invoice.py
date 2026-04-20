@@ -108,10 +108,13 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "exchange_rate": exchange_rate,
         })
 
-        # Set totals
+        # Set totals — PaymentRequestReference has no `total_amount` field,
+        # that was the "PaymentRequestReference object has no attribute
+        # 'total_amount'" server error on Create-from-PI. Summing grand_total
+        # is the intended value.
         target.total_outstanding_amount = sum((row.outstanding_amount or 0) for row in target.payment_references)
         target.total_payment_amount = sum((row.payment_amount or 0) for row in target.payment_references)
-        target.total_amount = sum((row.total_amount or 0) for row in target.payment_references)
+        target.total_amount = sum((row.grand_total or 0) for row in target.payment_references)
 
     target_doc = get_mapped_doc(
         "Purchase Invoice",
