@@ -858,6 +858,51 @@ def sales_invoice_permission_query(user):
 
 
 @frappe.whitelist()
+def ensure_sales_user_si_perm():
+	"""One-shot on-demand fix for the missing 'Sales User' DocPerm on
+	Sales Invoice. Same logic as the migrate-time patch — idempotent.
+	System Manager only, since it grants permissions."""
+	if frappe.session.user != "Administrator" and "System Manager" not in frappe.get_roles(frappe.session.user):
+		frappe.throw(_("System Manager only."))
+
+	_ROLE = "Sales User"
+	_DT = "Sales Invoice"
+
+	if not frappe.db.exists("Role", _ROLE):
+		return {"status": "skipped", "reason": f"Role {_ROLE!r} missing"}
+
+	existing = frappe.db.sql(
+		"""SELECT name FROM `tabCustom DocPerm`
+		   WHERE parent=%s AND role=%s AND permlevel=0 AND IFNULL(if_owner,0)=0""",
+		(_DT, _ROLE), pluck="name",
+	)
+	fields = {
+		"read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 1,
+		"print": 1, "email": 1, "report": 1, "share": 1,
+	}
+	if existing:
+		for name in existing:
+			frappe.db.set_value("Custom DocPerm", name, fields, update_modified=False)
+		action = f"updated {len(existing)} existing Custom DocPerm"
+	else:
+		doc = frappe.new_doc("Custom DocPerm")
+		doc.parent = _DT
+		doc.parenttype = "DocType"
+		doc.parentfield = "permissions"
+		doc.role = _ROLE
+		doc.permlevel = 0
+		doc.if_owner = 0
+		for k, v in fields.items():
+			doc.set(k, v)
+		doc.insert(ignore_permissions=True)
+		action = f"created Custom DocPerm: {doc.name}"
+
+	frappe.db.commit()
+	frappe.clear_cache(doctype=_DT)
+	return {"status": "ok", "action": action, "role": _ROLE, "doctype": _DT}
+
+
+@frappe.whitelist()
 def debug_user_visibility(user, doctype="Sales Invoice"):
 	"""Dump everything that affects a user's visibility on a doctype.
 	Read-only diagnostic — returns permission query SQL, user permissions,
