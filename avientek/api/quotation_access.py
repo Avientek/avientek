@@ -908,6 +908,26 @@ def debug_user_visibility(user, doctype="Sales Invoice"):
 	out["visible_row_count"] = cnt
 	out["sample_names"] = sample
 
+	# Per-role DocPerm inspection (std + custom). Reveals `if_owner=1`
+	# which narrows the visible set to docs the user CREATED — often the
+	# hidden cause of "I see far fewer rows than the permission query".
+	perms_out = []
+	for role in out.get("roles") or []:
+		std = frappe.db.sql(
+			"""SELECT 'standard' AS src, role, permlevel, if_owner, `read`, `write`, `create`
+			   FROM `tabDocPerm` WHERE parent=%s AND role=%s""",
+			(doctype, role), as_dict=True,
+		)
+		cust = frappe.db.sql(
+			"""SELECT 'custom' AS src, role, permlevel, if_owner, `read`, `write`, `create`
+			   FROM `tabCustom DocPerm` WHERE parent=%s AND role=%s""",
+			(doctype, role), as_dict=True,
+		)
+		for p in std + cust:
+			perms_out.append(p)
+	out["docperm_entries"] = perms_out
+	out["docperms_with_if_owner"] = [p for p in perms_out if p.get("if_owner")]
+
 	return out
 
 def delivery_note_permission_query(user):
