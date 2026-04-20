@@ -1498,11 +1498,15 @@ def get_payment_voucher_context(docname):
             ["bank", "bank_account_no", "iban"], as_dict=True
         ) or {}
 
-    # Supplier/party bank details — Issue 13: show for Supplier, Employee, Customer
+    # Supplier/party bank details — show for Supplier, Employee, Customer.
+    # Cascaded fallback: explicit selection -> default Bank Account -> any
+    # Bank Account -> (for Employee) the bank fields on the Employee doc
+    # itself. The last fallback is new — on this site Employees have no
+    # Bank Account records and their bank details live on Employee.bank_*,
+    # so the print was showing blank for all Employee payments.
     supplier_bank = {}
     supplier_swift = ""
     if doc.payment_type != "Internal Transfer" and doc.party and doc.party_type:
-        # 1. Prefer the bank account explicitly selected on the PRF
         if doc.get("supplier_bank_account"):
             supplier_bank = frappe.db.get_value(
                 "Bank Account",
@@ -1510,7 +1514,6 @@ def get_payment_voucher_context(docname):
                 ["name", "bank", "bank_account_no", "iban", "branch_code"],
                 as_dict=True,
             ) or {}
-        # 2. Default bank account for this party
         if not supplier_bank:
             supplier_bank = frappe.db.get_value(
                 "Bank Account",
@@ -1518,7 +1521,6 @@ def get_payment_voucher_context(docname):
                 ["name", "bank", "bank_account_no", "iban", "branch_code"],
                 as_dict=True,
             ) or {}
-        # 3. Any bank account for this party (fallback for Employees without default)
         if not supplier_bank:
             supplier_bank = frappe.db.get_value(
                 "Bank Account",
@@ -1526,8 +1528,33 @@ def get_payment_voucher_context(docname):
                 ["name", "bank", "bank_account_no", "iban", "branch_code"],
                 as_dict=True,
             ) or {}
+        # Employee bank fields fallback (bank_name / bank_ac_no / iban on
+        # the Employee doc itself — used in HR setups that don't create
+        # per-employee Bank Account records)
+        if not supplier_bank and doc.party_type == "Employee":
+            emp = frappe.db.get_value(
+                "Employee", doc.party,
+                ["bank_name", "bank_ac_no", "iban"],
+                as_dict=True,
+            ) or {}
+            if emp.get("bank_name") or emp.get("bank_ac_no") or emp.get("iban"):
+                supplier_bank = {
+                    "name": "",
+                    "bank": emp.get("bank_name") or "",
+                    "bank_account_no": emp.get("bank_ac_no") or "",
+                    "iban": emp.get("iban") or "",
+                    "branch_code": "",
+                }
+
         if supplier_bank and supplier_bank.get("bank"):
-            supplier_swift = frappe.db.get_value("Bank", supplier_bank["bank"], "swift_number") or ""
+            supplier_swift = (
+                frappe.db.get_value("Bank", supplier_bank["bank"], "swift_number") or ""
+            )
+        # SWIFT final fallback — some sites put the SWIFT code in
+        # Bank Account.branch_code. If Bank.swift_number wasn't populated
+        # but branch_code is, use that so the print isn't blank.
+        if not supplier_swift and supplier_bank and supplier_bank.get("branch_code"):
+            supplier_swift = supplier_bank.get("branch_code") or ""
 
     # Pre-compute currency totals and base total from payment references
     currency_totals = {}
