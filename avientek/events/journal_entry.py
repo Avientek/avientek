@@ -29,11 +29,12 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "currency": frappe.db.get_value("Company", source.company, "default_currency"),
             "exchange_rate": 1,
         })
-        # PaymentRequestReference has no `total_amount` field — the old
-        # `row.total_amount` access was throwing the server error on
-        # Create-from-JE. Sum grand_total instead.
+        # PaymentRequestReference has neither `total_amount` nor
+        # `payment_amount` fields — both previously tripped the mapper
+        # with "object has no attribute" server errors. Use only fields
+        # the child row actually has (grand_total, outstanding_amount).
         target.total_outstanding_amount = sum((row.outstanding_amount or 0) for row in target.payment_references)
-        target.total_payment_amount = sum((row.payment_amount or 0) for row in target.payment_references)
+        target.total_payment_amount = 0
         target.total_amount = sum((row.grand_total or 0) for row in target.payment_references)
     target_doc = get_mapped_doc(
         "Journal Entry",

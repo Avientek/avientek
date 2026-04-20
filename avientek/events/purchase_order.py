@@ -407,23 +407,14 @@ def create_notification(ref_doctype,ref_name,item):
 @frappe.whitelist()
 def create_payment_request(source_name, target_doc=None, args=None):
     def set_single_reference(source, target):
-        attachment_html = ""
+        # Attachment PDF used to be saved here via save_file with
+        # dt=target.doctype, dn=target.name — but `target.name` is blank
+        # during the mapping postprocess (new doc not saved yet), so
+        # Frappe raised "Attached To Name must be a string or an
+        # integer" and the Create action failed. The attachment_html it
+        # assembled was never used on the target either. Removed.
 
-        # 1. Generate and attach Purchase Order PDF
-        try:
-            po_pdf_data = get_pdf(frappe.get_print("Purchase Order", source.name, "Standard"))
-            po_file = save_file(
-                fname=f"{source.name}-Print.pdf",
-                content=po_pdf_data,
-                dt=target.doctype,
-                dn=target.name,
-                is_private=1
-            )
-            attachment_html += f'<a href="{po_file.file_url}" target="_blank">Purchase Order PDF</a><br>'
-        except Exception as e:
-            frappe.log_error(frappe.get_traceback(), "Failed to generate PO PDF")
-
-        # 2. Get related Sales Order from first item
+        # Get related Sales Order from first item
         sales_order = source.items[0].sales_order if source.items else ""
 
         # 3. Append to payment references
