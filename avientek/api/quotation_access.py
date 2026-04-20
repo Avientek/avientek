@@ -856,6 +856,60 @@ def sales_order_permission_query(user):
 def sales_invoice_permission_query(user):
 	return _combined_permission_query(user, "Sales Invoice", "Sales Invoice Item")
 
+
+@frappe.whitelist()
+def debug_user_visibility(user, doctype="Sales Invoice"):
+	"""Dump everything that affects a user's visibility on a doctype.
+	Call as admin to diagnose why a restricted user sees too few or too
+	many rows. Returns raw permission query SQL, user permissions,
+	row count when executed, and a small sample of matching names."""
+	if frappe.session.user != "Administrator" and "System Manager" not in frappe.get_roles(frappe.session.user):
+		frappe.throw(_("System Manager only."))
+
+	out = {"user": user, "doctype": doctype}
+
+	# Raw user permissions
+	out["user_permissions"] = frappe.db.sql(
+		"SELECT allow, for_value, applicable_for, apply_to_all_doctypes "
+		"FROM `tabUser Permission` WHERE user=%s",
+		user, as_dict=True,
+	)
+
+	# Roles
+	out["roles"] = frappe.get_roles(user)
+
+	# What our permission-query function returns
+	try:
+		if doctype == "Sales Invoice":
+			cond = sales_invoice_permission_query(user)
+		elif doctype == "Sales Order":
+			cond = sales_order_permission_query(user)
+		elif doctype == "Delivery Note":
+			cond = delivery_note_permission_query(user)
+		elif doctype == "Quotation":
+			cond = quotation_permission_query(user)
+		else:
+			cond = _combined_permission_query(user, doctype, doctype + " Item")
+		out["permission_query_sql"] = cond or "(empty — no restriction)"
+	except Exception as e:
+		out["permission_query_error"] = str(e)
+		cond = None
+
+	# Count rows that pass the permission query AS-IS (simulating list load)
+	if cond:
+		cnt = frappe.db.sql(f"SELECT COUNT(*) FROM `tab{doctype}` WHERE {cond}")[0][0]
+		sample = frappe.db.sql(
+			f"SELECT name FROM `tab{doctype}` WHERE {cond} ORDER BY modified DESC LIMIT 5",
+			pluck="name",
+		)
+	else:
+		cnt = frappe.db.count(doctype)
+		sample = frappe.db.get_all(doctype, fields=["name"], limit=5, pluck="name")
+	out["visible_row_count"] = cnt
+	out["sample_names"] = sample
+
+	return out
+
 def delivery_note_permission_query(user):
 	return _combined_permission_query(user, "Delivery Note", "Delivery Note Item")
 
