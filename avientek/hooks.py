@@ -442,7 +442,10 @@ doc_events = {
         "validate": "avientek.events.item.validate_brand_pn",
     },
     "Sales Order": {
-        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
+        "before_validate": [
+            "avientek.events.utils.fill_missing_item_defaults",
+            "avientek.events.utils.normalize_gst_treatment_from_template",
+        ],
         "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
         "validate": [
             "avientek.events.sales_order.validate_customer_company",
@@ -456,7 +459,10 @@ doc_events = {
         "on_submit": "avientek.events.sales_order.set_sales_order_confirmation_date",
     },
     "Quotation": {
-        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
+        "before_validate": [
+            "avientek.events.utils.fill_missing_item_defaults",
+            "avientek.events.utils.normalize_gst_treatment_from_template",
+        ],
         "validate": "avientek.events.quotation.validate_item_tax_template",
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
@@ -482,7 +488,10 @@ doc_events = {
         ],
     },
     "Sales Invoice": {
-        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
+        "before_validate": [
+            "avientek.events.utils.fill_missing_item_defaults",
+            "avientek.events.utils.normalize_gst_treatment_from_template",
+        ],
         "validate": [
             "avientek.events.sales_invoice.validate_item_tax_template",
             "avientek.events.sales_invoice.validate_customer_company",
@@ -494,7 +503,10 @@ doc_events = {
         "on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry",
     },
     "Delivery Note": {
-        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
+        "before_validate": [
+            "avientek.events.utils.fill_missing_item_defaults",
+            "avientek.events.utils.normalize_gst_treatment_from_template",
+        ],
         "validate": "avientek.events.delivery_note.validate_item_tax_template",
         "on_submit": "avientek.events.warranty.on_delivery_note_submit",
         "on_cancel": "avientek.events.warranty.on_delivery_note_cancel",

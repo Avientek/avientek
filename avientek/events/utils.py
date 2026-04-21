@@ -120,6 +120,54 @@ def autofill_item_tax_template(doc, required_company=None):
             )
 
 
+def normalize_gst_treatment_from_template(doc, method=None):
+    """Pull `gst_treatment` onto each item row from its Item Tax Template
+    before india_compliance's validate_transaction runs.
+
+    Problem: india_compliance blocks saves that mix `gst_treatment == "Non-GST"`
+    rows with GST rows. On a fresh Quotation, `gst_treatment` is a
+    `fetch_from: item_tax_template.gst_treatment` field, but the fetch
+    isn't guaranteed to have fired on the row yet when validate runs —
+    so rows come in blank / stale and the validator flags them as Non-GST.
+
+    Fix: for every row that has an `item_tax_template` set, read the
+    template's `gst_treatment` and apply it to the row. Rows that
+    genuinely point to a Non-GST template keep "Non-GST" (so the
+    compliance rule is still enforced when the data is actually wrong).
+    """
+    if not getattr(doc, "items", None):
+        return
+
+    templates = {row.item_tax_template for row in doc.items if getattr(row, "item_tax_template", None)}
+    if not templates:
+        return
+
+    tpl_map = frappe._dict(
+        frappe.get_all(
+            "Item Tax Template",
+            filters={"name": ("in", list(templates))},
+            fields=["name", "gst_treatment"],
+            as_list=True,
+        )
+    )
+    if not tpl_map:
+        return
+
+    for row in doc.items:
+        tpl = getattr(row, "item_tax_template", None)
+        if not tpl:
+            continue
+        tpl_treatment = tpl_map.get(tpl)
+        if not tpl_treatment:
+            continue
+        # Only overwrite when the current value is blank OR stale (points
+        # to a different value than the template now carries). Don't touch
+        # rows the user deliberately set to a different treatment.
+        current = getattr(row, "gst_treatment", None)
+        if not current or current != tpl_treatment:
+            row.gst_treatment = tpl_treatment
+
+
 # @frappe.whitelist()
 # def get_previous_doc_rate_and_currency(doctype, child):
 # 	po_details = []

@@ -1959,6 +1959,154 @@ def export_report_as_excel(data, doctype):
 
 
 @frappe.whitelist()
+def check_items_gst_status(item_codes=None, quotation=None):
+	"""Diagnose GST treatment for a set of items so we can pinpoint which
+	Item masters are causing india_compliance's "Items not covered under
+	GST cannot be clubbed..." error.
+
+	Pass either `item_codes` (comma-separated string or JSON list) or a
+	`quotation` name — we'll pull the items off the draft/saved quote.
+
+	For each item, returns:
+	  - gst_hsn_code
+	  - is_nil_rated / is_non_gst flags (from Item master)
+	  - Item Tax Templates linked on the Item + each template's gst_treatment
+	  - the effective `gst_treatment` (derived the same way India Compliance does)
+	  - a human-readable `diagnosis` explaining why (or why not) the row
+	    will trip the validator.
+	"""
+	import json as _json
+
+	codes = []
+	if quotation:
+		# Saved Quotation — read items from DB
+		codes = [r.item_code for r in frappe.get_all(
+			"Quotation Item",
+			filters={"parent": quotation},
+			fields=["item_code"],
+			order_by="idx asc",
+		) if r.item_code]
+	elif item_codes:
+		if isinstance(item_codes, str):
+			try:
+				parsed = _json.loads(item_codes)
+				codes = parsed if isinstance(parsed, list) else [item_codes]
+			except Exception:
+				codes = [c.strip() for c in item_codes.split(",") if c.strip()]
+		elif isinstance(item_codes, list):
+			codes = item_codes
+
+	codes = list({c for c in codes if c})
+	if not codes:
+		return {"error": "Provide item_codes or quotation"}
+
+	# Fetch master data
+	items_meta = frappe.get_all(
+		"Item",
+		filters={"name": ("in", codes)},
+		fields=["name", "item_name", "gst_hsn_code", "is_nil_rated", "is_non_gst"],
+	)
+	items_map = {i["name"]: i for i in items_meta}
+
+	tax_rows = frappe.get_all(
+		"Item Tax",
+		filters={"parent": ("in", codes), "parenttype": "Item"},
+		fields=["parent", "item_tax_template", "idx"],
+		order_by="parent asc, idx asc",
+	)
+	templates_by_item = {}
+	for tr in tax_rows:
+		templates_by_item.setdefault(tr["parent"], []).append(tr["item_tax_template"])
+
+	all_templates = {tr["item_tax_template"] for tr in tax_rows if tr["item_tax_template"]}
+	tpl_treatment = frappe._dict()
+	if all_templates:
+		tpl_treatment = frappe._dict(
+			frappe.get_all(
+				"Item Tax Template",
+				filters={"name": ("in", list(all_templates))},
+				fields=["name", "gst_treatment"],
+				as_list=True,
+			)
+		)
+
+	results = []
+	for code in codes:
+		item = items_map.get(code)
+		if not item:
+			results.append({
+				"item_code": code,
+				"diagnosis": "Item master not found",
+				"gst_treatment_effective": "Unknown",
+			})
+			continue
+
+		templates = templates_by_item.get(code, [])
+		tpl_details = [
+			{"template": t, "gst_treatment": tpl_treatment.get(t) or "(blank)"}
+			for t in templates
+		]
+
+		# Determine effective treatment the same way india_compliance does
+		effective = None
+		if item.get("is_non_gst"):
+			effective = "Non-GST"
+		elif item.get("is_nil_rated"):
+			effective = "Nil-Rated"
+		elif templates and tpl_treatment.get(templates[0]):
+			effective = tpl_treatment.get(templates[0])
+		elif item.get("gst_hsn_code"):
+			effective = "Taxable"
+		else:
+			effective = "Non-GST"  # what the validator will see
+
+		# Diagnosis text
+		reasons = []
+		if item.get("is_non_gst"):
+			reasons.append("Item master has is_non_gst=1 — explicit Non-GST flag.")
+		if item.get("is_nil_rated"):
+			reasons.append("Item master has is_nil_rated=1.")
+		if not item.get("gst_hsn_code"):
+			reasons.append("Item master is missing HSN/SAC code (gst_hsn_code).")
+		if not templates:
+			reasons.append("Item has no Item Tax Templates linked.")
+		else:
+			non_gst_templates = [t for t in templates if tpl_treatment.get(t) == "Non-GST"]
+			if non_gst_templates:
+				reasons.append(
+					f"Linked template(s) have gst_treatment=Non-GST: {', '.join(non_gst_templates)}"
+				)
+
+		if effective == "Non-GST":
+			will_fail = True
+			if not reasons:
+				reasons.append("Effective treatment resolves to Non-GST for unknown reasons — inspect Item master.")
+		else:
+			will_fail = False
+			if not reasons:
+				reasons.append("OK — item will be treated as " + effective)
+
+		results.append({
+			"item_code": code,
+			"item_name": item.get("item_name") or "",
+			"gst_hsn_code": item.get("gst_hsn_code") or "",
+			"is_non_gst": item.get("is_non_gst") or 0,
+			"is_nil_rated": item.get("is_nil_rated") or 0,
+			"item_tax_templates": tpl_details,
+			"gst_treatment_effective": effective,
+			"will_block_mixed_save": will_fail,
+			"diagnosis": " | ".join(reasons),
+		})
+
+	summary = {
+		"total": len(results),
+		"will_block": sum(1 for r in results if r.get("will_block_mixed_save")),
+		"ok": sum(1 for r in results if not r.get("will_block_mixed_save")),
+	}
+	return {"summary": summary, "items": results}
+
+
+@frappe.whitelist()
 def check_quotation_selling_price_state():
 	"""Diagnostic + on-demand fix for Quotation Item Selling Price editability.
 
