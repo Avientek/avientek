@@ -952,21 +952,88 @@ def get_supplier_bank_details(supplier_name, party_type="Supplier"):
         limit=1,
     )
 
-    if not bank_account:
+    if bank_account:
+        bank_data = bank_account[0]
+        swift_code = ""
+        if bank_data.get("bank"):
+            swift_code = frappe.db.get_value("Bank", bank_data.bank, "swift_number") or ""
+        # SWIFT fallback — some sites store the SWIFT in branch_code.
+        if not swift_code and bank_data.get("branch_code"):
+            swift_code = bank_data.get("branch_code") or ""
+        return {
+            "bank_account_no": bank_data.get("bank_account_no") or "",
+            "iban": bank_data.get("iban") or "",
+            "bank": bank_data.get("bank") or "",
+            "branch_code": bank_data.get("branch_code") or "",
+            "swift_code": swift_code,
+            "supplier_bank_account": bank_data.get("name") or "",
+        }
+
+    # Employee fallback — many HR setups don't create a Bank Account record
+    # per employee; bank info lives directly on the Employee doc
+    # (bank_name, bank_ac_no, iban). Use those so the PRF form fills in
+    # automatically without manual entry.
+    if party_type == "Employee":
+        emp = frappe.db.get_value(
+            "Employee",
+            supplier_name,
+            ["bank_name", "bank_ac_no", "iban"],
+            as_dict=True,
+        ) or {}
+        if emp.get("bank_name") or emp.get("bank_ac_no") or emp.get("iban"):
+            swift_code = ""
+            if emp.get("bank_name"):
+                swift_code = (
+                    frappe.db.get_value("Bank", emp.get("bank_name"), "swift_number")
+                    or ""
+                )
+            return {
+                "bank_account_no": emp.get("bank_ac_no") or "",
+                "iban": emp.get("iban") or "",
+                "bank": emp.get("bank_name") or "",
+                "branch_code": "",
+                "swift_code": swift_code,
+                "supplier_bank_account": "",
+            }
+
+    return {}
+
+
+@frappe.whitelist()
+def get_employee_contact_details(employee):
+    """Return Employee's embedded address + contact fields for PRF
+    onload. Employees usually don't have linked Address docs — their
+    contact info sits directly on the Employee master."""
+    if not employee:
         return {}
-
-    bank_data = bank_account[0]
-    swift_code = ""
-    if bank_data.get("bank"):
-        swift_code = frappe.db.get_value("Bank", bank_data.bank, "swift_number") or ""
-
+    emp = frappe.db.get_value(
+        "Employee",
+        employee,
+        [
+            "current_address",
+            "permanent_address",
+            "personal_email",
+            "company_email",
+            "prefered_email",
+            "cell_number",
+            "employee_name",
+        ],
+        as_dict=True,
+    ) or {}
+    if not emp:
+        return {}
+    address_display = emp.get("current_address") or emp.get("permanent_address") or ""
+    email = (
+        emp.get("prefered_email")
+        or emp.get("company_email")
+        or emp.get("personal_email")
+        or ""
+    )
     return {
-        "bank_account_no": bank_data.get("bank_account_no") or "",
-        "iban": bank_data.get("iban") or "",
-        "bank": bank_data.get("bank") or "",
-        "branch_code": bank_data.get("branch_code") or "",
-        "swift_code": swift_code,
-        "supplier_bank_account": bank_data.get("name") or "",
+        "address_display": address_display,
+        "email": email,
+        "telephone": emp.get("cell_number") or "",
+        "employee_name": emp.get("employee_name") or "",
     }
 
 @frappe.whitelist()
@@ -1227,16 +1294,58 @@ def get_voucher_print_data(docname):
 
     company_currency = frappe.db.get_value("Company", doc.company, "default_currency") or "AED"
 
-    # Supplier/party bank details
-    supplier_bank = frappe.db.get_value(
-        "Bank Account",
-        {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
-        ["name", "bank", "bank_account_no", "iban", "branch_code"],
-        as_dict=True
-    ) or {}
+    # Supplier/party bank details — full fallback chain so print never
+    # comes out blank when a Bank Account record is missing or SWIFT
+    # isn't on the Bank doc:
+    #   1. doc.supplier_bank_account (explicit selection on the form)
+    #   2. is_default Bank Account for that party
+    #   3. ANY Bank Account for that party
+    #   4. Employee.bank_name/bank_ac_no/iban (HR setups w/o Bank Accounts)
+    # SWIFT comes from Bank.swift_number, falling back to
+    # Bank Account.branch_code.
+    supplier_bank = {}
+    if doc.get("supplier_bank_account"):
+        supplier_bank = frappe.db.get_value(
+            "Bank Account", doc.supplier_bank_account,
+            ["name", "bank", "bank_account_no", "iban", "branch_code"],
+            as_dict=True,
+        ) or {}
+    if not supplier_bank:
+        supplier_bank = frappe.db.get_value(
+            "Bank Account",
+            {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
+            ["name", "bank", "bank_account_no", "iban", "branch_code"],
+            as_dict=True,
+        ) or {}
+    if not supplier_bank:
+        supplier_bank = frappe.db.get_value(
+            "Bank Account",
+            {"party_type": doc.party_type, "party": doc.party},
+            ["name", "bank", "bank_account_no", "iban", "branch_code"],
+            as_dict=True,
+        ) or {}
+    if not supplier_bank and doc.party_type == "Employee":
+        emp = frappe.db.get_value(
+            "Employee", doc.party,
+            ["bank_name", "bank_ac_no", "iban"],
+            as_dict=True,
+        ) or {}
+        if emp.get("bank_name") or emp.get("bank_ac_no") or emp.get("iban"):
+            supplier_bank = {
+                "name": "",
+                "bank": emp.get("bank_name") or "",
+                "bank_account_no": emp.get("bank_ac_no") or "",
+                "iban": emp.get("iban") or "",
+                "branch_code": "",
+            }
+
     supplier_swift = ""
     if supplier_bank and supplier_bank.get("bank"):
-        supplier_swift = frappe.db.get_value("Bank", supplier_bank.bank, "swift_number") or ""
+        supplier_swift = (
+            frappe.db.get_value("Bank", supplier_bank.get("bank"), "swift_number") or ""
+        )
+    if not supplier_swift and supplier_bank and supplier_bank.get("branch_code"):
+        supplier_swift = supplier_bank.get("branch_code") or ""
 
     # Issued bank details (single query instead of two)
     issued_bank_details = frappe.db.get_value(

@@ -1331,26 +1331,50 @@ function fetch_supplier_details(frm, force_update) {
         });
     }
 
-    // Fetch bank details for Supplier and Customer (not Employee)
-    if (frm.doc.party_type !== "Employee") {
-        if (!frm.doc.supplier_bank_account || force_update) {
-            frappe.call({
-                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_supplier_bank_details",
-                args: {
-                    supplier_name: frm.doc.party,
-                    party_type: frm.doc.party_type
-                },
-                callback: function(r) {
-                    if (r.message) {
-                        set_if_changed(frm, "supplier_bank_account", r.message.supplier_bank_account);
-                        set_if_changed(frm, "account_number", r.message.bank_account_no);
-                        set_if_changed(frm, "iban", r.message.iban || "");
-                        set_if_changed(frm, "bank", r.message.bank);
-                        set_if_changed(frm, "swift_code", r.message.swift_code);
+    // Fetch bank details for Supplier, Customer AND Employee.
+    // Employee branch falls back to Employee.bank_name / bank_ac_no / iban
+    // server-side when no Bank Account record exists.
+    if (!frm.doc.supplier_bank_account || force_update || frm.doc.party_type === "Employee") {
+        frappe.call({
+            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_supplier_bank_details",
+            args: {
+                supplier_name: frm.doc.party,
+                party_type: frm.doc.party_type
+            },
+            callback: function(r) {
+                if (r.message) {
+                    set_if_changed(frm, "supplier_bank_account", r.message.supplier_bank_account);
+                    set_if_changed(frm, "account_number", r.message.bank_account_no);
+                    set_if_changed(frm, "iban", r.message.iban || "");
+                    set_if_changed(frm, "bank", r.message.bank);
+                    set_if_changed(frm, "swift_code", r.message.swift_code);
+                }
+            }
+        });
+    }
+
+    // Employee-specific: pull address + contact (current_address / email /
+    // cell_number) directly from the Employee master, since
+    // get_default_address only returns linked Address docs and Employees
+    // typically store contact info on the Employee doc itself.
+    if (frm.doc.party_type === "Employee") {
+        frappe.call({
+            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_employee_contact_details",
+            args: { employee: frm.doc.party },
+            callback: function(r) {
+                if (r && r.message) {
+                    if (r.message.address_display) {
+                        set_if_changed(frm, "address_display", r.message.address_display);
+                    }
+                    if (r.message.email) {
+                        set_if_changed(frm, "email", r.message.email);
+                    }
+                    if (r.message.telephone) {
+                        set_if_changed(frm, "telephone", r.message.telephone);
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     // Fetch bank letter from Supplier master
