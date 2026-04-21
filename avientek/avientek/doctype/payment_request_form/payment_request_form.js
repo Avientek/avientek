@@ -297,12 +297,54 @@ frappe.ui.form.on('Payment Request Form', {
         }
 
         if (frm.doc.payment_type == "Pay" && !frm.doc.__islocal) {
+            // Combined PDF can take well over the 60-90 sec gateway timeout
+            // for vouchers with many references. Queue it on a background
+            // worker; the worker attaches the file to this PRF and emits
+            // "prf_combined_pdf_ready", which we listen for below to
+            // surface a "Download Now" button.
             frm.add_custom_button(__('Download Combined PDF'), function () {
-                window.open(
-                    `/api/method/avientek.avientek.doctype.payment_request_form.payment_request_form.download_payment_pdf?docname=${encodeURIComponent(frm.doc.name)}`,
-                    '_blank'
-                );
+                frappe.show_alert({
+                    message: __('Preparing Combined PDF — this may take a minute.'),
+                    indicator: 'blue'
+                }, 5);
+                frappe.call({
+                    method: "avientek.avientek.doctype.payment_request_form.payment_request_form.download_payment_pdf",
+                    args: { docname: frm.doc.name, mode: "enqueue" },
+                    callback: function(r) {
+                        if (r && r.message && r.message.status === "queued") {
+                            frappe.show_alert({
+                                message: r.message.message,
+                                indicator: 'green'
+                            }, 8);
+                        }
+                    }
+                });
             });
+
+            // Listen once per form-load for the worker's "ready" event so
+            // the user gets an immediate download link without manually
+            // refreshing the form.
+            if (!frm._prf_combined_pdf_listener) {
+                frm._prf_combined_pdf_listener = true;
+                frappe.realtime.on("prf_combined_pdf_ready", function(data) {
+                    if (!data || data.docname !== frm.doc.name) return;
+                    frappe.show_alert({
+                        message: __('Combined PDF ready'),
+                        indicator: 'green'
+                    }, 10);
+                    // Open the file in a new tab
+                    window.open(data.file_url, "_blank");
+                    frm.reload_doc();
+                });
+                frappe.realtime.on("prf_combined_pdf_failed", function(data) {
+                    if (!data || data.docname !== frm.doc.name) return;
+                    frappe.msgprint({
+                        title: __('Combined PDF failed'),
+                        message: data.error || __('Unknown error'),
+                        indicator: 'red'
+                    });
+                });
+            }
         }
 
         // "Get Invoices From" button removed - users can add rows manually

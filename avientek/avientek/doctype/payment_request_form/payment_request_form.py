@@ -1142,81 +1142,84 @@ def make_payment_order(source_name, target_doc=None):
     return target_doc
 
 
-@frappe.whitelist()
-def download_payment_pdf(docname):
-    """Streams the combined PDF directly to the browser."""
+def _read_local_pdf(file_url):
+    """Read a Frappe-managed file straight from disk — avoids the
+    HTTP+session round-trip that the original sync downloader used.
+    Works inside background jobs too (no request context required)."""
+    if not file_url or not file_url.lower().endswith(".pdf"):
+        return None
+    try:
+        from frappe.utils.file_manager import get_file_path
+        path = get_file_path(file_url)
+        if not path or not os.path.exists(path):
+            return None
+        with open(path, "rb") as fh:
+            return fh.read()
+    except Exception as e:
+        frappe.log_error(f"_read_local_pdf failed for {file_url}: {e}")
+        return None
 
-    if not frappe.has_permission("Payment Request Form", "read", doc=docname):
-        frappe.throw("Not permitted")
 
+def _build_combined_pdf_bytes(docname):
+    """Builds the merged Payment Voucher PDF and returns the bytes.
+
+    Pure (no HTTP context required), so the same function works whether
+    called inline or from a background worker. Heavy steps:
+      - Render Payment Voucher print format (~5s)
+      - Per reference: render PO + Quotation print formats (~5-10s each)
+      - Read attached PDFs from disk (instant, no HTTP)
+    For large vouchers this can run 60s+, so callers should usually
+    invoke this from inside frappe.enqueue.
+    """
     doc = frappe.get_doc("Payment Request Form", docname)
-    base_url = frappe.utils.get_url()
-    session_cookie = frappe.local.request.cookies.get("sid")
-    headers = {"Cookie": f"sid={session_cookie}"}
-
     merger = PdfMerger()
 
-    # Merge Payment Request Form
+    # 1. Payment Voucher print format (with format fallbacks)
     try:
-        # Use "Payment Voucher Fast" as the primary format — it's the complete
-        # voucher (bank details, IBAN, supplier address, dynamic columns, Doc
-        # Reference label, TR/LC application on page 2). Falls back to the
-        # older formats only if Fast is missing.
         print_format_name = "Payment Voucher Fast"
         if not frappe.db.exists("Print Format", print_format_name):
             print_format_name = "Payment Voucher Professional"
         if not frappe.db.exists("Print Format", print_format_name):
             print_format_name = "PAYMENT VOUCHER"
 
-        print_format_pdf = frappe.get_print(
-            "Payment Request Form",
-            docname,
-            print_format=print_format_name,
-            as_pdf=True
+        pdf_bytes = frappe.get_print(
+            "Payment Request Form", docname,
+            print_format=print_format_name, as_pdf=True,
         )
-        merger.append(io.BytesIO(print_format_pdf))
+        merger.append(io.BytesIO(pdf_bytes))
     except Exception as e:
-        frappe.log_error(f"Error merging print format PDF: {e}")
+        frappe.log_error(f"PRF combined PDF — voucher render failed: {e}", "PRF Combined PDF")
 
-    # Loop through references
-    for row in doc.payment_references:
+    # 2. Per-reference: PI attachment + PO PDF + Quotation PDF
+    for row in (doc.payment_references or []):
         supplier_bill_no = row.reference_name
-
-        # Get Purchase Invoice name from Supplier Bill No
         purchase_invoice_name = frappe.db.get_value(
-            "Purchase Invoice",
-            {"bill_no": supplier_bill_no},
-            "name"
+            "Purchase Invoice", {"bill_no": supplier_bill_no}, "name"
         )
-
         if not purchase_invoice_name:
-            frappe.log_error(f"No Purchase Invoice found for Bill No: {supplier_bill_no}")
             continue
 
-        # Purchase Invoice Attachment
         try:
             attachment = frappe.get_all(
                 "File",
                 filters={
                     "attached_to_doctype": "Purchase Invoice",
-                    "attached_to_name": purchase_invoice_name
+                    "attached_to_name": purchase_invoice_name,
                 },
                 fields=["file_url"],
                 order_by="creation asc",
-                limit=1
+                limit=1,
             )
             if attachment:
-                file_url = attachment[0]["file_url"]
-                res = requests.get(
-                    file_url if file_url.startswith("http") else base_url + file_url,
-                    headers=headers, verify=False
-                )
-                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
-                    merger.append(io.BytesIO(res.content))
+                pdf_bytes = _read_local_pdf(attachment[0]["file_url"])
+                if pdf_bytes:
+                    merger.append(io.BytesIO(pdf_bytes))
         except Exception as e:
-            frappe.log_error(f"Error fetching Purchase Invoice attachment for {purchase_invoice_name}: {e}")
+            frappe.log_error(
+                f"PRF combined PDF — PI attachment {purchase_invoice_name}: {e}",
+                "PRF Combined PDF",
+            )
 
-        # Purchase Order & Quotation PDFs
         try:
             purchase_order = frappe.get_value(
                 "Purchase Invoice Item",
@@ -1236,52 +1239,136 @@ def download_payment_pdf(docname):
                 quotation = frappe.db.get_value(
                     "Sales Order Item", {"parent": sales_order}, "prevdoc_docname"
                 ) if sales_order else None
-
                 if quotation:
-                    quotation_pdf = get_pdf(
+                    q_pdf = get_pdf(
                         frappe.get_print("Quotation", quotation, print_format="Quotation New")
                     )
-                    merger.append(io.BytesIO(quotation_pdf))
+                    merger.append(io.BytesIO(q_pdf))
         except Exception as e:
-            frappe.log_error(f"Error fetching Quotation PDFs for {purchase_invoice_name}: {e}")
+            frappe.log_error(
+                f"PRF combined PDF — PO/QTN for {purchase_invoice_name}: {e}",
+                "PRF Combined PDF",
+            )
 
-    # Bank Letter (Supplier only, after reference docs)
+    # 3. Bank letter
     if doc.bank_letter:
-        try:
-            file_url = doc.bank_letter
-            if file_url.lower().endswith('.pdf'):
-                if not file_url.startswith("http"):
-                    file_url = base_url + file_url
-                res = requests.get(file_url, headers=headers, verify=False)
-                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
-                    merger.append(io.BytesIO(res.content))
-        except Exception as e:
-            frappe.log_error(f"Error merging bank letter: {e}")
+        pdf_bytes = _read_local_pdf(doc.bank_letter)
+        if pdf_bytes:
+            merger.append(io.BytesIO(pdf_bytes))
 
-    # Additional Documents (always last in the combined PDF)
-    for addl_doc in (doc.additional_documents or []):
-        if not addl_doc.attachment:
+    # 4. Additional documents (always last)
+    for addl in (doc.additional_documents or []):
+        if not addl.attachment:
             continue
-        try:
-            file_url = addl_doc.attachment
-            if file_url.lower().endswith('.pdf'):
-                if not file_url.startswith("http"):
-                    file_url = base_url + file_url
-                res = requests.get(file_url, headers=headers, verify=False)
-                if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', ''):
-                    merger.append(io.BytesIO(res.content))
-        except Exception as e:
-            frappe.log_error(f"Error merging additional document {addl_doc.label}: {e}")
+        pdf_bytes = _read_local_pdf(addl.attachment)
+        if pdf_bytes:
+            merger.append(io.BytesIO(pdf_bytes))
 
-    # Output merged PDF
     output = io.BytesIO()
     merger.write(output)
     merger.close()
     output.seek(0)
+    return output.read()
 
-    frappe.local.response.filename = f"{docname}_combined.pdf"
-    frappe.local.response.filecontent = output.read()
-    frappe.local.response.type = "download"
+
+def _build_and_attach_combined_pdf(docname, user):
+    """Background-job target. Builds the combined PDF, deletes any
+    previous "<docname>_combined.pdf" attached to the same PRF, attaches
+    the fresh one, and pushes a realtime event so the UI can refresh
+    and surface a download button."""
+    try:
+        pdf_bytes = _build_combined_pdf_bytes(docname)
+        filename = f"{docname}_combined.pdf"
+
+        # Remove any older combined PDF attached to this PRF so the user
+        # always sees the latest one only — avoids attachment clutter.
+        old_files = frappe.get_all(
+            "File",
+            filters={
+                "attached_to_doctype": "Payment Request Form",
+                "attached_to_name": docname,
+                "file_name": filename,
+            },
+            fields=["name"],
+        )
+        for f in old_files:
+            try:
+                frappe.delete_doc("File", f.name, ignore_permissions=True, force=True)
+            except Exception:
+                pass
+
+        file_doc = save_file(
+            fname=filename,
+            content=pdf_bytes,
+            dt="Payment Request Form",
+            dn=docname,
+            is_private=1,
+        )
+        frappe.db.commit()
+
+        frappe.publish_realtime(
+            "prf_combined_pdf_ready",
+            {"docname": docname, "file_url": file_doc.file_url, "file_name": filename},
+            user=user,
+        )
+
+        # System notification (also surfaces in the bell icon)
+        try:
+            frappe.publish_realtime(
+                "msgprint",
+                _("Combined PDF for {0} is ready. Refresh the form to see it under Attachments.").format(docname),
+                user=user,
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        frappe.log_error(
+            f"PRF combined PDF — background build failed for {docname}: {e}",
+            "PRF Combined PDF",
+        )
+        frappe.publish_realtime(
+            "prf_combined_pdf_failed",
+            {"docname": docname, "error": str(e)[:500]},
+            user=user,
+        )
+
+
+@frappe.whitelist()
+def download_payment_pdf(docname, mode="enqueue"):
+    """Combined Payment Voucher PDF.
+
+    mode="enqueue" (default) — queues the build on a background worker
+    and returns immediately so the HTTP gateway doesn't time out on
+    large vouchers. The worker attaches the resulting PDF to the PRF
+    and emits a realtime event "prf_combined_pdf_ready".
+
+    mode="sync" — legacy behavior; streams the PDF inline. Only safe
+    for small vouchers (<3 references) since render time can exceed the
+    Frappe Cloud gateway timeout.
+    """
+    if not frappe.has_permission("Payment Request Form", "read", doc=docname):
+        frappe.throw(_("Not permitted"))
+
+    if mode == "sync":
+        pdf_bytes = _build_combined_pdf_bytes(docname)
+        frappe.local.response.filename = f"{docname}_combined.pdf"
+        frappe.local.response.filecontent = pdf_bytes
+        frappe.local.response.type = "download"
+        return
+
+    # Default: background mode
+    frappe.enqueue(
+        "avientek.avientek.doctype.payment_request_form.payment_request_form._build_and_attach_combined_pdf",
+        queue="long",
+        timeout=900,
+        docname=docname,
+        user=frappe.session.user,
+        enqueue_after_commit=True,
+    )
+    return {
+        "status": "queued",
+        "message": _("Combined PDF for {0} is being prepared. You'll see it under Attachments shortly.").format(docname),
+    }
 
 
 @frappe.whitelist()
