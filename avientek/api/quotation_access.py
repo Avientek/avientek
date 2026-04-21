@@ -1980,12 +1980,18 @@ def check_items_gst_status(item_codes=None, quotation=None):
 	codes = []
 	if quotation:
 		# Saved Quotation — read items from DB
+		if not frappe.db.exists("Quotation", quotation):
+			return {
+				"error": f"Quotation '{quotation}' not found. Use an actual Quotation name (e.g. QTN-0001-25-00001), not a placeholder.",
+			}
 		codes = [r.item_code for r in frappe.get_all(
 			"Quotation Item",
 			filters={"parent": quotation},
 			fields=["item_code"],
 			order_by="idx asc",
 		) if r.item_code]
+		if not codes:
+			return {"error": f"Quotation '{quotation}' has no items."}
 	elif item_codes:
 		if isinstance(item_codes, str):
 			try:
