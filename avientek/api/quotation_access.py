@@ -1959,6 +1959,115 @@ def export_report_as_excel(data, doctype):
 
 
 @frappe.whitelist()
+def find_gst_problem_quotations(limit=20):
+	"""Zero-input diagnostic: scans Draft Quotations for the India
+	company and returns the ones whose items would trip the
+	"Items not covered under GST cannot be clubbed..." validator.
+
+	No parameters needed. Just hit:
+	  /api/method/avientek.api.quotation_access.find_gst_problem_quotations
+
+	Returns the list of offending Quotations + per-item problem breakdown.
+	"""
+	try:
+		limit = int(limit)
+	except Exception:
+		limit = 20
+	limit = max(1, min(limit, 200))
+
+	company = "Avientek Electronics Trading PVT. LTD"
+	quotations = frappe.get_all(
+		"Quotation",
+		filters={"company": company, "docstatus": 0},
+		fields=["name", "customer_name", "transaction_date", "grand_total"],
+		order_by="modified desc",
+		limit=limit,
+	)
+
+	problem_quotes = []
+	for q in quotations:
+		items = frappe.get_all(
+			"Quotation Item",
+			filters={"parent": q.name},
+			fields=["idx", "item_code", "item_name", "item_tax_template"],
+			order_by="idx asc",
+		)
+		if not items:
+			continue
+
+		# Pull each item's HSN / is_non_gst and every linked tax template's gst_treatment
+		codes = list({i.item_code for i in items if i.item_code})
+		item_fields = ["name", "gst_hsn_code"]
+		if frappe.get_meta("Item").has_field("is_non_gst"):
+			item_fields.append("is_non_gst")
+		items_meta = {
+			r["name"]: r
+			for r in frappe.get_all("Item", filters={"name": ("in", codes)}, fields=item_fields)
+		} if codes else {}
+
+		templates = {i.item_tax_template for i in items if i.item_tax_template}
+		tpl_treatment = frappe._dict(
+			frappe.get_all(
+				"Item Tax Template",
+				filters={"name": ("in", list(templates))},
+				fields=["name", "gst_treatment"],
+				as_list=True,
+			)
+		) if templates else frappe._dict()
+
+		non_gst_rows = []
+		has_gst_rows = False
+		for it in items:
+			meta = items_meta.get(it.item_code, {}) if it.item_code else {}
+			if meta.get("is_non_gst"):
+				treatment = "Non-GST"
+			elif it.item_tax_template and tpl_treatment.get(it.item_tax_template):
+				treatment = tpl_treatment.get(it.item_tax_template)
+			elif meta.get("gst_hsn_code"):
+				treatment = "Taxable"
+			else:
+				treatment = "Non-GST"
+
+			if treatment == "Non-GST":
+				reasons = []
+				if meta.get("is_non_gst"):
+					reasons.append("is_non_gst=1 on Item master")
+				if not meta.get("gst_hsn_code"):
+					reasons.append("missing HSN code on Item master")
+				if not it.item_tax_template:
+					reasons.append("no Item Tax Template linked")
+				elif tpl_treatment.get(it.item_tax_template) == "Non-GST":
+					reasons.append(f"template '{it.item_tax_template}' has gst_treatment=Non-GST")
+				non_gst_rows.append({
+					"row": it.idx,
+					"item_code": it.item_code,
+					"item_name": it.item_name,
+					"hsn": meta.get("gst_hsn_code") or "",
+					"reasons": " | ".join(reasons) or "unknown",
+				})
+			else:
+				has_gst_rows = True
+
+		if non_gst_rows and has_gst_rows:
+			problem_quotes.append({
+				"quotation": q.name,
+				"customer": q.customer_name,
+				"date": str(q.transaction_date),
+				"amount": q.grand_total,
+				"problem_row_count": len(non_gst_rows),
+				"total_items": len(items),
+				"problem_rows": non_gst_rows,
+			})
+
+	return {
+		"company": company,
+		"scanned_draft_quotations": len(quotations),
+		"problem_count": len(problem_quotes),
+		"problems": problem_quotes,
+	}
+
+
+@frappe.whitelist()
 def check_items_gst_status(item_codes=None, quotation=None):
 	"""Diagnose GST treatment for a set of items so we can pinpoint which
 	Item masters are causing india_compliance's "Items not covered under
