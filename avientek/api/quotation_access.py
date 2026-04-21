@@ -1956,3 +1956,74 @@ def export_report_as_excel(data, doctype):
 	frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
 	frappe.response["filecontent"] = xlsx_file.getvalue()
 	frappe.response["type"] = "download"
+
+
+@frappe.whitelist()
+def check_quotation_selling_price_state():
+	"""Diagnostic + on-demand fix for Quotation Item Selling Price editability.
+
+	Returns current state of the two fields. If called with ?apply=1 (and
+	user is System Manager), re-applies the intended config in place so you
+	don't have to wait for the next Migrate.
+	"""
+	apply = frappe.form_dict.get("apply") in ("1", 1, True, "true")
+
+	specials = frappe.db.get_value(
+		"Custom Field",
+		"Quotation Item-custom_special_rate",
+		["read_only", "allow_on_submit", "label"],
+		as_dict=True,
+	) or {}
+	total = frappe.db.get_value(
+		"Custom Field",
+		"Quotation Item-custom_selling_price",
+		["read_only", "allow_on_submit", "label"],
+		as_dict=True,
+	) or {}
+
+	before = {"custom_special_rate": specials, "custom_selling_price": total}
+	result = {"before": before, "applied": False}
+
+	if apply:
+		if "System Manager" not in frappe.get_roles(frappe.session.user):
+			frappe.throw("Only System Manager can apply the fix.")
+		changed = False
+		if specials and specials.get("read_only") != 0:
+			frappe.db.set_value(
+				"Custom Field",
+				"Quotation Item-custom_special_rate",
+				"read_only",
+				0,
+				update_modified=False,
+			)
+			changed = True
+		if total and total.get("read_only") != 1:
+			frappe.db.set_value(
+				"Custom Field",
+				"Quotation Item-custom_selling_price",
+				"read_only",
+				1,
+				update_modified=False,
+			)
+			changed = True
+		if changed:
+			frappe.db.commit()
+			frappe.clear_cache(doctype="Quotation Item")
+
+		result["applied"] = changed
+		result["after"] = {
+			"custom_special_rate": frappe.db.get_value(
+				"Custom Field",
+				"Quotation Item-custom_special_rate",
+				["read_only", "allow_on_submit", "label"],
+				as_dict=True,
+			),
+			"custom_selling_price": frappe.db.get_value(
+				"Custom Field",
+				"Quotation Item-custom_selling_price",
+				["read_only", "allow_on_submit", "label"],
+				as_dict=True,
+			),
+		}
+
+	return result
