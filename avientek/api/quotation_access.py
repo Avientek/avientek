@@ -2000,11 +2000,16 @@ def check_items_gst_status(item_codes=None, quotation=None):
 	if not codes:
 		return {"error": "Provide item_codes or quotation"}
 
-	# Fetch master data
+	# Fetch master data — only request fields that exist on this install.
+	# `is_nil_rated` lives on Item Tax Template (not Item); we infer
+	# nil-rated status from the linked template's gst_treatment instead.
+	item_fields = ["name", "item_name", "gst_hsn_code"]
+	if frappe.get_meta("Item").has_field("is_non_gst"):
+		item_fields.append("is_non_gst")
 	items_meta = frappe.get_all(
 		"Item",
 		filters={"name": ("in", codes)},
-		fields=["name", "item_name", "gst_hsn_code", "is_nil_rated", "is_non_gst"],
+		fields=item_fields,
 	)
 	items_map = {i["name"]: i for i in items_meta}
 
@@ -2051,8 +2056,6 @@ def check_items_gst_status(item_codes=None, quotation=None):
 		effective = None
 		if item.get("is_non_gst"):
 			effective = "Non-GST"
-		elif item.get("is_nil_rated"):
-			effective = "Nil-Rated"
 		elif templates and tpl_treatment.get(templates[0]):
 			effective = tpl_treatment.get(templates[0])
 		elif item.get("gst_hsn_code"):
@@ -2064,8 +2067,6 @@ def check_items_gst_status(item_codes=None, quotation=None):
 		reasons = []
 		if item.get("is_non_gst"):
 			reasons.append("Item master has is_non_gst=1 — explicit Non-GST flag.")
-		if item.get("is_nil_rated"):
-			reasons.append("Item master has is_nil_rated=1.")
 		if not item.get("gst_hsn_code"):
 			reasons.append("Item master is missing HSN/SAC code (gst_hsn_code).")
 		if not templates:
@@ -2075,6 +2076,11 @@ def check_items_gst_status(item_codes=None, quotation=None):
 			if non_gst_templates:
 				reasons.append(
 					f"Linked template(s) have gst_treatment=Non-GST: {', '.join(non_gst_templates)}"
+				)
+			blank_tpl = [t for t in templates if not tpl_treatment.get(t)]
+			if blank_tpl:
+				reasons.append(
+					f"Linked template(s) have blank gst_treatment: {', '.join(blank_tpl)}"
 				)
 
 		if effective == "Non-GST":
@@ -2091,7 +2097,6 @@ def check_items_gst_status(item_codes=None, quotation=None):
 			"item_name": item.get("item_name") or "",
 			"gst_hsn_code": item.get("gst_hsn_code") or "",
 			"is_non_gst": item.get("is_non_gst") or 0,
-			"is_nil_rated": item.get("is_nil_rated") or 0,
 			"item_tax_templates": tpl_details,
 			"gst_treatment_effective": effective,
 			"will_block_mixed_save": will_fail,
