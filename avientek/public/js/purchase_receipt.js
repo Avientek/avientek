@@ -1,28 +1,4 @@
 frappe.ui.form.on('Purchase Receipt', {
-    onload: function(frm) {
-        if (frm.doc.conversion_rate != frm.doc.plc_conversion_rate) {
-            if (frm.doc.__islocal) {
-                frm.doc.items.forEach(function(item) {
-                    var discount_amount = item.discount_amount;
-                    frappe.model.set_value(item.doctype, item.name, 'discount_amount', 0);
-                    frappe.model.set_value(item.doctype, item.name, 'margin_rate_or_amount', Math.abs(discount_amount));
-                });
-                var purchase_order = frm.doc.items[0] && frm.doc.items[0].purchase_order;
-                if (purchase_order) {
-                    frappe.db.get_value("Purchase Order", purchase_order, "plc_conversion_rate").then(function(r) {
-                        if (r && r.message) {
-                            setTimeout(function() {
-                                frm.set_value("plc_conversion_rate", r.message.plc_conversion_rate).then(function() {
-                                    frm.refresh_field("plc_conversion_rate");
-                                });
-                            }, 2000);
-                        }
-                    });
-                }
-            }
-        }
-    },
-
     // ── Client Script: "Validate exchange rate" - filter supplier by company ──
     company: function(frm) {
         frappe.call({
