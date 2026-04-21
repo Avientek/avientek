@@ -393,6 +393,64 @@ frappe.ui.form.on('Quotation', {
 
     // ── Refresh / Onload ────────────────────────────────────
     refresh(frm) {
+        // Diagnostic button — for the India company, surfaces why any
+        // items in this Quotation will trip the "Items not covered under
+        // GST cannot be clubbed..." validator. Pulls item codes straight
+        // off the current form, so it works even on unsaved drafts.
+        if (frm.doc.company === "Avientek Electronics Trading PVT. LTD") {
+            frm.add_custom_button(__("Check GST Status"), function () {
+                let codes = (frm.doc.items || [])
+                    .map(r => r.item_code)
+                    .filter(Boolean);
+                if (!codes.length) {
+                    frappe.msgprint(__("No items on this Quotation to check."));
+                    return;
+                }
+                frappe.call({
+                    method: "avientek.api.quotation_access.check_items_gst_status",
+                    args: { item_codes: JSON.stringify(codes) },
+                    callback: function (r) {
+                        if (!r.message) return;
+                        if (r.message.error) {
+                            frappe.msgprint(r.message.error);
+                            return;
+                        }
+                        let summary = r.message.summary || {};
+                        let items = r.message.items || [];
+                        let rows = items.map(it => `
+                            <tr style="${it.will_block_mixed_save ? 'background:#ffecec;' : ''}">
+                                <td>${frappe.utils.escape_html(it.item_code || "")}</td>
+                                <td>${frappe.utils.escape_html(it.gst_hsn_code || "—")}</td>
+                                <td><b>${frappe.utils.escape_html(it.gst_treatment_effective || "")}</b></td>
+                                <td>${it.will_block_mixed_save ? "❌ YES" : "✅ OK"}</td>
+                                <td style="font-size:11px;">${frappe.utils.escape_html(it.diagnosis || "")}</td>
+                            </tr>`).join("");
+                        let html = `
+                            <p><b>${summary.total || 0}</b> items — <b style="color:red;">${summary.will_block || 0}</b> blocking, <b style="color:green;">${summary.ok || 0}</b> ok.</p>
+                            <table class="table table-bordered" style="font-size:12px;">
+                                <thead>
+                                    <tr>
+                                        <th>Item Code</th>
+                                        <th>HSN</th>
+                                        <th>GST Treatment</th>
+                                        <th>Blocks?</th>
+                                        <th>Why</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${rows}</tbody>
+                            </table>
+                            <p style="margin-top:10px;"><b>Fix:</b> For each blocking row, open the Item master and either (a) set HSN/SAC code and link an Item Tax Template whose GST Treatment is "Taxable", or (b) uncheck is_non_gst if it's wrongly marked.</p>
+                        `;
+                        frappe.msgprint({
+                            title: __("GST Status for Items on this Quotation"),
+                            message: html,
+                            wide: true,
+                        });
+                    },
+                });
+            }, __("GST"));
+        }
+
         // Show margin warning for APPROVED_WITH_WARNING brands
         if (frm.doc.custom_quotation_brand_summary && frm.doc.docstatus === 0) {
             var warnings = [];
