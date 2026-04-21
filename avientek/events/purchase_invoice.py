@@ -28,33 +28,28 @@ def validate_item_tax_template(doc, method=None):
 @frappe.whitelist()
 def create_payment_request(source_name, target_doc=None, args=None):
     def set_single_reference(source, target):
-        # Set required party fields (previously missing — caused errors on save)
+        # Required top-level fields on Payment Request Form. `company` was
+        # previously missing — the PRF form's onload then calls
+        # erpnext's get_party_details(company=...) which throws with an
+        # empty company and the user sees "Server error" before the form
+        # even finishes loading.
         target.payment_type = "Pay"
+        target.company = source.company
         target.party_type = "Supplier"
         target.party = source.supplier
         target.party_name = source.supplier_name or source.supplier
         target.posting_date = frappe.utils.nowdate()
 
-        # Attachment PDFs (PO, Quotation) used to be saved here via save_file
-        # with dt=target.doctype, dn=target.name — but `target.name` is blank
-        # during the mapping postprocess (new doc not saved yet). Frappe
-        # returned "Attached To Name must be a string or an integer" and
-        # the whole Create action failed. The attachment_html variable it
-        # assembled was never used on the target either, so dropping the
-        # whole block. Attachments can be added after save.
-
         purchase_order = source.items[0].purchase_order if source.items else ""
 
-        # Add row to Payment References. PaymentRequestReference schema
-        # has: reference_doctype, reference_name, grand_total,
-        # base_grand_total, outstanding_amount, base_outstanding_amount,
-        # exchange_rate, invoice_date, currency, document_reference,
-        # remarks, due_date. It does NOT have payment_amount or
-        # total_amount — those fields previously tripped the mapper.
         exchange_rate = source.conversion_rate or 1
-        os_company = source.outstanding_amount or 0  # in company currency (AED)
+        os_company = source.outstanding_amount or 0  # in company currency
         os_invoice = os_company / exchange_rate if exchange_rate else os_company
 
+        # PaymentRequestReference schema: reference_doctype, reference_name,
+        # grand_total, base_grand_total, outstanding_amount,
+        # base_outstanding_amount, exchange_rate, invoice_date, currency,
+        # document_reference, remarks, due_date.
         target.append("payment_references", {
             "reference_doctype": "Purchase Invoice",
             "reference_name": source.name,
@@ -69,10 +64,11 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "exchange_rate": exchange_rate,
         })
 
-        # Parent totals — use only fields the child row actually has.
+        # Parent totals — use only fields that actually exist on PRF.
+        # `total_amount` was being set previously but is NOT a PRF field;
+        # removed to avoid any stray validation issues.
         target.total_outstanding_amount = sum((row.outstanding_amount or 0) for row in target.payment_references)
         target.total_payment_amount = 0
-        target.total_amount = sum((row.grand_total or 0) for row in target.payment_references)
 
     target_doc = get_mapped_doc(
         "Purchase Invoice",
