@@ -18,3 +18,4 @@ avientek.patches.backfill_quotation_total_margin_percent
 avientek.patches.ensure_sales_user_sales_invoice_perm
 avientek.patches.grant_all_role_prf_draft_edit
 avientek.patches.fix_prf_professional_swift_fallback
+avientek.patches.fix_prf_fast_frappe_call_worker

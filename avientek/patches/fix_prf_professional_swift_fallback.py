@@ -37,7 +37,15 @@ _OLD_BLOCK_RE = re.compile(
 )
 
 _NEW_BLOCK = (
-    '{% set _ctx = frappe.call("avientek.avientek.doctype.payment_request_form.payment_request_form.get_payment_voucher_context", docname=doc.name) %}\n'
+    # Use frappe.get_attr, NOT frappe.call. frappe.call in Jinja goes
+    # through the HTTP whitelist dispatcher which touches
+    # frappe.local.request — that raises "request" when the print
+    # format is rendered from a background worker (reported by Shijin
+    # for AVFZC-021 combined PDF). frappe.get_attr just resolves the
+    # function; calling it is a pure Python call with no request
+    # plumbing.
+    '{% set _get_ctx = frappe.get_attr("avientek.avientek.doctype.payment_request_form.payment_request_form.get_payment_voucher_context") %}\n'
+    '{% set _ctx = _get_ctx(doc.name) %}\n'
     '{% set supplier_bank = _ctx.supplier_bank or {} %}\n'
     '{% set supplier_swift = _ctx.supplier_swift or "" %}'
 )
