@@ -1171,24 +1171,34 @@ def _build_combined_pdf_bytes(docname):
     For large vouchers this can run 60s+, so callers should usually
     invoke this from inside frappe.enqueue.
     """
+    import traceback
+
     doc = frappe.get_doc("Payment Request Form", docname)
     merger = PdfMerger()
+    appended = 0  # track sections actually merged so we can fail loud on empty output
 
-    # 1. Payment Voucher print format (with format fallbacks)
-    try:
-        print_format_name = "Payment Voucher Fast"
-        if not frappe.db.exists("Print Format", print_format_name):
-            print_format_name = "Payment Voucher Professional"
-        if not frappe.db.exists("Print Format", print_format_name):
-            print_format_name = "PAYMENT VOUCHER"
+    # 1. Payment Voucher print format (with format fallbacks). This step
+    # is MANDATORY — if we can't render the voucher itself there is no
+    # point saving a combined PDF at all. Let the exception propagate
+    # to the worker's outer handler so the user sees the real error via
+    # prf_combined_pdf_failed rather than an empty file.
+    print_format_name = "Payment Voucher Fast"
+    if not frappe.db.exists("Print Format", print_format_name):
+        print_format_name = "Payment Voucher Professional"
+    if not frappe.db.exists("Print Format", print_format_name):
+        print_format_name = "PAYMENT VOUCHER"
 
-        pdf_bytes = frappe.get_print(
-            "Payment Request Form", docname,
-            print_format=print_format_name, as_pdf=True,
+    pdf_bytes = frappe.get_print(
+        "Payment Request Form", docname,
+        print_format=print_format_name, as_pdf=True,
+    )
+    if not pdf_bytes:
+        raise RuntimeError(
+            f"frappe.get_print returned empty bytes for Payment Request Form {docname} "
+            f"using print format {print_format_name!r}"
         )
-        merger.append(io.BytesIO(pdf_bytes))
-    except Exception as e:
-        frappe.log_error(f"PRF combined PDF — voucher render failed: {e}", "PRF Combined PDF")
+    merger.append(io.BytesIO(pdf_bytes))
+    appended += 1
 
     # 2. Per-reference: PI attachment + PO PDF + Quotation PDF
     for row in (doc.payment_references or []):
@@ -1214,9 +1224,10 @@ def _build_combined_pdf_bytes(docname):
                 pdf_bytes = _read_local_pdf(attachment[0]["file_url"])
                 if pdf_bytes:
                     merger.append(io.BytesIO(pdf_bytes))
+                    appended += 1
         except Exception as e:
             frappe.log_error(
-                f"PRF combined PDF — PI attachment {purchase_invoice_name}: {e}",
+                f"PRF combined PDF — PI attachment {purchase_invoice_name}: {e}\n{traceback.format_exc()}",
                 "PRF Combined PDF",
             )
 
@@ -1231,7 +1242,9 @@ def _build_combined_pdf_bytes(docname):
                 po_pdf = get_pdf(
                     frappe.get_print("Purchase Order", purchase_order, print_format="Avientek PO")
                 )
-                merger.append(io.BytesIO(po_pdf))
+                if po_pdf:
+                    merger.append(io.BytesIO(po_pdf))
+                    appended += 1
 
                 sales_order = frappe.db.get_value(
                     "Purchase Order Item", {"parent": purchase_order}, "sales_order"
@@ -1243,10 +1256,12 @@ def _build_combined_pdf_bytes(docname):
                     q_pdf = get_pdf(
                         frappe.get_print("Quotation", quotation, print_format="Quotation New")
                     )
-                    merger.append(io.BytesIO(q_pdf))
+                    if q_pdf:
+                        merger.append(io.BytesIO(q_pdf))
+                        appended += 1
         except Exception as e:
             frappe.log_error(
-                f"PRF combined PDF — PO/QTN for {purchase_invoice_name}: {e}",
+                f"PRF combined PDF — PO/QTN for {purchase_invoice_name}: {e}\n{traceback.format_exc()}",
                 "PRF Combined PDF",
             )
 
@@ -1255,6 +1270,7 @@ def _build_combined_pdf_bytes(docname):
         pdf_bytes = _read_local_pdf(doc.bank_letter)
         if pdf_bytes:
             merger.append(io.BytesIO(pdf_bytes))
+            appended += 1
 
     # 4. Additional documents (always last)
     for addl in (doc.additional_documents or []):
@@ -1263,6 +1279,14 @@ def _build_combined_pdf_bytes(docname):
         pdf_bytes = _read_local_pdf(addl.attachment)
         if pdf_bytes:
             merger.append(io.BytesIO(pdf_bytes))
+            appended += 1
+
+    if appended == 0:
+        raise RuntimeError(
+            f"Combined PDF would be empty for Payment Request Form {docname} — "
+            "no voucher / references / attachments could be merged. Check the "
+            "Error Log doctype for per-step failure details."
+        )
 
     output = io.BytesIO()
     merger.write(output)
@@ -1276,6 +1300,23 @@ def _build_and_attach_combined_pdf(docname, user):
     previous "<docname>_combined.pdf" attached to the same PRF, attaches
     the fresh one, and pushes a realtime event so the UI can refresh
     and surface a download button."""
+    import traceback
+
+    # Impersonate the requesting user so print formats render with the
+    # same permissions the user has on the form (e.g. linked PI/PO/QTN
+    # read access). Without this the worker runs as Administrator but
+    # certain custom print formats / hooks resolve blank when session
+    # user is 'Administrator' in a queue context — reported symptom:
+    # downloaded combined PDF opens as a blank page.
+    try:
+        if user:
+            frappe.set_user(user)
+    except Exception as e:
+        frappe.log_error(
+            f"PRF combined PDF — set_user({user}) failed: {e}",
+            "PRF Combined PDF",
+        )
+
     try:
         pdf_bytes = _build_combined_pdf_bytes(docname)
         filename = f"{docname}_combined.pdf"
@@ -1322,13 +1363,14 @@ def _build_and_attach_combined_pdf(docname, user):
         except Exception:
             pass
     except Exception as e:
+        tb = traceback.format_exc()
         frappe.log_error(
-            f"PRF combined PDF — background build failed for {docname}: {e}",
+            f"PRF combined PDF — background build failed for {docname}: {e}\n{tb}",
             "PRF Combined PDF",
         )
         frappe.publish_realtime(
             "prf_combined_pdf_failed",
-            {"docname": docname, "error": str(e)[:500]},
+            {"docname": docname, "error": str(e)[:800]},
             user=user,
         )
 
