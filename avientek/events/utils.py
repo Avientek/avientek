@@ -124,16 +124,24 @@ def normalize_gst_treatment_from_template(doc, method=None):
     """Pull `gst_treatment` onto each item row from its Item Tax Template
     before india_compliance's validate_transaction runs.
 
-    Problem: india_compliance blocks saves that mix `gst_treatment == "Non-GST"`
-    rows with GST rows. On a fresh Quotation, `gst_treatment` is a
+    Problem 1 (Apr 21): on a fresh Quotation, `gst_treatment` is a
     `fetch_from: item_tax_template.gst_treatment` field, but the fetch
-    isn't guaranteed to have fired on the row yet when validate runs —
-    so rows come in blank / stale and the validator flags them as Non-GST.
+    isn't guaranteed to have fired server-side when validate runs — rows
+    come in blank / stale and the validator flags them as Non-GST.
 
-    Fix: for every row that has an `item_tax_template` set, read the
-    template's `gst_treatment` and apply it to the row. Rows that
-    genuinely point to a Non-GST template keep "Non-GST" (so the
-    compliance rule is still enforced when the data is actually wrong).
+    Problem 2 (Apr 22, reported by Sridhar — items IO17881, IO1789):
+    legacy Item Tax Templates that pre-date india_compliance carry a
+    real gst_rate and a populated `taxes` child table, but have no value
+    in the `gst_treatment` field. Copying the blank field verbatim leaves
+    the row as Non-GST and trips
+    `validate_tax_accounts_for_non_gst` → "Cannot charge GST for Non GST
+    Items" even though the template clearly represents taxable supply.
+
+    Fix: when the template's gst_treatment is blank, INFER it:
+      • gst_rate > 0          → Taxable
+      • any child tax row rate > 0 → Taxable
+    Otherwise leave the row alone so genuine Non-GST templates still
+    enforce the compliance split.
     """
     if not getattr(doc, "items", None):
         return
@@ -142,27 +150,53 @@ def normalize_gst_treatment_from_template(doc, method=None):
     if not templates:
         return
 
-    tpl_map = frappe._dict(
-        frappe.get_all(
-            "Item Tax Template",
-            filters={"name": ("in", list(templates))},
-            fields=["name", "gst_treatment"],
-            as_list=True,
-        )
+    # Read gst_treatment AND gst_rate from each template. gst_rate gives
+    # us a fallback when the treatment field is blank on legacy templates.
+    tpl_rows = frappe.get_all(
+        "Item Tax Template",
+        filters={"name": ("in", list(templates))},
+        fields=["name", "gst_treatment", "gst_rate"],
     )
-    if not tpl_map:
+    if not tpl_rows:
         return
+
+    # Child tax rates — a second fallback. If gst_treatment is blank AND
+    # gst_rate is 0/null, but the template's `taxes` child table carries
+    # a positive rate against some account, still infer Taxable.
+    child_max_rate = {}
+    child_rows = frappe.get_all(
+        "Item Tax Template Detail",
+        filters={"parent": ("in", list(templates))},
+        fields=["parent", "tax_rate"],
+    )
+    for cr in child_rows:
+        try:
+            r = float(cr.get("tax_rate") or 0)
+        except Exception:
+            r = 0
+        if r > child_max_rate.get(cr["parent"], 0):
+            child_max_rate[cr["parent"]] = r
+
+    resolved = {}
+    for tpl in tpl_rows:
+        treatment = tpl.get("gst_treatment")
+        if not treatment:
+            rate = 0
+            try:
+                rate = float(tpl.get("gst_rate") or 0)
+            except Exception:
+                rate = 0
+            if rate > 0 or child_max_rate.get(tpl["name"], 0) > 0:
+                treatment = "Taxable"
+        resolved[tpl["name"]] = treatment
 
     for row in doc.items:
         tpl = getattr(row, "item_tax_template", None)
         if not tpl:
             continue
-        tpl_treatment = tpl_map.get(tpl)
+        tpl_treatment = resolved.get(tpl)
         if not tpl_treatment:
             continue
-        # Only overwrite when the current value is blank OR stale (points
-        # to a different value than the template now carries). Don't touch
-        # rows the user deliberately set to a different treatment.
         current = getattr(row, "gst_treatment", None)
         if not current or current != tpl_treatment:
             row.gst_treatment = tpl_treatment
