@@ -1356,14 +1356,16 @@ def download_payment_pdf(docname, mode="enqueue"):
         frappe.local.response.type = "download"
         return
 
-    # Default: background mode
+    # Default: background mode. enqueue_after_commit was removed — the
+    # endpoint does no prior DB write, so there's nothing to commit; on
+    # some Frappe Cloud deployments the job was never getting queued
+    # (reported on Jithin's spreadsheet row 30).
     frappe.enqueue(
         "avientek.avientek.doctype.payment_request_form.payment_request_form._build_and_attach_combined_pdf",
         queue="long",
         timeout=900,
         docname=docname,
         user=frappe.session.user,
-        enqueue_after_commit=True,
     )
     return {
         "status": "queued",
