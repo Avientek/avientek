@@ -880,11 +880,13 @@ def run_calculation_pipeline(doc, method=None):
     for it in doc.items:
         prev = prev_items.get(it.name)
         if prev:
-            prev_rate   = flt(prev.custom_special_rate)
-            curr_rate   = flt(it.custom_special_rate)
-            prev_markup = flt(prev.custom_markup_)
-            curr_markup = flt(it.custom_markup_)
-            if abs(curr_rate - prev_rate) > 0.01 and abs(curr_markup - prev_markup) < 0.001:
+            prev_rate = flt(prev.custom_special_rate)
+            curr_rate = flt(it.custom_special_rate)
+            # The JS custom_special_rate handler also back-solves custom_markup_
+            # client-side, so both fields change together — checking markup%
+            # unchanged would never fire. Just check if the selling rate itself
+            # changed from the saved DB value.
+            if abs(curr_rate - prev_rate) > 0.01:
                 manual_overrides[it.name] = curr_rate
 
         calc_item_totals(it)
