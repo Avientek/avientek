@@ -891,6 +891,17 @@ def run_calculation_pipeline(doc, method=None):
 
         calc_item_totals(it)
 
+        # After calc_item_totals, detect persistent manual overrides from prior
+        # saves. calc_item_totals uses back-solved custom_markup_ (inflated to
+        # a pre-discount value) and produces an inflated custom_special_rate.
+        # If DB rate ≠ freshly-calculated rate, the DB rate is the user's real
+        # price and must be preserved — otherwise it drifts on every plain save.
+        if prev and it.name not in manual_overrides:
+            db_rate = flt(prev.custom_special_rate)
+            calc_rate = flt(it.custom_special_rate)
+            if abs(db_rate - calc_rate) > 0.01:
+                manual_overrides[it.name] = db_rate
+
     # Capture pre-distribute totals needed to compute stable markup% targets.
     discount_amount = _to_flt(doc.custom_discount_amount_value)
     pre_discount_total = sum(_to_flt(it.custom_selling_price) for it in doc.items)
