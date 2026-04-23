@@ -803,26 +803,42 @@ def validate_item_tax_template(doc, method=None):
 # ──────────────────────────────────────────────────────────────
 # 5)  MASTER PIPELINE  (called from before_save hook)
 # ──────────────────────────────────────────────────────────────
-def _apply_manual_selling_rate(it, user_rate):
-    """Back-solve custom_markup_ so calc_item_totals produces the user's selling price.
-    Called after calc_item_totals so custom_cogs is already populated.
+def _apply_manual_selling_rate(it, user_rate, discount_total=0.0, pre_discount_total=0.0):
+    """Back-solve custom_markup_ so the formula stays stable across saves.
+
+    When a parent-level discount exists, calc_item_totals + distribute_discount_server
+    will reduce the rate on every save. We inflate the back-solved markup% target by
+    the discount share so that on subsequent saves:
+        calc_item_totals  →  pre_discount_rate
+        distribute        →  pre_discount_rate − share  ≈  user_rate   (stable)
+
+    custom_special_rate is always written as user_rate (what the user sees).
     """
     qty = max(cint(it.qty), 1)
-    user_selling = flt(user_rate * qty, 4)
     cogs = flt(it.custom_cogs)
-
     if cogs <= 0:
         return
 
-    markup_val = flt(user_selling - cogs, 4)
+    # Inflate target so post-discount matches user_rate:
+    #   pre_rate = user_rate × T / (T − D)
+    pre_discount_rate = user_rate
+    if discount_total > 0 and pre_discount_total > discount_total:
+        pre_discount_rate = flt(
+            user_rate * pre_discount_total / (pre_discount_total - discount_total), 4
+        )
+
+    pre_discount_selling = flt(pre_discount_rate * qty, 4)
+    user_selling = flt(user_rate * qty, 4)
+
+    markup_val = flt(pre_discount_selling - cogs, 4)
     markup_pct = flt(markup_val / cogs * 100, 4)
     margin_val = flt(user_selling - cogs, 4)
     margin_pct = flt(margin_val / user_selling * 100, 4) if user_selling else 0.0
 
     it.update({
-        "custom_markup_":       markup_pct,
+        "custom_markup_":       markup_pct,           # inflated so formula is self-consistent
         "custom_markup_value":  markup_val,
-        "custom_special_rate":  user_rate,
+        "custom_special_rate":  user_rate,            # final visible price
         "rate":                 user_rate,
         "custom_selling_price": user_selling,
         "custom_total_":        user_selling,
@@ -873,6 +889,10 @@ def run_calculation_pipeline(doc, method=None):
 
         calc_item_totals(it)
 
+    # Capture pre-distribute totals needed to compute stable markup% targets.
+    discount_amount = _to_flt(doc.custom_discount_amount_value)
+    pre_discount_total = sum(_to_flt(it.custom_selling_price) for it in doc.items)
+
     # Distribute parent-level incentive only when parent has a positive amount.
     # calc_item_totals already computes item-level incentive from each item's
     # custom_incentive_ percentage; the distributor overrides that with the
@@ -884,17 +904,21 @@ def run_calculation_pipeline(doc, method=None):
     # Distribute parent-level discount only when parent has a positive amount.
     # calc_item_totals resets item discount fields to 0, so stale values
     # from a previous "Apply Discount" no longer trigger redistribution.
-    discount_amount = _to_flt(doc.custom_discount_amount_value)
     if discount_amount > 0:
         distribute_discount_server(doc)
 
     # Apply manual selling-price overrides after all automatic distributions.
-    # This ensures the user's typed price wins over both markup calculation
-    # and parent-level discount re-distribution.
+    # Pass discount_total and pre_discount_total so _apply_manual_selling_rate
+    # can inflate the back-solved markup% target, making the state self-consistent:
+    # calc_item_totals → pre_discount_rate → distribute → user_rate on every save.
     for it in doc.items:
         manual_rate = manual_overrides.get(it.name)
         if manual_rate is not None:
-            _apply_manual_selling_rate(it, manual_rate)
+            _apply_manual_selling_rate(
+                it, manual_rate,
+                discount_total=discount_amount,
+                pre_discount_total=pre_discount_total,
+            )
 
     rebuild_brand_summary(doc)
     recalc_doc_totals(doc)
