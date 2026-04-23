@@ -838,32 +838,29 @@ def run_calculation_pipeline(doc, method=None):
     if doc.docstatus != 0:
         return
 
-    # Build previous-state lookup to detect manual selling-price edits.
-    # If the user changed custom_special_rate without touching custom_markup_,
-    # we back-solve markup% from the user's value so future saves are stable.
+    # Detect which items had their selling price manually edited.
+    # Condition: custom_special_rate changed but custom_markup_ did not
+    # → user typed a price directly, not a markup% change.
+    # We apply the manual override LAST (after discount distribution) so
+    # the user's price is truly final and not reduced by any parent discount.
     prev_items = {}
     doc_before = doc.get_doc_before_save()
     if doc_before:
         for pit in doc_before.items:
             prev_items[pit.name] = pit
 
+    manual_overrides = {}
     for it in doc.items:
         prev = prev_items.get(it.name)
-
-        manual_rate = None
         if prev:
             prev_rate   = flt(prev.custom_special_rate)
             curr_rate   = flt(it.custom_special_rate)
             prev_markup = flt(prev.custom_markup_)
             curr_markup = flt(it.custom_markup_)
-            # User changed selling price but left markup% untouched → manual entry
             if abs(curr_rate - prev_rate) > 0.01 and abs(curr_markup - prev_markup) < 0.001:
-                manual_rate = curr_rate
+                manual_overrides[it.name] = curr_rate
 
         calc_item_totals(it)
-
-        if manual_rate is not None:
-            _apply_manual_selling_rate(it, manual_rate)
 
     # Distribute parent-level incentive only when parent has a positive amount.
     # calc_item_totals already computes item-level incentive from each item's
@@ -879,6 +876,14 @@ def run_calculation_pipeline(doc, method=None):
     discount_amount = _to_flt(doc.custom_discount_amount_value)
     if discount_amount > 0:
         distribute_discount_server(doc)
+
+    # Apply manual selling-price overrides after all automatic distributions.
+    # This ensures the user's typed price wins over both markup calculation
+    # and parent-level discount re-distribution.
+    for it in doc.items:
+        manual_rate = manual_overrides.get(it.name)
+        if manual_rate is not None:
+            _apply_manual_selling_rate(it, manual_rate)
 
     rebuild_brand_summary(doc)
     recalc_doc_totals(doc)
