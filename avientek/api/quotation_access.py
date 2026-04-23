@@ -672,14 +672,6 @@ def has_permission_check(doc, ptype, user):
 
 	doctype = doc.doctype if hasattr(doc, "doctype") else doc.get("doctype")
 
-	# Quotation visibility rule — independent of User Permissions. A restricted
-	# user only sees a Quotation when the visibility rule's OR-chain matches
-	# (approved+100%, owner, or a sales_team entry under their Sales Person
-	# subtree). Roles in QUOTATION_VISIBILITY_BYPASS_ROLES skip this check.
-	if doctype == "Quotation" and not _user_has_visibility_bypass(user):
-		if not _quotation_doc_visible_to_user(doc, user):
-			return False
-
 	brand_perms = _get_user_brands(user)
 	ig_perms = _get_user_item_groups(user)
 	cg_perms = _get_user_customer_groups(user)
@@ -688,6 +680,13 @@ def has_permission_check(doc, ptype, user):
 
 	if not brand_perms and not ig_perms and not cg_perms and not sp_perms and not company_perms:
 		return None  # No restrictions
+
+	# Quotation visibility rule applies only to users who have explicit restrictions.
+	# Unrestricted users rely on DocPerm alone — applying visibility to them would
+	# prevent global search from working if they have no owned/team quotations.
+	if doctype == "Quotation" and not _user_has_visibility_bypass(user):
+		if not _quotation_doc_visible_to_user(doc, user):
+			return False
 
 	if not doctype:
 		return None
@@ -844,6 +843,16 @@ def _quotation_doc_visible_to_user(doc, user):
 def quotation_permission_query(user):
 	existing = _combined_permission_query(user, "Quotation", "Quotation Item")
 	if _user_has_visibility_bypass(user):
+		return existing
+	# Only apply visibility condition if the user has at least one explicit restriction.
+	# For unrestricted users the SQL condition would block global search entirely when
+	# they have no owned or sales-team quotations.
+	brand_perms = _get_user_brands(user)
+	ig_perms = _get_user_item_groups(user)
+	cg_perms = _get_user_customer_groups(user)
+	sp_perms = _get_user_sales_persons(user)
+	company_perms = _get_user_companies(user)
+	if not brand_perms and not ig_perms and not cg_perms and not sp_perms and not company_perms:
 		return existing
 	visibility = _quotation_visibility_condition(user)
 	if existing:
