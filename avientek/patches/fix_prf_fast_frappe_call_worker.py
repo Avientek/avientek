@@ -29,16 +29,20 @@ import frappe
 
 _PF_NAME = "Payment Voucher Fast"
 
-_OLD_CALL_RE = re.compile(
-    r'\{%\s*set\s+ctx\s*=\s*frappe\.call\(\s*'
-    r'"avientek\.avientek\.doctype\.payment_request_form\.payment_request_form\.get_payment_voucher_context"\s*,\s*'
-    r'docname\s*=\s*doc\.name\s*\)\s*%\}'
-)
+_OLD_PATTERNS = [
+    # original frappe.call (HTTP whitelist path — fails in background workers)
+    re.compile(
+        r'frappe\.call\(\s*"avientek\.avientek\.doctype\.payment_request_form'
+        r'\.payment_request_form\.get_payment_voucher_context"\s*,\s*docname\s*=\s*doc\.name\s*\)'
+    ),
+    # interim frappe.get_attr attempt (not in Jinja safe globals — also fails)
+    re.compile(
+        r'frappe\.get_attr\(\s*"avientek\.avientek\.doctype\.payment_request_form'
+        r'\.payment_request_form\.get_payment_voucher_context"\s*\)\s*\(\s*doc\.name\s*\)'
+    ),
+]
 
-_NEW_CALL = (
-    '{% set _get_ctx = frappe.get_attr("avientek.avientek.doctype.payment_request_form.payment_request_form.get_payment_voucher_context") %}\n'
-    '{% set ctx = _get_ctx(doc.name) %}'
-)
+_NEW_CALL = "get_payment_voucher_context(doc.name)"
 
 
 def execute():
@@ -51,20 +55,24 @@ def execute():
         print("[fix_prf_fast_frappe_call_worker] empty html, skip")
         return
 
-    if "frappe.get_attr" in html and "get_payment_voucher_context" in html:
-        print("[fix_prf_fast_frappe_call_worker] already rewritten, skip")
+    if "get_payment_voucher_context(doc.name)" in html:
+        print("[fix_prf_fast_frappe_call_worker] already using direct Jinja call, skip")
         return
 
-    if not _OLD_CALL_RE.search(html):
-        print("[fix_prf_fast_frappe_call_worker] old frappe.call pattern not found, skip")
-        return
+    new_html = html
+    replaced = False
+    for pattern in _OLD_PATTERNS:
+        candidate = pattern.sub(_NEW_CALL, new_html, count=1)
+        if candidate != new_html:
+            new_html = candidate
+            replaced = True
+            break
 
-    new_html = _OLD_CALL_RE.sub(_NEW_CALL, html, count=1)
-    if new_html == html:
-        print("[fix_prf_fast_frappe_call_worker] substitution failed, skip")
+    if not replaced:
+        print("[fix_prf_fast_frappe_call_worker] no matching pattern found, skip")
         return
 
     frappe.db.set_value("Print Format", _PF_NAME, "html", new_html, update_modified=False)
     frappe.db.commit()
     frappe.clear_cache(doctype="Print Format")
-    print(f"[fix_prf_fast_frappe_call_worker] swapped frappe.call for frappe.get_attr in {_PF_NAME}")
+    print(f"[fix_prf_fast_frappe_call_worker] rewrote {_PF_NAME} to use direct Jinja function call")

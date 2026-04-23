@@ -309,10 +309,11 @@ override_doctype_dashboards = {
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# "methods": "avientek.utils.jinja_methods",
-# "filters": "avientek.utils.jinja_filters"
-# }
+jinja = {
+	"methods": [
+		"avientek.avientek.doctype.payment_request_form.payment_request_form.get_payment_voucher_context",
+	]
+}
 
 # Installation
 # ------------
