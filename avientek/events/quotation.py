@@ -803,14 +803,67 @@ def validate_item_tax_template(doc, method=None):
 # ──────────────────────────────────────────────────────────────
 # 5)  MASTER PIPELINE  (called from before_save hook)
 # ──────────────────────────────────────────────────────────────
+def _apply_manual_selling_rate(it, user_rate):
+    """Back-solve custom_markup_ so calc_item_totals produces the user's selling price.
+    Called after calc_item_totals so custom_cogs is already populated.
+    """
+    qty = max(cint(it.qty), 1)
+    user_selling = flt(user_rate * qty, 4)
+    cogs = flt(it.custom_cogs)
+
+    if cogs <= 0:
+        return
+
+    markup_val = flt(user_selling - cogs, 4)
+    markup_pct = flt(markup_val / cogs * 100, 4)
+    margin_val = flt(user_selling - cogs, 4)
+    margin_pct = flt(margin_val / user_selling * 100, 4) if user_selling else 0.0
+
+    it.update({
+        "custom_markup_":       markup_pct,
+        "custom_markup_value":  markup_val,
+        "custom_special_rate":  user_rate,
+        "rate":                 user_rate,
+        "custom_selling_price": user_selling,
+        "custom_total_":        user_selling,
+        "amount":               user_selling,
+        "custom_margin_":       margin_pct,
+        "custom_margin_value":  margin_val,
+    })
+
+
 def run_calculation_pipeline(doc, method=None):
     """Authoritative server-side calculation — runs on every save.
     Skip on submit/cancel/amend to preserve the previewed values."""
     if doc.docstatus != 0:
         return
 
+    # Build previous-state lookup to detect manual selling-price edits.
+    # If the user changed custom_special_rate without touching custom_markup_,
+    # we back-solve markup% from the user's value so future saves are stable.
+    prev_items = {}
+    doc_before = doc.get_doc_before_save()
+    if doc_before:
+        for pit in doc_before.items:
+            prev_items[pit.name] = pit
+
     for it in doc.items:
+        prev = prev_items.get(it.name)
+
+        manual_rate = None
+        if prev:
+            prev_rate   = flt(prev.custom_special_rate)
+            curr_rate   = flt(it.custom_special_rate)
+            prev_markup = flt(prev.custom_markup_)
+            curr_markup = flt(it.custom_markup_)
+            # User changed selling price but left markup% untouched → manual entry
+            if abs(curr_rate - prev_rate) > 0.01 and abs(curr_markup - prev_markup) < 0.001:
+                manual_rate = curr_rate
+
         calc_item_totals(it)
+
+        if manual_rate is not None:
+            _apply_manual_selling_rate(it, manual_rate)
 
     # Distribute parent-level incentive only when parent has a positive amount.
     # calc_item_totals already computes item-level incentive from each item's
