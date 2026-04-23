@@ -903,10 +903,13 @@ def run_calculation_pipeline(doc, method=None):
     if incentive_amount > 0:
         distribute_incentive_server(doc)
 
-    # Distribute parent-level discount only when parent has a positive amount.
-    # calc_item_totals resets item discount fields to 0, so stale values
-    # from a previous "Apply Discount" no longer trigger redistribution.
-    if discount_amount > 0:
+    # Distribute parent-level discount only when something actually changed.
+    # If no item's selling price differs from its DB value, the discount was
+    # already applied in a previous save — re-running causes tiny rounding
+    # drift each save (e.g. total 15,110.70 → 15,110.16 with no user edits).
+    # Only redistribute when a price was manually changed this save.
+    new_item_names = {it.name for it in doc.items} - set(prev_items.keys())
+    if discount_amount > 0 and (manual_overrides or new_item_names):
         distribute_discount_server(doc)
 
     # Apply manual selling-price overrides after all automatic distributions.
