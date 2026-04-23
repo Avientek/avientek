@@ -843,11 +843,22 @@ def run_calculation_pipeline(doc, method=None):
     # → user typed a price directly, not a markup% change.
     # We apply the manual override LAST (after discount distribution) so
     # the user's price is truly final and not reduced by any parent discount.
+    #
+    # NOTE: get_doc_before_save() returns None at before_save time in this
+    # Frappe version because _doc_before_save is not loaded before the hook
+    # fires. Load from DB directly instead.
     prev_items = {}
-    doc_before = doc.get_doc_before_save()
-    if doc_before:
-        for pit in doc_before.items:
-            prev_items[pit.name] = pit
+    if not doc.is_new():
+        try:
+            db_items = frappe.get_all(
+                "Quotation Item",
+                filters={"parent": doc.name},
+                fields=["name", "custom_special_rate", "custom_markup_"],
+            )
+            for pit in db_items:
+                prev_items[pit.name] = pit
+        except Exception:
+            pass
 
     manual_overrides = {}
     for it in doc.items:
