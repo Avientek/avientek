@@ -1175,6 +1175,7 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     UI can render a live progress bar with stage breakdown.
     """
     import traceback
+    import time as _time
 
     doc = frappe.get_doc("Payment Request Form", docname)
     merger = PdfMerger()
@@ -1195,6 +1196,16 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             except Exception:
                 pass
 
+    def _announce(msg):
+        """Emit a progress event at the CURRENT stage (don't advance the
+        counter). Used to show the user what's happening BEFORE the heavy
+        step completes, so long-running phases don't look frozen."""
+        if progress_cb:
+            try:
+                progress_cb(_stage_counter["n"], total_stages, msg)
+            except Exception:
+                pass
+
     # 1. Payment Voucher print format (with format fallbacks). This step
     # is MANDATORY — if we can't render the voucher itself there is no
     # point saving a combined PDF at all. Let the exception propagate
@@ -1206,10 +1217,13 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     if not frappe.db.exists("Print Format", print_format_name):
         print_format_name = "PAYMENT VOUCHER"
 
+    _announce(_("Rendering Payment Voucher…"))
+    t_voucher = _time.time()
     pdf_bytes = frappe.get_print(
         "Payment Request Form", docname,
         print_format=print_format_name, as_pdf=True,
     )
+    print(f"[PRF PDF {docname}] voucher '{print_format_name}' rendered in {_time.time()-t_voucher:.2f}s")
     if not pdf_bytes:
         raise RuntimeError(
             f"frappe.get_print returned empty bytes for Payment Request Form {docname} "
@@ -1234,8 +1248,8 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     #
     # Additional timing instrumentation prints per-step elapsed seconds
     # into the worker log so future slowdowns are diagnosable without
-    # re-reading the code.
-    import time as _time
+    # re-reading the code. _time is already imported at the top of the
+    # function so we don't re-import here.
 
     refs = list(doc.payment_references or [])
 
@@ -1303,7 +1317,8 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             unique_qns.append(r["qn"])
 
     po_pdf_cache = {}
-    for po in unique_pos:
+    for _i, po in enumerate(unique_pos, start=1):
+        _announce(_("Rendering Purchase Order {0}/{1} — {2}").format(_i, len(unique_pos), po))
         t = _time.time()
         try:
             po_pdf_cache[po] = get_pdf(
@@ -1317,7 +1332,8 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             )
 
     qn_pdf_cache = {}
-    for qn in unique_qns:
+    for _i, qn in enumerate(unique_qns, start=1):
+        _announce(_("Rendering Quotation {0}/{1} — {2}").format(_i, len(unique_qns), qn))
         t = _time.time()
         try:
             qn_pdf_cache[qn] = get_pdf(
@@ -1392,11 +1408,15 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             "Error Log doctype for per-step failure details."
         )
 
+    _announce(_("Merging PDFs…"))
+    t_merge = _time.time()
     output = io.BytesIO()
     merger.write(output)
     merger.close()
     output.seek(0)
-    return output.read()
+    data = output.read()
+    print(f"[PRF PDF {docname}] merged {appended} sections in {_time.time()-t_merge:.2f}s, output={len(data)} bytes")
+    return data
 
 
 def _build_and_attach_combined_pdf(docname, user):
@@ -1436,8 +1456,15 @@ def _build_and_attach_combined_pdf(docname, user):
         except Exception:
             pass
 
+    # Immediately emit a "worker picked up the job" event so the UI knows
+    # the build has truly started (vs. stuck in the queue).
+    _progress(0, 1, _("Worker started — preparing build plan…"))
+
+    import time as _time
+    t_overall = _time.time()
     try:
         pdf_bytes = _build_combined_pdf_bytes(docname, progress_cb=_progress)
+        print(f"[PRF PDF {docname}] build_bytes total: {_time.time()-t_overall:.2f}s")
         filename = f"{docname}_combined.pdf"
 
         # Remove any older combined PDF attached to this PRF so the user
@@ -1457,6 +1484,8 @@ def _build_and_attach_combined_pdf(docname, user):
             except Exception:
                 pass
 
+        _progress(1, 1, _("Attaching PDF to Payment Request Form…"))
+        t_save = _time.time()
         # save_file enforces frappe.conf.max_file_size (default 10 MB).
         # Combined PDFs that merge many references routinely exceed 10 MB —
         # AVFZC-017 reported "File size exceeded the maximum allowed size
@@ -1487,6 +1516,7 @@ def _build_and_attach_combined_pdf(docname, user):
                 except Exception:
                     pass
         frappe.db.commit()
+        print(f"[PRF PDF {docname}] save_file + commit: {_time.time()-t_save:.2f}s")
 
         frappe.publish_realtime(
             "prf_combined_pdf_ready",
