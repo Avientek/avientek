@@ -1160,7 +1160,7 @@ def _read_local_pdf(file_url):
         return None
 
 
-def _build_combined_pdf_bytes(docname):
+def _build_combined_pdf_bytes(docname, progress_cb=None):
     """Builds the merged Payment Voucher PDF and returns the bytes.
 
     Pure (no HTTP context required), so the same function works whether
@@ -1170,12 +1170,30 @@ def _build_combined_pdf_bytes(docname):
       - Read attached PDFs from disk (instant, no HTTP)
     For large vouchers this can run 60s+, so callers should usually
     invoke this from inside frappe.enqueue.
+
+    progress_cb(current, total, stage_msg) fires after each stage so the
+    UI can render a live progress bar with stage breakdown.
     """
     import traceback
 
     doc = frappe.get_doc("Payment Request Form", docname)
     merger = PdfMerger()
     appended = 0  # track sections actually merged so we can fail loud on empty output
+
+    # Precompute total stage count so the progress bar shows a stable denominator.
+    ref_count = len(doc.payment_references or [])
+    addl_count = sum(1 for a in (doc.additional_documents or []) if a.attachment)
+    bank_letter_count = 1 if doc.bank_letter else 0
+    total_stages = 1 + (3 * ref_count) + bank_letter_count + addl_count
+    _stage_counter = {"n": 0}
+
+    def _step(msg):
+        _stage_counter["n"] += 1
+        if progress_cb:
+            try:
+                progress_cb(_stage_counter["n"], total_stages, msg)
+            except Exception:
+                pass
 
     # 1. Payment Voucher print format (with format fallbacks). This step
     # is MANDATORY — if we can't render the voucher itself there is no
@@ -1199,14 +1217,19 @@ def _build_combined_pdf_bytes(docname):
         )
     merger.append(io.BytesIO(pdf_bytes))
     appended += 1
+    _step(_("Rendered Payment Voucher"))
 
     # 2. Per-reference: PI attachment + PO PDF + Quotation PDF
-    for row in (doc.payment_references or []):
+    for _ref_idx, row in enumerate(doc.payment_references or [], start=1):
         supplier_bill_no = row.reference_name
         purchase_invoice_name = frappe.db.get_value(
             "Purchase Invoice", {"bill_no": supplier_bill_no}, "name"
         )
         if not purchase_invoice_name:
+            # Still advance 3 stages so the progress bar matches total_stages.
+            _step(_("Reference {0}/{1} — Purchase Invoice attachment (skipped)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Purchase Order (skipped)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Quotation (skipped)").format(_ref_idx, ref_count))
             continue
 
         try:
@@ -1230,6 +1253,7 @@ def _build_combined_pdf_bytes(docname):
                 f"PRF combined PDF — PI attachment {purchase_invoice_name}: {e}\n{traceback.format_exc()}",
                 "PRF Combined PDF",
             )
+        _step(_("Reference {0}/{1} — Purchase Invoice attachment").format(_ref_idx, ref_count))
 
         try:
             purchase_order = frappe.get_value(
@@ -1245,6 +1269,7 @@ def _build_combined_pdf_bytes(docname):
                 if po_pdf:
                     merger.append(io.BytesIO(po_pdf))
                     appended += 1
+                _step(_("Reference {0}/{1} — Purchase Order").format(_ref_idx, ref_count))
 
                 sales_order = frappe.db.get_value(
                     "Purchase Order Item", {"parent": purchase_order}, "sales_order"
@@ -1259,6 +1284,10 @@ def _build_combined_pdf_bytes(docname):
                     if q_pdf:
                         merger.append(io.BytesIO(q_pdf))
                         appended += 1
+                _step(_("Reference {0}/{1} — Quotation").format(_ref_idx, ref_count))
+            else:
+                _step(_("Reference {0}/{1} — Purchase Order (none)").format(_ref_idx, ref_count))
+                _step(_("Reference {0}/{1} — Quotation (none)").format(_ref_idx, ref_count))
         except Exception as e:
             frappe.log_error(
                 f"PRF combined PDF — PO/QTN for {purchase_invoice_name}: {e}\n{traceback.format_exc()}",
@@ -1271,6 +1300,7 @@ def _build_combined_pdf_bytes(docname):
         if pdf_bytes:
             merger.append(io.BytesIO(pdf_bytes))
             appended += 1
+        _step(_("Bank letter"))
 
     # 4. Additional documents (always last)
     for addl in (doc.additional_documents or []):
@@ -1280,6 +1310,7 @@ def _build_combined_pdf_bytes(docname):
         if pdf_bytes:
             merger.append(io.BytesIO(pdf_bytes))
             appended += 1
+        _step(_("Additional document"))
 
     if appended == 0:
         raise RuntimeError(
@@ -1317,8 +1348,23 @@ def _build_and_attach_combined_pdf(docname, user):
             "PRF Combined PDF",
         )
 
+    def _progress(current, total, stage):
+        try:
+            frappe.publish_realtime(
+                "prf_combined_pdf_progress",
+                {
+                    "docname": docname,
+                    "current": current,
+                    "total": total,
+                    "stage": stage,
+                },
+                user=user,
+            )
+        except Exception:
+            pass
+
     try:
-        pdf_bytes = _build_combined_pdf_bytes(docname)
+        pdf_bytes = _build_combined_pdf_bytes(docname, progress_cb=_progress)
         filename = f"{docname}_combined.pdf"
 
         # Remove any older combined PDF attached to this PRF so the user

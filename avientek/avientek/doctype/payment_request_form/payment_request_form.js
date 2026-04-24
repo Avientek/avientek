@@ -33,6 +33,112 @@ if (!document.getElementById('payment-ref-styles')) {
     $(row_styles).attr('id', 'payment-ref-styles').appendTo('head');
 }
 
+// ──────────────────────────────────────────────────────────────
+// Combined PDF persistent progress banner
+// ──────────────────────────────────────────────────────────────
+// Survives tab switching / minimizing / page refresh so a long PDF
+// build (for a PRF with many references) is always observable.
+// State lives in localStorage under `avientek:prf:<docname>:combined_pdf_job`.
+// Stale jobs (>30 min) are auto-cleared on load.
+const PRF_JOB_LS_KEY = (docname) => `avientek:prf:${docname}:combined_pdf_job`;
+const PRF_JOB_STALE_MS = 30 * 60 * 1000;
+
+function prf_save_job(docname) {
+    try {
+        localStorage.setItem(PRF_JOB_LS_KEY(docname), JSON.stringify({
+            docname: docname,
+            started_at: Date.now(),
+        }));
+    } catch (e) {}
+}
+
+function prf_load_job(docname) {
+    try {
+        const raw = localStorage.getItem(PRF_JOB_LS_KEY(docname));
+        if (!raw) return null;
+        const job = JSON.parse(raw);
+        if (!job || !job.started_at || (Date.now() - job.started_at > PRF_JOB_STALE_MS)) {
+            localStorage.removeItem(PRF_JOB_LS_KEY(docname));
+            return null;
+        }
+        return job;
+    } catch (e) {
+        try { localStorage.removeItem(PRF_JOB_LS_KEY(docname)); } catch (_) {}
+        return null;
+    }
+}
+
+function prf_clear_job(docname) {
+    try { localStorage.removeItem(PRF_JOB_LS_KEY(docname)); } catch (e) {}
+}
+
+function prf_format_elapsed(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function prf_render_banner(frm, job, progress) {
+    const elapsed = prf_format_elapsed(Date.now() - job.started_at);
+    let pct = 0;
+    let stage = __('Preparing Combined PDF…');
+    let counter = '';
+    if (progress && progress.total > 0) {
+        pct = Math.min(100, Math.round((progress.current / progress.total) * 100));
+        stage = progress.stage || stage;
+        counter = ` (${progress.current}/${progress.total})`;
+    }
+    const html = `
+        <div style="display:flex; align-items:center; gap:12px;">
+            <div style="flex:0 0 auto; color:#1f7e4f;">
+                <i class="fa fa-spinner fa-spin" style="font-size:18px;"></i>
+            </div>
+            <div style="flex:1 1 auto; min-width:0;">
+                <div style="font-weight:600; margin-bottom:4px;">
+                    ${__('Combined PDF building')} — ${__('elapsed')} ${elapsed}
+                </div>
+                <div style="font-size:12px; color:#6c7680; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${frappe.utils.escape_html(stage)}${counter}
+                </div>
+                <div style="height:6px; background:#ebeef0; border-radius:3px; overflow:hidden;">
+                    <div style="height:100%; width:${pct}%; background:#1f7e4f; transition:width .3s;"></div>
+                </div>
+                <div style="font-size:11px; color:#8d99a6; margin-top:4px;">
+                    ${__('Safe to switch tabs or refresh — this keeps running on the server.')}
+                </div>
+            </div>
+        </div>
+    `;
+    frm.set_intro(html, 'blue');
+}
+
+function prf_stop_banner(frm) {
+    if (frm._prf_banner_timer) {
+        clearInterval(frm._prf_banner_timer);
+        frm._prf_banner_timer = null;
+    }
+    try { frm.set_intro(''); } catch (e) {}
+}
+
+function prf_start_banner(frm) {
+    const job = prf_load_job(frm.doc.name);
+    if (!job) {
+        prf_stop_banner(frm);
+        return;
+    }
+    prf_render_banner(frm, job, frm._prf_last_progress);
+    if (frm._prf_banner_timer) clearInterval(frm._prf_banner_timer);
+    frm._prf_banner_timer = setInterval(() => {
+        const j = prf_load_job(frm.doc.name);
+        if (!j) {
+            prf_stop_banner(frm);
+            return;
+        }
+        prf_render_banner(frm, j, frm._prf_last_progress);
+    }, 1000);
+}
+
 // Invoice drill-down link + View button styles
 if (!document.getElementById('inv-drilldown-styles')) {
     $(`<style id="inv-drilldown-styles">
@@ -303,10 +409,12 @@ frappe.ui.form.on('Payment Request Form', {
             // "prf_combined_pdf_ready", which we listen for below to
             // surface a "Download Now" button.
             frm.add_custom_button(__('Download Combined PDF'), function () {
-                frappe.show_alert({
-                    message: __('Preparing Combined PDF — this may take a minute.'),
-                    indicator: 'blue'
-                }, 5);
+                // Start persistent banner immediately so user gets live
+                // feedback even if they switch tabs / minimize / refresh.
+                prf_save_job(frm.doc.name);
+                frm._prf_last_progress = null;
+                prf_start_banner(frm);
+
                 frappe.call({
                     method: "avientek.avientek.doctype.payment_request_form.payment_request_form.download_payment_pdf",
                     args: { docname: frm.doc.name, mode: "enqueue" },
@@ -315,29 +423,49 @@ frappe.ui.form.on('Payment Request Form', {
                             frappe.show_alert({
                                 message: r.message.message,
                                 indicator: 'green'
-                            }, 8);
+                            }, 5);
                         }
+                    },
+                    error: function() {
+                        // Gateway rejected — don't leave the banner spinning forever.
+                        prf_clear_job(frm.doc.name);
+                        prf_stop_banner(frm);
                     }
                 });
             });
 
-            // Listen once per form-load for the worker's "ready" event so
-            // the user gets an immediate download link without manually
-            // refreshing the form.
+            // Listen once per form-load for the worker's progress + ready +
+            // failed events. These fire on the realtime (socket.io) channel
+            // which reconnects automatically when the tab comes back, so
+            // missed events on a backgrounded tab are delivered on resume.
             if (!frm._prf_combined_pdf_listener) {
                 frm._prf_combined_pdf_listener = true;
+
+                frappe.realtime.on("prf_combined_pdf_progress", function(data) {
+                    if (!data || data.docname !== frm.doc.name) return;
+                    frm._prf_last_progress = data;
+                    const job = prf_load_job(frm.doc.name);
+                    if (job) prf_render_banner(frm, job, data);
+                });
+
                 frappe.realtime.on("prf_combined_pdf_ready", function(data) {
                     if (!data || data.docname !== frm.doc.name) return;
+                    prf_clear_job(frm.doc.name);
+                    prf_stop_banner(frm);
+                    frm._prf_last_progress = null;
                     frappe.show_alert({
                         message: __('Combined PDF ready'),
                         indicator: 'green'
                     }, 10);
-                    // Open the file in a new tab
                     window.open(data.file_url, "_blank");
                     frm.reload_doc();
                 });
+
                 frappe.realtime.on("prf_combined_pdf_failed", function(data) {
                     if (!data || data.docname !== frm.doc.name) return;
+                    prf_clear_job(frm.doc.name);
+                    prf_stop_banner(frm);
+                    frm._prf_last_progress = null;
                     frappe.msgprint({
                         title: __('Combined PDF failed'),
                         message: data.error || __('Unknown error'),
@@ -345,6 +473,10 @@ frappe.ui.form.on('Payment Request Form', {
                     });
                 });
             }
+
+            // Rehydrate banner if a build is still in flight from a prior
+            // page load (user refreshed the tab or came back after a while).
+            prf_start_banner(frm);
         }
 
         // "Get Invoices From" button removed - users can add rows manually
