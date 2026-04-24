@@ -655,6 +655,29 @@ frappe.ui.form.on('Quotation', {
                 show_update_special_price_dialog(frm);
             });
         }
+
+        // "Update Items" button on submitted Quotations — same behavior as
+        // ERPNext's Sales Order / Purchase Order buttons. ERPNext does not
+        // ship this button for Quotation by default; added here so users
+        // can tweak qty / rate on an open quote without cancel+amend.
+        // Shown only when the quote can still be acted on:
+        //   - docstatus === 1 (submitted)
+        //   - status != "Lost", "Ordered", "Expired"
+        //   - user has write permission
+        if (
+            frm.doc.docstatus === 1 &&
+            ["Lost", "Ordered", "Expired"].indexOf(frm.doc.status) === -1 &&
+            frm.has_perm("write")
+        ) {
+            frm.add_custom_button(__("Update Items"), function () {
+                erpnext.utils.update_child_items({
+                    frm: frm,
+                    child_docname: "items",
+                    child_doctype: "Quotation Item",
+                    cannot_add_row: false,
+                });
+            });
+        }
     },
 
     onload(frm) {
