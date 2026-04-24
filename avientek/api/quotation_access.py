@@ -1340,6 +1340,7 @@ def _do_restricted_report_export(doctype, unrestricted=False):
 		parent_fields_json=parent_fields,
 		child_fields_json=child_fields,
 		filters_json=_json.dumps(list_filters) if list_filters else None,
+		unrestricted=unrestricted,
 	)
 
 
@@ -1350,33 +1351,36 @@ def restricted_download_template(
 ):
 	"""Override frappe.core.doctype.data_import.data_import.download_template.
 
-	For restricted users on restricted doctypes, automatically route to
-	filtered export instead of blocking.
+	Routes ALL users (including Administrator) exporting EXPORT_RESTRICTED_DOCTYPES
+	through the flat exporter so parent columns are repeated on every child row.
+	Users with User Permission restrictions get child-row filtering on top;
+	Administrator and other unrestricted users get all rows, just flat.
 	"""
 	from frappe.core.doctype.data_import.data_import import download_template as original_download
 
 	user = frappe.session.user
-	if user != "Administrator" and doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-		# Check ALL restriction types — read permissions fresh from DB every time
-		has_restriction = (
-			_get_user_brands(user)
-			or _get_user_item_groups(user)
-			or _get_user_customer_groups(user)
-			or _get_user_supplier_groups(user)
-			or _get_user_sales_persons(user)
-			or _get_user_companies(user)
-		)
-		if has_restriction:
-			try:
-				return _do_restricted_export(
-					doctype, export_fields, export_filters, file_type,
-				)
-			except Exception:
-				frappe.log_error(
-					title=f"Restricted Export Error ({doctype})",
-					message=frappe.get_traceback(),
-				)
-				# Fall through to standard export on error
+	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
+		has_restriction = False
+		if user != "Administrator":
+			has_restriction = bool(
+				_get_user_brands(user)
+				or _get_user_item_groups(user)
+				or _get_user_customer_groups(user)
+				or _get_user_supplier_groups(user)
+				or _get_user_sales_persons(user)
+				or _get_user_companies(user)
+			)
+		try:
+			return _do_restricted_export(
+				doctype, export_fields, export_filters, file_type,
+				unrestricted=not has_restriction,
+			)
+		except Exception:
+			frappe.log_error(
+				title=f"Flat Export Error ({doctype})",
+				message=frappe.get_traceback(),
+			)
+			# Fall through to standard export on error
 
 	return original_download(
 		doctype=doctype,
@@ -1387,8 +1391,13 @@ def restricted_download_template(
 	)
 
 
-def _do_restricted_export(doctype, export_fields, export_filters, file_type):
-	"""Internal: parse fields/filters and call export_my_data."""
+def _do_restricted_export(doctype, export_fields, export_filters, file_type, unrestricted=False):
+	"""Internal: parse fields/filters and call export_my_data.
+
+	`unrestricted=True` means caller has no User Permission restrictions; the
+	flat exporter still runs (parent columns repeated per child row) but no
+	child-row filtering is applied.
+	"""
 	import json as _json
 
 	# Clear form_dict fields so _combined_permission_query doesn't add
