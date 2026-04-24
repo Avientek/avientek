@@ -1229,33 +1229,42 @@ def restricted_export_query():
 	from frappe.desk.reportview import export_query as original_export
 
 	user = frappe.session.user
-	if user != "Administrator":
-		doctype = frappe.form_dict.get("doctype")
-		if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
-			# Check ALL restriction types — read permissions fresh from DB every time
-			has_restriction = (
-				_get_user_brands(user)
-				or _get_user_item_groups(user)
-				or _get_user_customer_groups(user)
-				or _get_user_supplier_groups(user)
-				or _get_user_sales_persons(user)
-				or _get_user_companies(user)
+	doctype = frappe.form_dict.get("doctype")
+
+	# Route all users (including unrestricted) exporting EXPORT_RESTRICTED_DOCTYPES
+	# through our flat export so the parent columns get REPEATED on every child
+	# row. Frappe's native exporter only fills parent fields on the first row of
+	# each document — rows 2..N are blank in columns A..M, which the user cannot
+	# analyze in Excel. Our flat export writes the full parent values per child row.
+	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES and user != "Administrator":
+		has_restriction = (
+			_get_user_brands(user)
+			or _get_user_item_groups(user)
+			or _get_user_customer_groups(user)
+			or _get_user_supplier_groups(user)
+			or _get_user_sales_persons(user)
+			or _get_user_companies(user)
+		)
+		try:
+			return _do_restricted_report_export(doctype, unrestricted=not has_restriction)
+		except Exception:
+			frappe.log_error(
+				title=f"Flat Export Error ({doctype})",
+				message=frappe.get_traceback(),
 			)
-			if has_restriction:
-				try:
-					return _do_restricted_report_export(doctype)
-				except Exception:
-					frappe.log_error(
-						title=f"Restricted Report Export Error ({doctype})",
-						message=frappe.get_traceback(),
-					)
-					# Fall through to standard export on error
+			# Fall through to standard export on error
 
 	return original_export()
 
 
-def _do_restricted_report_export(doctype):
-	"""Internal: parse Report View fields/filters and call export_my_data."""
+def _do_restricted_report_export(doctype, unrestricted=False):
+	"""Internal: parse Report View fields/filters and call export_my_data.
+
+	When `unrestricted=True`, the caller has no User Permission restrictions
+	(admin-like user). export_my_data skips the "no restrictions" error and
+	returns all permission-allowed rows flat — with parent columns repeated
+	on every child row.
+	"""
 	import json as _json
 	import re
 
@@ -1464,6 +1473,7 @@ def _do_restricted_export(doctype, export_fields, export_filters, file_type):
 		child_fields_json=child_fields,
 		extra_child_tables_json=_json.dumps(extra_child_fields) if extra_child_fields else None,
 		filters_json=_json.dumps(list_filters) if list_filters else None,
+		unrestricted=unrestricted,
 	)
 
 # ── Script Report filter injection ──
@@ -1535,20 +1545,25 @@ def restricted_query_report_run(
 # ── Custom filtered export for restricted users ──
 
 @frappe.whitelist()
-def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=None, child_fields_json=None, extra_child_tables_json=None, filters_json=None):
+def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=None, child_fields_json=None, extra_child_tables_json=None, filters_json=None, unrestricted=False):
 	"""Export only the user's permitted data with dynamic child-row filtering.
 
 	Dynamically reads ALL User Permissions for the current user and filters
 	child rows by ANY matching field (brand, item_group, etc.) using AND logic.
 	If docnames is provided, only those specific documents are exported.
 	If parent_fields_json/child_fields_json provided, use those columns instead of defaults.
+
+	`unrestricted=True` — called internally from restricted_export_query for
+	users with no User Permission restrictions. Skips the "no restrictions"
+	error AND the child-row filtering (all child rows included), so the user
+	gets every row they can read, with parent columns repeated per child row.
 	"""
 	import csv
 	import io
 	import json as json_mod
 
 	user = frappe.session.user
-	if user == "Administrator":
+	if user == "Administrator" and not unrestricted:
 		frappe.throw(_("Administrators should use the standard Export."))
 
 	if doctype not in EXPORT_RESTRICTED_DOCTYPES:
@@ -1567,7 +1582,7 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 		"SELECT allow, for_value FROM `tabUser Permission` WHERE user=%s",
 		user, as_dict=True,
 	)
-	if not all_perms:
+	if not all_perms and not unrestricted:
 		frappe.throw(
 			_("You have no data restrictions. Please use the standard Export instead."),
 			title=_("No Restrictions"),
