@@ -79,7 +79,33 @@ function prf_format_elapsed(ms) {
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
+// Use a single dedicated DOM element per form — frm.set_intro on this
+// Frappe version appends rather than replaces, so calling it on every
+// tick stacked dozens of duplicate banners.
+function prf_get_or_create_banner_el(frm) {
+    let el = frm._prf_banner_el;
+    if (el && document.body.contains(el)) return el;
+
+    // Prefer frm.dashboard.wrapper (sits above the form body). Fall back to
+    // the layout wrapper if dashboard isn't rendered yet.
+    let mount = null;
+    try { mount = frm.dashboard && frm.dashboard.wrapper; } catch (e) {}
+    if (!mount || !mount.length) {
+        try { mount = frm.layout && frm.layout.wrapper; } catch (e) {}
+    }
+    if (!mount || !mount.length) return null;
+
+    el = document.createElement('div');
+    el.className = 'prf-combined-pdf-banner';
+    el.style.cssText = 'margin:8px 0; padding:12px 16px; background:#eaf4ff; border-left:4px solid #1f7e4f; border-radius:4px;';
+    $(mount).prepend(el);
+    frm._prf_banner_el = el;
+    return el;
+}
+
 function prf_render_banner(frm, job, progress) {
+    const el = prf_get_or_create_banner_el(frm);
+    if (!el) return;
     const elapsed = prf_format_elapsed(Date.now() - job.started_at);
     let pct = 0;
     let stage = __('Preparing Combined PDF…');
@@ -89,13 +115,13 @@ function prf_render_banner(frm, job, progress) {
         stage = progress.stage || stage;
         counter = ` (${progress.current}/${progress.total})`;
     }
-    const html = `
+    el.innerHTML = `
         <div style="display:flex; align-items:center; gap:12px;">
             <div style="flex:0 0 auto; color:#1f7e4f;">
                 <i class="fa fa-spinner fa-spin" style="font-size:18px;"></i>
             </div>
             <div style="flex:1 1 auto; min-width:0;">
-                <div style="font-weight:600; margin-bottom:4px;">
+                <div style="font-weight:600; margin-bottom:4px; color:#1f3a5f;">
                     ${__('Combined PDF building')} — ${__('elapsed')} ${elapsed}
                 </div>
                 <div style="font-size:12px; color:#6c7680; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
@@ -110,7 +136,6 @@ function prf_render_banner(frm, job, progress) {
             </div>
         </div>
     `;
-    frm.set_intro(html, 'blue');
 }
 
 function prf_stop_banner(frm) {
@@ -118,7 +143,10 @@ function prf_stop_banner(frm) {
         clearInterval(frm._prf_banner_timer);
         frm._prf_banner_timer = null;
     }
-    try { frm.set_intro(''); } catch (e) {}
+    if (frm._prf_banner_el) {
+        try { frm._prf_banner_el.remove(); } catch (e) {}
+        frm._prf_banner_el = null;
+    }
 }
 
 function prf_start_banner(frm) {
