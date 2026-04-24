@@ -1457,13 +1457,35 @@ def _build_and_attach_combined_pdf(docname, user):
             except Exception:
                 pass
 
-        file_doc = save_file(
-            fname=filename,
-            content=pdf_bytes,
-            dt="Payment Request Form",
-            dn=docname,
-            is_private=1,
-        )
+        # save_file enforces frappe.conf.max_file_size (default 10 MB).
+        # Combined PDFs that merge many references routinely exceed 10 MB —
+        # AVFZC-017 reported "File size exceeded the maximum allowed size
+        # of 10.0 MB". Temporarily raise the ceiling for this attach only,
+        # then restore, so the limit still applies to user uploads.
+        _orig_max = frappe.local.conf.get("max_file_size") if getattr(frappe.local, "conf", None) else None
+        try:
+            if getattr(frappe.local, "conf", None) is not None:
+                try:
+                    frappe.local.conf["max_file_size"] = 200 * 1024 * 1024  # 200 MB
+                except TypeError:
+                    # Some Frappe versions use a _dict that only supports attribute access.
+                    setattr(frappe.local.conf, "max_file_size", 200 * 1024 * 1024)
+            file_doc = save_file(
+                fname=filename,
+                content=pdf_bytes,
+                dt="Payment Request Form",
+                dn=docname,
+                is_private=1,
+            )
+        finally:
+            if getattr(frappe.local, "conf", None) is not None:
+                try:
+                    if _orig_max is not None:
+                        frappe.local.conf["max_file_size"] = _orig_max
+                    else:
+                        frappe.local.conf.pop("max_file_size", None)
+                except Exception:
+                    pass
         frappe.db.commit()
 
         frappe.publish_realtime(
