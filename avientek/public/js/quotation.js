@@ -655,6 +655,19 @@ frappe.ui.form.on('Quotation', {
                 show_update_special_price_dialog(frm);
             });
         }
+
+        // Hide ERPNext's native "Update Items" button on Quotation.
+        // ERPNext adds this natively in versions newer than 15.95.2 —
+        // Avientek policy requires cancel+amend for submitted quote
+        // edits, so we strip the button out. Runs both immediately and
+        // again on the next tick so it catches whether ERPNext's refresh
+        // handler ran before or after ours.
+        var _strip_update_items = function () {
+            try { frm.remove_custom_button(__("Update Items")); } catch (e) {}
+        };
+        _strip_update_items();
+        setTimeout(_strip_update_items, 0);
+        setTimeout(_strip_update_items, 300);
     },
 
     onload(frm) {
