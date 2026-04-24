@@ -1573,16 +1573,100 @@ def download_payment_pdf(docname, mode="enqueue"):
     # endpoint does no prior DB write, so there's nothing to commit; on
     # some Frappe Cloud deployments the job was never getting queued
     # (reported on Jithin's spreadsheet row 30).
-    frappe.enqueue(
+    job = frappe.enqueue(
         "avientek.avientek.doctype.payment_request_form.payment_request_form._build_and_attach_combined_pdf",
         queue="long",
         timeout=900,
         docname=docname,
         user=frappe.session.user,
     )
+    # Remember this job so a subsequent "Cancel" click can kill it.
+    # Scoped per-docname, auto-expires after 1 hour.
+    try:
+        if job and getattr(job, "id", None):
+            frappe.cache().set_value(
+                f"prf_combined_pdf_job:{docname}",
+                job.id,
+                expires_in_sec=3600,
+            )
+    except Exception:
+        pass
+
     return {
         "status": "queued",
+        "job_id": getattr(job, "id", None) if job else None,
         "message": _("Combined PDF for {0} is being prepared. You'll see it under Attachments shortly.").format(docname),
+    }
+
+
+@frappe.whitelist()
+def cancel_combined_pdf(docname):
+    """Stop a running Combined PDF build job for this PRF.
+
+    Looks up the RQ job id we stashed at enqueue time and asks RQ to
+    stop it (sends SIGINT to the worker processing that job). Also
+    publishes prf_combined_pdf_failed so any listening UI clears its
+    banner. Idempotent — if the job is already gone, just clears UI.
+    """
+    if not frappe.has_permission("Payment Request Form", "read", doc=docname):
+        frappe.throw(_("Not permitted"))
+
+    cache_key = f"prf_combined_pdf_job:{docname}"
+    job_id = None
+    try:
+        job_id = frappe.cache().get_value(cache_key)
+        if isinstance(job_id, bytes):
+            job_id = job_id.decode("utf-8", errors="ignore")
+    except Exception:
+        job_id = None
+
+    cancelled = False
+    err = None
+    if job_id:
+        # Try two mechanisms: rq.command.send_stop_job_command (interrupts a
+        # running job in-flight) and rq.cancel_job (removes a queued job).
+        try:
+            import rq  # noqa: F401
+            from rq import cancel_job as _cancel_queued
+            from rq.command import send_stop_job_command as _stop_running
+            conn = frappe.cache().redis
+            try:
+                _stop_running(conn, job_id)
+                cancelled = True
+            except Exception as e1:
+                err = str(e1)
+            try:
+                _cancel_queued(job_id, connection=conn)
+                cancelled = True
+            except Exception as e2:
+                if not cancelled:
+                    err = f"{err}; {e2}" if err else str(e2)
+        except Exception as e:
+            err = str(e)
+
+    # Clear the cache entry either way.
+    try:
+        frappe.cache().delete_value(cache_key)
+    except Exception:
+        pass
+
+    # Notify the UI to clear the banner (even if job was already dead).
+    try:
+        frappe.publish_realtime(
+            "prf_combined_pdf_failed",
+            {
+                "docname": docname,
+                "error": _("Build cancelled by user."),
+            },
+            user=frappe.session.user,
+        )
+    except Exception:
+        pass
+
+    return {
+        "cancelled": bool(cancelled),
+        "job_id": job_id,
+        "error": err,
     }
 
 

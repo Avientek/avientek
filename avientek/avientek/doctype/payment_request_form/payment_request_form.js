@@ -103,6 +103,31 @@ function prf_get_or_create_banner_el(frm) {
     return el;
 }
 
+function prf_cancel_job(frm) {
+    const docname = frm.doc.name;
+    frappe.confirm(
+        __('Stop the Combined PDF build for {0}? Any partial work will be discarded.', [docname]),
+        function() {
+            frappe.call({
+                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.cancel_combined_pdf",
+                args: { docname: docname },
+                callback: function(r) {
+                    prf_clear_job(docname);
+                    prf_stop_banner(frm);
+                    frm._prf_last_progress = null;
+                    const cancelled = r && r.message && r.message.cancelled;
+                    frappe.show_alert({
+                        message: cancelled
+                            ? __('Combined PDF build stopped.')
+                            : __('Cancel sent — worker will stop on next checkpoint.'),
+                        indicator: cancelled ? 'orange' : 'blue'
+                    }, 6);
+                }
+            });
+        }
+    );
+}
+
 function prf_render_banner(frm, job, progress) {
     const el = prf_get_or_create_banner_el(frm);
     if (!el) return;
@@ -134,8 +159,22 @@ function prf_render_banner(frm, job, progress) {
                     ${__('Safe to switch tabs or refresh — this keeps running on the server.')}
                 </div>
             </div>
+            <div style="flex:0 0 auto;">
+                <button type="button" class="btn btn-xs btn-danger prf-cancel-pdf-btn"
+                    style="white-space:nowrap;">
+                    ${__('Cancel')}
+                </button>
+            </div>
         </div>
     `;
+    // Wire the cancel button fresh each render (innerHTML replaces nodes).
+    const btn = el.querySelector('.prf-cancel-pdf-btn');
+    if (btn) {
+        btn.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            prf_cancel_job(frm);
+        });
+    }
 }
 
 function prf_stop_banner(frm) {
