@@ -1231,20 +1231,22 @@ def restricted_export_query():
 	user = frappe.session.user
 	doctype = frappe.form_dict.get("doctype")
 
-	# Route all users (including unrestricted) exporting EXPORT_RESTRICTED_DOCTYPES
-	# through our flat export so the parent columns get REPEATED on every child
-	# row. Frappe's native exporter only fills parent fields on the first row of
-	# each document — rows 2..N are blank in columns A..M, which the user cannot
+	# Route EVERY user (Administrator included) exporting EXPORT_RESTRICTED_DOCTYPES
+	# through our flat export so parent columns get REPEATED on every child row.
+	# Frappe's native exporter only fills parent fields on the first row of each
+	# document — rows 2..N are blank in columns A..M, which the user cannot
 	# analyze in Excel. Our flat export writes the full parent values per child row.
-	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES and user != "Administrator":
-		has_restriction = (
-			_get_user_brands(user)
-			or _get_user_item_groups(user)
-			or _get_user_customer_groups(user)
-			or _get_user_supplier_groups(user)
-			or _get_user_sales_persons(user)
-			or _get_user_companies(user)
-		)
+	if doctype and doctype in EXPORT_RESTRICTED_DOCTYPES:
+		has_restriction = False
+		if user != "Administrator":
+			has_restriction = bool(
+				_get_user_brands(user)
+				or _get_user_item_groups(user)
+				or _get_user_customer_groups(user)
+				or _get_user_supplier_groups(user)
+				or _get_user_sales_persons(user)
+				or _get_user_companies(user)
+			)
 		try:
 			return _do_restricted_report_export(doctype, unrestricted=not has_restriction)
 		except Exception:
