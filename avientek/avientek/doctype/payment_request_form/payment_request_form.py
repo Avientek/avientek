@@ -1220,79 +1220,152 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     _step(_("Rendered Payment Voucher"))
 
     # 2. Per-reference: PI attachment + PO PDF + Quotation PDF
-    for _ref_idx, row in enumerate(doc.payment_references or [], start=1):
-        supplier_bill_no = row.reference_name
-        purchase_invoice_name = frappe.db.get_value(
-            "Purchase Invoice", {"bill_no": supplier_bill_no}, "name"
-        )
-        if not purchase_invoice_name:
-            # Still advance 3 stages so the progress bar matches total_stages.
-            _step(_("Reference {0}/{1} — Purchase Invoice attachment (skipped)").format(_ref_idx, ref_count))
-            _step(_("Reference {0}/{1} — Purchase Order (skipped)").format(_ref_idx, ref_count))
-            _step(_("Reference {0}/{1} — Quotation (skipped)").format(_ref_idx, ref_count))
-            continue
+    #
+    # Optimization: the *same* Purchase Order and *same* Quotation often
+    # appear across several Payment References (e.g. one PO invoiced in
+    # multiple tranches). Rendering them once per reference is the
+    # dominant cost for a big PRF — AVFZC-017 saw 13+ min. Below we:
+    #
+    #   (a) Resolve PI / PO / Quotation names per reference up-front
+    #       (cheap SQL; surfaces which renders are actually needed).
+    #   (b) Render each UNIQUE PO and Quotation exactly once and cache
+    #       the bytes.
+    #   (c) Assemble in original reference order from the caches.
+    #
+    # Additional timing instrumentation prints per-step elapsed seconds
+    # into the worker log so future slowdowns are diagnosable without
+    # re-reading the code.
+    import time as _time
 
+    refs = list(doc.payment_references or [])
+
+    def _resolve_ref(row):
+        """Lightweight SQL-only resolve for one reference row.
+        Returns dict with pi, po, qn, and pi_attachment_bytes (or Nones).
+        """
+        out = {"pi": None, "po": None, "qn": None, "pi_att": None}
+        out["pi"] = frappe.db.get_value(
+            "Purchase Invoice", {"bill_no": row.reference_name}, "name"
+        )
+        if not out["pi"]:
+            return out
         try:
-            attachment = frappe.get_all(
+            att = frappe.get_all(
                 "File",
                 filters={
                     "attached_to_doctype": "Purchase Invoice",
-                    "attached_to_name": purchase_invoice_name,
+                    "attached_to_name": out["pi"],
                 },
                 fields=["file_url"],
                 order_by="creation asc",
                 limit=1,
             )
-            if attachment:
-                pdf_bytes = _read_local_pdf(attachment[0]["file_url"])
-                if pdf_bytes:
-                    merger.append(io.BytesIO(pdf_bytes))
-                    appended += 1
+            if att:
+                out["pi_att"] = _read_local_pdf(att[0]["file_url"])
         except Exception as e:
             frappe.log_error(
-                f"PRF combined PDF — PI attachment {purchase_invoice_name}: {e}\n{traceback.format_exc()}",
+                f"PRF combined PDF — PI attachment {out['pi']}: {e}\n{traceback.format_exc()}",
                 "PRF Combined PDF",
             )
+        out["po"] = frappe.get_value(
+            "Purchase Invoice Item",
+            {"parent": out["pi"]},
+            fieldname="purchase_order",
+            order_by="idx asc",
+        )
+        if out["po"]:
+            so = frappe.db.get_value(
+                "Purchase Order Item", {"parent": out["po"]}, "sales_order"
+            )
+            if so:
+                out["qn"] = frappe.db.get_value(
+                    "Sales Order Item", {"parent": so}, "prevdoc_docname"
+                )
+        return out
+
+    t_resolve = _time.time()
+    resolved = [_resolve_ref(row) for row in refs]
+    print(f"[PRF PDF {docname}] resolved {len(refs)} refs in {_time.time()-t_resolve:.2f}s")
+
+    # Unique PO / Quotation names to render exactly once.
+    unique_pos = []
+    seen_pos = set()
+    for r in resolved:
+        if r["po"] and r["po"] not in seen_pos:
+            seen_pos.add(r["po"])
+            unique_pos.append(r["po"])
+
+    unique_qns = []
+    seen_qns = set()
+    for r in resolved:
+        if r["qn"] and r["qn"] not in seen_qns:
+            seen_qns.add(r["qn"])
+            unique_qns.append(r["qn"])
+
+    po_pdf_cache = {}
+    for po in unique_pos:
+        t = _time.time()
+        try:
+            po_pdf_cache[po] = get_pdf(
+                frappe.get_print("Purchase Order", po, print_format="Avientek PO")
+            )
+            print(f"[PRF PDF {docname}] rendered PO {po} in {_time.time()-t:.2f}s")
+        except Exception as e:
+            frappe.log_error(
+                f"PRF combined PDF — PO render {po}: {e}\n{traceback.format_exc()}",
+                "PRF Combined PDF",
+            )
+
+    qn_pdf_cache = {}
+    for qn in unique_qns:
+        t = _time.time()
+        try:
+            qn_pdf_cache[qn] = get_pdf(
+                frappe.get_print("Quotation", qn, print_format="Quotation New")
+            )
+            print(f"[PRF PDF {docname}] rendered QN {qn} in {_time.time()-t:.2f}s")
+        except Exception as e:
+            frappe.log_error(
+                f"PRF combined PDF — Quotation render {qn}: {e}\n{traceback.format_exc()}",
+                "PRF Combined PDF",
+            )
+
+    # Assemble in original reference order, reusing cached bytes.
+    for _ref_idx, (row, r) in enumerate(zip(refs, resolved), start=1):
+        if not r["pi"]:
+            _step(_("Reference {0}/{1} — Purchase Invoice attachment (skipped)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Purchase Order (skipped)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Quotation (skipped)").format(_ref_idx, ref_count))
+            continue
+
+        if r["pi_att"]:
+            merger.append(io.BytesIO(r["pi_att"]))
+            appended += 1
         _step(_("Reference {0}/{1} — Purchase Invoice attachment").format(_ref_idx, ref_count))
 
-        try:
-            purchase_order = frappe.get_value(
-                "Purchase Invoice Item",
-                {"parent": purchase_invoice_name},
-                fieldname="purchase_order",
-                order_by="idx asc",
-            )
-            if purchase_order:
-                po_pdf = get_pdf(
-                    frappe.get_print("Purchase Order", purchase_order, print_format="Avientek PO")
-                )
-                if po_pdf:
-                    merger.append(io.BytesIO(po_pdf))
-                    appended += 1
-                _step(_("Reference {0}/{1} — Purchase Order").format(_ref_idx, ref_count))
+        if r["po"]:
+            po_pdf = po_pdf_cache.get(r["po"])
+            if po_pdf:
+                merger.append(io.BytesIO(po_pdf))
+                appended += 1
+            _step(_("Reference {0}/{1} — Purchase Order").format(_ref_idx, ref_count))
 
-                sales_order = frappe.db.get_value(
-                    "Purchase Order Item", {"parent": purchase_order}, "sales_order"
-                )
-                quotation = frappe.db.get_value(
-                    "Sales Order Item", {"parent": sales_order}, "prevdoc_docname"
-                ) if sales_order else None
-                if quotation:
-                    q_pdf = get_pdf(
-                        frappe.get_print("Quotation", quotation, print_format="Quotation New")
-                    )
-                    if q_pdf:
-                        merger.append(io.BytesIO(q_pdf))
-                        appended += 1
+            if r["qn"]:
+                q_pdf = qn_pdf_cache.get(r["qn"])
+                if q_pdf:
+                    merger.append(io.BytesIO(q_pdf))
+                    appended += 1
                 _step(_("Reference {0}/{1} — Quotation").format(_ref_idx, ref_count))
             else:
-                _step(_("Reference {0}/{1} — Purchase Order (none)").format(_ref_idx, ref_count))
                 _step(_("Reference {0}/{1} — Quotation (none)").format(_ref_idx, ref_count))
-        except Exception as e:
-            frappe.log_error(
-                f"PRF combined PDF — PO/QTN for {purchase_invoice_name}: {e}\n{traceback.format_exc()}",
-                "PRF Combined PDF",
-            )
+        else:
+            _step(_("Reference {0}/{1} — Purchase Order (none)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Quotation (none)").format(_ref_idx, ref_count))
+
+    print(
+        f"[PRF PDF {docname}] reference summary — refs={len(refs)} "
+        f"unique_POs={len(unique_pos)} unique_QNs={len(unique_qns)}"
+    )
 
     # 3. Bank letter
     if doc.bank_letter:
