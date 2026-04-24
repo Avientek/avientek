@@ -886,21 +886,34 @@ def run_calculation_pipeline(doc, method=None):
             # client-side, so both fields change together — checking markup%
             # unchanged would never fire. Just check if the selling rate itself
             # changed from the saved DB value.
-            if abs(curr_rate - prev_rate) > 0.01:
+            # Threshold 0.005 = half a display cent: any legitimate user edit
+            # at 2-decimal currency precision is ≥0.01, so 0.005 is a safe
+            # boundary between user edit and sub-cent calc drift.
+            if abs(curr_rate - prev_rate) > 0.005:
                 manual_overrides[it.name] = curr_rate
 
         calc_item_totals(it)
 
-        # After calc_item_totals, detect persistent manual overrides from prior
-        # saves. calc_item_totals uses back-solved custom_markup_ (inflated to
-        # a pre-discount value) and produces an inflated custom_special_rate.
-        # If DB rate ≠ freshly-calculated rate, the DB rate is the user's real
-        # price and must be preserved — otherwise it drifts on every plain save.
+        # Drift protection for persistent manual overrides.
+        #
+        # custom_markup_ is stored at 4-decimal precision. On a prior save
+        # _apply_manual_selling_rate back-solves markup% from the user's rate,
+        # truncating to 4 decimals. On the next save calc_item_totals applies
+        # that truncated markup% forward — producing a rate that differs from
+        # the stored rate by ~0.0001 (e.g. 262.00 → 261.9999). Over repeated
+        # saves and display rounding, users see 262.00 drift to 261.99.
+        #
+        # If the user did not change either the rate OR the markup% on this
+        # save, any drift between DB rate and freshly-calculated rate is pure
+        # truncation error and the DB rate must be restored.
         if prev and it.name not in manual_overrides:
-            db_rate = flt(prev.custom_special_rate)
-            calc_rate = flt(it.custom_special_rate)
-            if abs(db_rate - calc_rate) > 0.01:
-                manual_overrides[it.name] = db_rate
+            prev_markup = flt(prev.custom_markup_)
+            curr_markup = flt(it.custom_markup_)
+            if abs(curr_markup - prev_markup) < 0.0005:
+                db_rate = flt(prev.custom_special_rate)
+                calc_rate = flt(it.custom_special_rate)
+                if db_rate > 0 and abs(db_rate - calc_rate) > 1e-6:
+                    manual_overrides[it.name] = db_rate
 
     # Capture pre-distribute totals needed to compute stable markup% targets.
     discount_amount = _to_flt(doc.custom_discount_amount_value)
