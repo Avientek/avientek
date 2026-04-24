@@ -879,56 +879,50 @@ def run_calculation_pipeline(doc, method=None):
     # Capture form rate BEFORE calc_item_totals overwrites it. Used for
     # both existing-item and new-item drift detection below.
     form_rates = {it.name: flt(it.custom_special_rate) for it in doc.items}
+    form_markups = {it.name: flt(it.custom_markup_) for it in doc.items}
+
+    # Diagnostic: one compact line per item showing the exact state the
+    # pipeline started from. If drift shows up in the UI after save, read
+    # these lines from the bench log to see why the drift fix didn't fire.
+    # Safe to leave on — prints a few lines per save and no PII.
+    print(f"[Q-TRACE {doc.name}] pipeline-version=aca31a8+diag item_count={len(doc.items)}")
 
     manual_overrides = {}
     for it in doc.items:
         prev = prev_items.get(it.name)
         form_rate = form_rates.get(it.name, 0.0)
+        form_markup = form_markups.get(it.name, 0.0)
 
         if prev:
             prev_rate = flt(prev.custom_special_rate)
-            # The JS custom_special_rate handler also back-solves custom_markup_
-            # client-side, so both fields change together — checking markup%
-            # unchanged would never fire. Just check if the selling rate itself
-            # changed from the saved DB value.
-            # Threshold 0.005 = half a display cent: any legitimate user edit
-            # at 2-decimal currency precision is ≥0.01, so 0.005 is a safe
-            # boundary between user edit and sub-cent calc drift.
+            prev_markup = flt(prev.custom_markup_)
             if abs(form_rate - prev_rate) > 0.005:
                 manual_overrides[it.name] = form_rate
+                print(f"[Q-TRACE {doc.name}] idx={it.idx} user_edit db_rate={prev_rate} form_rate={form_rate} → override={form_rate}")
 
         calc_item_totals(it)
+        calc_rate = flt(it.custom_special_rate)
 
-        # Drift protection for persistent manual overrides on existing rows.
-        #
-        # custom_markup_ is stored at 4-decimal precision. On a prior save
-        # _apply_manual_selling_rate back-solves markup% from the user's rate,
-        # truncating to 4 decimals. On the next save calc_item_totals applies
-        # that truncated markup% forward — producing a rate that differs from
-        # the stored rate by ~0.0001 (e.g. 262.00 → 261.9999). Over repeated
-        # saves and display rounding, users see 262.00 drift to 261.99.
-        #
-        # If the user did not change either the rate OR the markup% on this
-        # save, any drift between DB rate and freshly-calculated rate is pure
-        # truncation error and the DB rate must be restored.
         if prev and it.name not in manual_overrides:
             prev_markup = flt(prev.custom_markup_)
-            curr_markup = flt(it.custom_markup_)
-            if abs(curr_markup - prev_markup) < 0.0005:
-                db_rate = flt(prev.custom_special_rate)
-                calc_rate = flt(it.custom_special_rate)
+            db_rate = flt(prev.custom_special_rate)
+            markup_delta = abs(form_markup - prev_markup)
+            if markup_delta < 0.0005:
                 if db_rate > 0 and abs(db_rate - calc_rate) > 1e-6:
                     manual_overrides[it.name] = db_rate
+                    print(f"[Q-TRACE {doc.name}] idx={it.idx} existing_drift db_rate={db_rate} calc_rate={calc_rate} form_markup={form_markup} prev_markup={prev_markup} → override={db_rate}")
+                else:
+                    print(f"[Q-TRACE {doc.name}] idx={it.idx} stable db_rate={db_rate} calc_rate={calc_rate}")
+            else:
+                # Markup% changed — user intentionally adjusted, don't pin.
+                print(f"[Q-TRACE {doc.name}] idx={it.idx} markup_changed db_rate={db_rate} form_markup={form_markup} prev_markup={prev_markup} markup_delta={markup_delta} → calc_rate={calc_rate} (no override)")
 
-        # Drift protection for NEW rows (no prev record). Same root cause:
-        # JS back-solves custom_markup_ from the user's typed rate, 4-decimal
-        # truncation, then calc_item_totals applies that markup% forward and
-        # produces ~0.01 drift (e.g. 220.00 → 220.01 on a freshly added row).
-        # Preserve the form rate the user actually typed.
         if not prev and it.name not in manual_overrides:
-            calc_rate = flt(it.custom_special_rate)
             if form_rate > 0 and abs(form_rate - calc_rate) > 1e-6:
                 manual_overrides[it.name] = form_rate
+                print(f"[Q-TRACE {doc.name}] idx={it.idx} new_row_drift form_rate={form_rate} calc_rate={calc_rate} → override={form_rate}")
+            else:
+                print(f"[Q-TRACE {doc.name}] idx={it.idx} new_row_stable form_rate={form_rate} calc_rate={calc_rate}")
 
     # Capture pre-distribute totals needed to compute stable markup% targets.
     discount_amount = _to_flt(doc.custom_discount_amount_value)
