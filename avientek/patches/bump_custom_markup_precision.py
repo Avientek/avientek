@@ -20,6 +20,12 @@ import frappe
 _TARGETS = [
     ("Quotation Item", "custom_markup_"),
     ("Item Price", "custom_markup_"),
+    # Same write-truncate-read pattern as custom_markup_: when a parent
+    # incentive amount is set, distribute_incentive_server writes this
+    # percent and calc_item_totals reads it back on the next save. At
+    # 2-decimal precision the truncation shifts cogs slightly, which
+    # propagates to selling price.
+    ("Quotation Item", "custom_incentive_"),
 ]
 
 
