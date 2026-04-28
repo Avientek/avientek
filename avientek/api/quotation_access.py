@@ -803,6 +803,23 @@ def _get_user_sales_person_subtree(user):
 	return list(collected)
 
 
+def _quotation_visibility_owned_sales_persons(user):
+	"""Sales Persons the user "owns" for visibility purposes:
+	  (a) the user's own Sales Person (via Employee.user_id) plus its descendants
+	  (b) Sales Persons granted via User Permission
+
+	Both count as ownership: a procurement / approver user with UP on a
+	Sales Person should see quotations where that SP is on the team, the
+	same way they'd see any other doc filtered through the Sales Person UP.
+	Without (b), users like PROCUREMENT L2 (UP on sales persons but no
+	linked Employee) couldn't see Pending Level 1/2 Approval quotations
+	even though their UP otherwise grants access via _combined_permission_query.
+	"""
+	sps = set(_get_user_sales_person_subtree(user) or [])
+	sps.update(_get_user_sales_persons(user) or [])
+	return sps
+
+
 def _quotation_visibility_condition(user):
 	"""Return SQL that a restricted user must satisfy to see a Quotation."""
 	clauses = [
@@ -810,7 +827,7 @@ def _quotation_visibility_condition(user):
 		"AND `tabQuotation`.`probabilities` = '100%')",
 		f"`tabQuotation`.`owner` = {frappe.db.escape(user)}",
 	]
-	sps = _get_user_sales_person_subtree(user)
+	sps = _quotation_visibility_owned_sales_persons(user)
 	if sps:
 		sp_list = ", ".join(frappe.db.escape(s) for s in sps)
 		clauses.append(
@@ -830,7 +847,7 @@ def _quotation_doc_visible_to_user(doc, user):
 		return True
 	if (doc.get("owner") or "") == user:
 		return True
-	sps = set(_get_user_sales_person_subtree(user))
+	sps = _quotation_visibility_owned_sales_persons(user)
 	if sps:
 		doc_sps = {st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person}
 		if doc_sps & sps:
