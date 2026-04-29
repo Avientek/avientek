@@ -1352,13 +1352,21 @@ function load_item_defaults(frm, cdt, cdn) {
             if (!r.message) return;
             let d = r.message;
 
-            // No Item Price for this company — show message
+            // No Item Price for this company — block selection and warn.
+            // Per Sridhar 2026-04-29: at item selection time, if the item
+            // is not on the company's Item Price List, show a popup
+            // "Please update the Item Price List for this item." and do
+            // not allow the row to keep that item — clearing item_code
+            // forces the user to either pick a priced item or update the
+            // price list before continuing.
             if (d.no_price_for_company) {
                 frappe.msgprint({
                     title: __('No Item Price Found'),
-                    message: __('No Item Price found for <b>{0}</b> in company <b>{1}</b> and price list <b>{2}</b>. Please create an Item Price first.', [d.item_code, d.company, d.price_list]),
+                    message: __('No Item Price found for <b>{0}</b> in company <b>{1}</b> and price list <b>{2}</b>. Please update the Item Price List for this item.', [d.item_code, d.company, d.price_list]),
                     indicator: 'orange'
                 });
+                // Clear the item from the row so it can't be saved unpriced.
+                frappe.model.set_value(cdt, cdn, 'item_code', '');
                 return;
             }
 

@@ -1087,9 +1087,11 @@ def opportunity_permission_query(user):
 def customer_permission_query(user):
 	"""Permission query for Customer.
 
-	Users with Sales Person restriction can see:
-	  1. Customers assigned to their sales person(s)
-	  2. Customers with NO Sales Team at all (unassigned)
+	Users with Sales Person restriction (User Permission) can ONLY see
+	Customers whose Sales Team contains a matching Sales Person.
+	Customers with no Sales Team are NOT visible to a sales-restricted user
+	(per Sridhar's 2026-04-29 ticket: "should only be able to access
+	Customer masters that are allocated to their assigned Sales Person").
 	Other restrictions (Customer Group, Company) apply with AND logic.
 	"""
 	if user == "Administrator":
@@ -1103,22 +1105,18 @@ def customer_permission_query(user):
 		cgs_sql = ", ".join(frappe.db.escape(cg) for cg in cg_perms)
 		parts.append("`tabCustomer`.`customer_group` IN ({cgs})".format(cgs=cgs_sql))
 
-	# Sales Person filter — include customers with matching SP OR no Sales Team
+	# Sales Person filter — strict: customer's Sales Team must include
+	# at least one of the user's permitted sales persons. No fallback for
+	# unassigned customers.
 	sp_perms = _get_user_sales_persons(user)
 	if sp_perms:
 		sps_sql = ", ".join(frappe.db.escape(sp) for sp in sp_perms)
 		parts.append(
-			"("
 			"EXISTS ("
 			"SELECT 1 FROM `tabSales Team` st "
 			"WHERE st.parent = `tabCustomer`.name "
 			"AND st.parenttype = 'Customer' "
 			"AND st.sales_person IN ({sps})"
-			") OR NOT EXISTS ("
-			"SELECT 1 FROM `tabSales Team` st2 "
-			"WHERE st2.parent = `tabCustomer`.name "
-			"AND st2.parenttype = 'Customer'"
-			")"
 			")".format(sps=sps_sql)
 		)
 
