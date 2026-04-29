@@ -820,6 +820,39 @@ def _quotation_visibility_owned_sales_persons(user):
 	return sps
 
 
+def _quotation_approver_states_for_user(user):
+	"""Return the set of Quotation workflow states the user can act on
+	as an approver (per the Workflow Transition definition).
+
+	Approvers must see the docs awaiting their action. A user with role
+	GM-CS approves out of "Pending Level 1 Approval", so we surface that
+	state; same for GM and "Pending Level 2 Approval", and for any
+	future workflow transitions / role names. Read from the active
+	Workflow record so this stays correct if the workflow is edited
+	without code changes.
+	"""
+	try:
+		wf_name = frappe.db.get_value(
+			"Workflow",
+			{"document_type": "Quotation", "is_active": 1},
+			"name",
+		)
+		if not wf_name:
+			return set()
+		user_roles = set(frappe.get_roles(user) or [])
+		if not user_roles:
+			return set()
+		transitions = frappe.get_all(
+			"Workflow Transition",
+			filters={"parent": wf_name, "parenttype": "Workflow"},
+			fields=["state", "allowed"],
+			ignore_permissions=True,
+		)
+		return {t["state"] for t in transitions if t.get("allowed") in user_roles}
+	except Exception:
+		return set()
+
+
 def _quotation_visibility_condition(user):
 	"""Return SQL that a restricted user must satisfy to see a Quotation."""
 	clauses = [
@@ -835,6 +868,12 @@ def _quotation_visibility_condition(user):
 			f"WHERE st.parent = `tabQuotation`.name "
 			f"AND st.parenttype = 'Quotation' "
 			f"AND st.sales_person IN ({sp_list}))"
+		)
+	approver_states = _quotation_approver_states_for_user(user)
+	if approver_states:
+		states_list = ", ".join(frappe.db.escape(s) for s in approver_states)
+		clauses.append(
+			f"`tabQuotation`.`workflow_state` IN ({states_list})"
 		)
 	return "(" + " OR ".join(clauses) + ")"
 
@@ -852,6 +891,9 @@ def _quotation_doc_visible_to_user(doc, user):
 		doc_sps = {st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person}
 		if doc_sps & sps:
 			return True
+	approver_states = _quotation_approver_states_for_user(user)
+	if approver_states and (doc.get("workflow_state") or "") in approver_states:
+		return True
 	return False
 
 
