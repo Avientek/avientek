@@ -854,10 +854,20 @@ def _quotation_approver_states_for_user(user):
 
 
 def _quotation_visibility_condition(user):
-	"""Return SQL that a restricted user must satisfy to see a Quotation."""
+	"""Return SQL that a restricted user must satisfy to see a Quotation.
+
+	Note on the 100% clause: originally restricted to workflow_state='Approved'
+	per Finance Manager's 2026-04-10 spec. Loosened 2026-04-29 (ticket on
+	operations3@avientek.com / QN-LLC-26-00372) to ANY workflow_state when
+	probabilities='100%'. Reason: a 100% probability quotation is a committed
+	deal — procurement / fulfillment users need it visible the moment it hits
+	100%, even before it has cleared Pending Level 1/2 approvals, so they can
+	start ordering. UP filters (Brand / Customer Group / Sales Person /
+	Company) still scope this via _combined_permission_query, so a user only
+	sees 100% quotes within their permitted scope.
+	"""
 	clauses = [
-		"(`tabQuotation`.`workflow_state` = 'Approved' "
-		"AND `tabQuotation`.`probabilities` = '100%')",
+		"`tabQuotation`.`probabilities` = '100%'",
 		f"`tabQuotation`.`owner` = {frappe.db.escape(user)}",
 	]
 	sps = _quotation_visibility_owned_sales_persons(user)
@@ -882,7 +892,7 @@ def _quotation_doc_visible_to_user(doc, user):
 	"""Mirror of _quotation_visibility_condition for has_permission_check.
 	Returns True if the user may read this specific Quotation under the
 	visibility rule."""
-	if doc.get("workflow_state") == "Approved" and doc.get("probabilities") == "100%":
+	if doc.get("probabilities") == "100%":
 		return True
 	if (doc.get("owner") or "") == user:
 		return True
