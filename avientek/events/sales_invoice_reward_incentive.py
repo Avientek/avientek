@@ -240,6 +240,14 @@ def _post_jv(si_doc, quote, accts, reward_amt, incentive_amt, method_setting):
     jv.company = si_doc.company
     jv.cheque_no = si_doc.name
     jv.cheque_date = posting_date
+    # custom_sales_invoice is read by the JV→PRF mapper
+    # (avientek/events/journal_entry.py) to populate document_reference.
+    # Setting it here keeps that mapping flow informative now that the
+    # legacy Sales Commission JV (which used to set it) has been removed.
+    try:
+        jv.custom_sales_invoice = si_doc.name
+    except Exception:
+        pass
     jv.user_remark = (
         f"Reward & Incentive booking for {si_doc.name} (against {quote.name}) "
         f"[{method_setting}]"
