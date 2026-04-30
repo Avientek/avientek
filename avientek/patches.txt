@@ -21,3 +21,4 @@ avientek.patches.fix_prf_professional_swift_fallback
 avientek.patches.fix_prf_fast_frappe_call_worker
 avientek.patches.bump_custom_markup_precision
 avientek.patches.ignore_up_custom_sales_person
+avientek.patches.render_letter_head_content_as_jinja
