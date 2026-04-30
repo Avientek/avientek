@@ -14,6 +14,26 @@ def after_migrate():
 	_fix_global_field_settings()
 	_enforce_custom_role_permissions()
 	_enforce_export_permissions()
+	_sync_payment_voucher_formats()
+
+
+def _sync_payment_voucher_formats():
+	"""Push the on-disk Payment Voucher Professional + Fast print
+	format JSON sources into their DB rows. Frappe's standard
+	import path skips updating Print Format rows whose existing row
+	has custom_format=1, so manual edits to the source JSON would
+	otherwise never reach a running site. Calling the idempotent
+	sync helper from after_migrate ensures every `bench migrate`
+	re-syncs them — the helper is a no-op when DB already matches
+	source, so it's safe to run on every migrate."""
+	try:
+		from avientek.patches.sync_payment_voucher_formats_v2026_04_27 import execute as _sync
+		_sync()
+	except Exception:
+		frappe.log_error(
+			title="after_migrate: PV format sync failed",
+			message=frappe.get_traceback(),
+		)
 
 
 def _create_asset_dam_fields():

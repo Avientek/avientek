@@ -4,6 +4,135 @@
 frappe.provide("erpnext.accounts.dimensions");
 let is_updating_fields = false;
 
+// ──────────────────────────────────────────────────────────────────────
+// Open Purchase Order picker — pulls a Supplier's open POs into the
+// Payment References child table for Advance Pay. Per Sridhar
+// 2026-04-27 #3.
+// ──────────────────────────────────────────────────────────────────────
+function _open_po_picker(frm) {
+    frappe.call({
+        method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_open_purchase_orders_for_party",
+        args: {
+            company: frm.doc.company,
+            party_type: frm.doc.party_type,
+            party: frm.doc.party,
+            currency: frm.doc.currency || null,
+        },
+        freeze: true,
+        freeze_message: __("Loading open Purchase Orders…"),
+        callback: function (r) {
+            const rows = r.message || [];
+            if (!rows.length) {
+                frappe.msgprint({
+                    title: __("No Open Purchase Orders"),
+                    indicator: "orange",
+                    message: __("No submitted, un-fully-billed Purchase Orders found for {0} in {1}{2}.", [
+                        frm.doc.party,
+                        frm.doc.company,
+                        frm.doc.currency ? " (" + frm.doc.currency + ")" : "",
+                    ]),
+                });
+                return;
+            }
+            _show_po_picker_dialog(frm, rows);
+        },
+    });
+}
+
+function _show_po_picker_dialog(frm, rows) {
+    const fmt_money = (v, cur) => {
+        const n = (parseFloat(v) || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+        });
+        return cur ? `${cur} ${n}` : n;
+    };
+
+    const dialog_rows = rows.map(r => `
+        <tr>
+            <td><input type="checkbox" class="po-pick-row" data-po="${frappe.utils.escape_html(r.name)}"></td>
+            <td>${frappe.utils.escape_html(r.name)}</td>
+            <td>${r.transaction_date || ""}</td>
+            <td class="text-right">${fmt_money(r.grand_total, r.currency)}</td>
+            <td class="text-right">${fmt_money(r.pending_amt, r.currency)}</td>
+            <td>${frappe.utils.escape_html(r.status || "")}</td>
+        </tr>
+    `).join("");
+
+    const html = `
+        <div style="max-height:50vh; overflow:auto;">
+            <table class="table table-sm table-bordered" style="margin:0;">
+                <thead style="position:sticky; top:0; background:#f4f5f6;">
+                    <tr>
+                        <th style="width:30px;"><input type="checkbox" class="po-pick-all"></th>
+                        <th>PO Name</th>
+                        <th>Date</th>
+                        <th class="text-right">Grand Total</th>
+                        <th class="text-right">Pending</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>${dialog_rows}</tbody>
+            </table>
+        </div>
+        <div class="text-muted small" style="margin-top:6px;">
+            ${__("Found {0} open Purchase Order(s) for this supplier.", [rows.length])}
+        </div>
+    `;
+
+    const d = new frappe.ui.Dialog({
+        title: __("Pick Open Purchase Orders"),
+        size: "large",
+        fields: [{ fieldtype: "HTML", fieldname: "po_grid_html" }],
+        primary_action_label: __("Add Selected to Payment References"),
+        primary_action() {
+            const picked = [];
+            d.$wrapper.find(".po-pick-row:checked").each(function () {
+                picked.push($(this).attr("data-po"));
+            });
+            if (!picked.length) {
+                frappe.show_alert({ message: __("No POs selected"), indicator: "orange" });
+                return;
+            }
+            const by_name = Object.fromEntries(rows.map(r => [r.name, r]));
+            const existing_refs = new Set(
+                (frm.doc.payment_references || [])
+                    .map(r => `${r.reference_doctype}|${r.reference_name}`)
+            );
+            let added = 0;
+            for (const po_name of picked) {
+                const key = `Purchase Order|${po_name}`;
+                if (existing_refs.has(key)) continue;
+                const r = by_name[po_name];
+                const new_row = frm.add_child("payment_references");
+                new_row.reference_doctype = "Purchase Order";
+                new_row.reference_name = po_name;
+                new_row.currency = r.currency;
+                new_row.exchange_rate = r.conversion_rate || 1;
+                new_row.grand_total = r.grand_total;
+                new_row.base_grand_total = r.base_grand_total;
+                new_row.outstanding_amount = r.pending_amt;
+                new_row.invoice_date = r.transaction_date;
+                added++;
+            }
+            frm.refresh_field("payment_references");
+            frappe.show_alert({
+                message: __("Added {0} Purchase Order(s) to Payment References", [added]),
+                indicator: added ? "green" : "blue",
+            });
+            d.hide();
+        },
+    });
+    d.fields_dict.po_grid_html.$wrapper.html(html);
+
+    // Select-all wiring
+    d.$wrapper.find(".po-pick-all").on("change", function () {
+        const checked = $(this).is(":checked");
+        d.$wrapper.find(".po-pick-row").prop("checked", checked);
+    });
+
+    d.show();
+}
+
 // Custom CSS for debit note rows (pink/red) and manual rows (blue)
 const row_styles = `
 <style>
@@ -546,6 +675,22 @@ frappe.ui.form.on('Payment Request Form', {
             prf_start_banner(frm);
         }
 
+        // "Get Open Purchase Orders" button — pulls a Supplier's open POs
+        // into Payment References so the user doesn't have to type each
+        // PO name manually for an Advance Pay flow. Per Sridhar
+        // 2026-04-27 #3. Visible only for draft Advance Pay PRFs against
+        // a Supplier party.
+        if (
+            frm.doc.docstatus === 0
+            && frm.doc.payment_type === "Advance Pay"
+            && frm.doc.party_type === "Supplier"
+            && frm.doc.party
+        ) {
+            frm.add_custom_button(__("Get Open Purchase Orders"), function () {
+                _open_po_picker(frm);
+            }, __("Get Items"));
+        }
+
         // "Get Invoices From" button removed - users can add rows manually
         if (frm.doc.docstatus === 1 && frm.doc.workflow_state === 'Released') {
             // Create Payment Entry button under 'Create'
@@ -622,7 +767,7 @@ frappe.ui.form.on('Payment Request Form', {
 			// the company-currency balance when doc.currency matches the
 			// company default.
 			return frappe.call({
-				method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_in_doc_currency",
+				method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_with_jv_inclusion",
 				args: {
 					company: frm.doc.company,
 					party_type: frm.doc.party_type,
@@ -1646,7 +1791,7 @@ function fetch_supplier_details(frm, force_update) {
     // currency (Sridhar 2026-04-27 #10).
     if (!frm.doc.supplier_balance || force_update) {
         frappe.call({
-            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_in_doc_currency",
+            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_with_jv_inclusion",
             args: {
                 company: frm.doc.company,
                 party_type: frm.doc.party_type,

@@ -1964,6 +1964,64 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
     return payment_history
 
 
+# ──────────────────────────── OPEN PURCHASE ORDER PULL (#3) ──────────
+@frappe.whitelist()
+def get_open_purchase_orders_for_party(company, party_type, party, currency=None):
+    """Return open Purchase Orders for the given party (typically a
+    Supplier). Used by the "Get Open Purchase Orders" button shown on
+    Payment Request Form when payment_type = "Advance Pay" — lets the
+    user pull POs into the Payment References table for advance payment.
+
+    Filters:
+      docstatus = 1
+      status NOT IN ('Closed', 'Completed', 'Delivered')   ← still actionable
+      total_billed_amt < grand_total                        ← not fully invoiced
+      grand_total > 0
+      company / supplier / (currency if provided) match
+    """
+    from frappe.utils import flt
+
+    if not (company and party_type and party):
+        return []
+    if party_type != "Supplier":
+        # Advance Pay → Open PO is supplier-flow only. Returning empty
+        # avoids an inappropriate UI for Customer / Employee parties.
+        return []
+
+    where = [
+        "docstatus = 1",
+        "company = %s",
+        "supplier = %s",
+        "status NOT IN ('Closed', 'Completed', 'Delivered', 'Cancelled')",
+        "grand_total > 0",
+        # PO carries a per_billed percentage (Float 0..100). Anything < 100
+        # is still partially-or-fully un-invoiced — eligible for advance.
+        "IFNULL(per_billed, 0) < 100",
+    ]
+    args = [company, party]
+    if currency:
+        where.append("currency = %s")
+        args.append(currency)
+
+    rows = frappe.db.sql(
+        f"""SELECT name, transaction_date, currency, conversion_rate,
+                   grand_total, base_grand_total,
+                   IFNULL(per_billed, 0) AS per_billed,
+                   status, supplier, supplier_name
+            FROM `tabPurchase Order`
+            WHERE {' AND '.join(where)}
+            ORDER BY transaction_date DESC, name DESC
+            LIMIT 200""",
+        args, as_dict=True,
+    )
+    for r in rows:
+        billed_pct = flt(r["per_billed"])
+        r["billed_pct"] = billed_pct
+        r["billed_amt"] = flt(r["grand_total"]) * billed_pct / 100.0
+        r["pending_amt"] = flt(r["grand_total"]) - r["billed_amt"]
+    return rows
+
+
 # ──────────────────────────── PARTY BALANCE IN DOC CURRENCY ───────────
 @frappe.whitelist()
 def get_party_balance_in_doc_currency(company, party_type, party, target_currency=None, posting_date=None):
@@ -2010,6 +2068,92 @@ def get_party_balance_in_doc_currency(company, party_type, party, target_currenc
     if not rate_target_to_company:
         return company_balance
     return company_balance / rate_target_to_company
+
+
+@frappe.whitelist()
+def get_party_balance_with_jv_inclusion(company, party_type, party, target_currency=None, posting_date=None):
+    """Like get_party_balance_in_doc_currency, plus any Journal Entry
+    Account postings to the party's default receivable / payable account
+    that DON'T have party_type/party fields populated on the JV row.
+
+    Sridhar 2026-04-27 #4: "For Supplier / Employee etc, the Outstanding
+    Balance from the journal Entries not reflecting". The most common
+    cause: an accountant booked the JV using the supplier's payable GL
+    account but forgot to set party_type=Supplier / party=<name> on the
+    row. ERPNext's standard get_party_details only counts party-tagged
+    rows, so those postings vanish from the balance.
+
+    This helper sums the standard party-balance PLUS the loose JV
+    postings to the same account, so the balance the user sees on the
+    PRF reflects every JV that mentions their account, not just the
+    well-tagged ones.
+
+    Note: this does NOT alter ERPNext's GLE logic anywhere else (Aging,
+    Trial Balance, etc.). It only feeds the supplier_balance field on
+    Payment Request Form. Long-term the right fix is data hygiene: tag
+    party_type/party on JV rows. This helper buys time while that
+    cleanup happens.
+    """
+    from frappe.utils import flt, today as _today
+
+    base = flt(get_party_balance_in_doc_currency(
+        company, party_type, party, target_currency, posting_date
+    ))
+
+    if not (company and party_type and party):
+        return base
+
+    # Resolve the party's default account on this company (typically
+    # default_payable_account for Supplier/Employee, default_receivable_account
+    # for Customer). Use the standard ERPNext helper.
+    try:
+        from erpnext.accounts.party import get_party_account
+        party_account = get_party_account(party_type, party, company)
+    except Exception:
+        party_account = None
+    if not party_account:
+        return base  # nothing to scan
+
+    # Find loose JV postings to that account (party fields blank).
+    on_or_before = posting_date or _today()
+    rows = frappe.db.sql(
+        """SELECT COALESCE(SUM(
+                  IFNULL(jea.debit_in_account_currency, 0)
+                - IFNULL(jea.credit_in_account_currency, 0)
+              ), 0) AS net_company_currency
+           FROM `tabJournal Entry Account` jea
+           INNER JOIN `tabJournal Entry` je ON je.name = jea.parent
+           WHERE je.docstatus = 1
+             AND je.posting_date <= %s
+             AND jea.account = %s
+             AND (jea.party IS NULL OR jea.party = '')
+             AND (jea.party_type IS NULL OR jea.party_type = '')""",
+        (on_or_before, party_account), as_dict=True,
+    )
+    loose_company_currency = flt(rows[0].net_company_currency if rows else 0)
+    if not loose_company_currency:
+        return base
+
+    # JV postings are stored in the JV's account currency; we read the
+    # *_in_account_currency column. For party accounts that match the
+    # company's default currency, this equals company currency. Convert
+    # to target_currency the same way the base balance was converted.
+    company_currency = frappe.get_cached_value("Company", company, "default_currency")
+    if not target_currency or target_currency == company_currency:
+        # Loose JV posting is in payable-account currency; for typical
+        # AED-account suppliers that's company currency already.
+        return base + loose_company_currency
+
+    try:
+        from erpnext.setup.utils import get_exchange_rate
+        rate_target_to_company = flt(get_exchange_rate(
+            target_currency, company_currency, posting_date
+        )) or 1.0
+    except Exception:
+        rate_target_to_company = 1.0
+    if not rate_target_to_company:
+        return base + loose_company_currency
+    return base + (loose_company_currency / rate_target_to_company)
 
 
 # ──────────────────────────── FAST PRINT CONTEXT ────────────────────────────
