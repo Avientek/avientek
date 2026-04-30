@@ -147,12 +147,21 @@ def _build_si_expense_map(filters):
     accts = [a for a in (reward_acct, incentive_acct) if a]
     placeholders = ", ".join(["%s"] * len(accts))
 
+    # Link JV → Sales Invoice via je.cheque_no (set to SI.name by
+    # book_reward_incentive_jv). One-way link policy: we don't store any
+    # SI ref on the JV other than cheque_no + user_remark. SI side has
+    # custom_reward_incentive_jv which is the canonical pointer the
+    # other direction.
+    #
+    # We don't use jea.reference_name because ERPNext's JV validator
+    # forbids setting reference_type=Sales Invoice on non-Receivable
+    # account rows.
     where = [
         "jea.parenttype = 'Journal Entry'",
         "je.docstatus = 1",
-        "jea.reference_type = 'Sales Invoice'",
         f"jea.account IN ({placeholders})",
         "jea.debit_in_account_currency > 0",
+        "(je.cheque_no IS NOT NULL AND je.cheque_no != '')",
     ]
     params = list(accts)
 
@@ -168,7 +177,8 @@ def _build_si_expense_map(filters):
 
     rows = frappe.db.sql(
         f"""
-        SELECT jea.reference_name AS si, jea.account, jea.debit_in_account_currency AS amt
+        SELECT je.cheque_no AS si,
+               jea.account, jea.debit_in_account_currency AS amt
         FROM `tabJournal Entry Account` jea
         INNER JOIN `tabJournal Entry` je ON je.name = jea.parent
         WHERE {' AND '.join(where)}

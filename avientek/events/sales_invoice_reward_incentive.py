@@ -158,12 +158,18 @@ def _resolve_quotation_for_si(si_doc):
     if not sales_orders:
         return None
 
+    # Sales Order Item.prevdoc_docname is always a Quotation (no
+    # prevdoc_doctype column on the child). Some rows may have it
+    # blank if SO was created standalone — skip those.
     for so in sales_orders:
-        qn = frappe.db.get_value(
-            "Sales Order Item",
-            {"parent": so, "prevdoc_doctype": "Quotation"},
-            "prevdoc_docname",
+        qn = frappe.db.sql(
+            """SELECT prevdoc_docname FROM `tabSales Order Item`
+               WHERE parent = %s AND prevdoc_docname IS NOT NULL
+                 AND prevdoc_docname != ''
+               ORDER BY idx LIMIT 1""",
+            so, pluck="prevdoc_docname",
         )
+        qn = qn[0] if qn else None
         if qn and frappe.db.exists("Quotation", qn):
             return frappe.get_doc("Quotation", qn)
     return None
@@ -238,50 +244,55 @@ def _post_jv(si_doc, quote, accts, reward_amt, incentive_amt, method_setting):
     jv.voucher_type = "Journal Entry"
     jv.posting_date = posting_date
     jv.company = si_doc.company
+    # cheque_no is the only link from JV back to SI we maintain — used
+    # both for traceability on the JV form AND as the join key in the
+    # Advance Gross Profit report. We deliberately do NOT set
+    # custom_sales_invoice (one-way link only): SI.custom_reward_incentive_jv
+    # is the single source of truth, so cancel/delete operations on the
+    # SI side don't need to walk back from the JV.
     jv.cheque_no = si_doc.name
     jv.cheque_date = posting_date
-    # custom_sales_invoice is read by the JV→PRF mapper
-    # (avientek/events/journal_entry.py) to populate document_reference.
-    # Setting it here keeps that mapping flow informative now that the
-    # legacy Sales Commission JV (which used to set it) has been removed.
-    try:
-        jv.custom_sales_invoice = si_doc.name
-    except Exception:
-        pass
     jv.user_remark = (
         f"Reward & Incentive booking for {si_doc.name} (against {quote.name}) "
         f"[{method_setting}]"
     )
 
+    # IMPORTANT: do NOT set reference_type/reference_name on the JV
+    # account rows. ERPNext's Journal Entry validator (validate_reference_doc)
+    # requires that any row referencing a Sales Invoice has the same
+    # Receivable account as the SI's debit_to — but our Reward / Incentive
+    # legs use expense and liability accounts, not receivables. Setting
+    # the reference would throw "Party / Account does not match with
+    # Customer / Debit To in Sales Invoice ...".
+    #
+    # Traceability instead via:
+    #   - jv.cheque_no = SI.name  (visible on JV form)
+    #   - jv.custom_sales_invoice = SI.name (Avientek custom Link field;
+    #     consumed by the JV→PRF mapper in events/journal_entry.py)
+    #   - jv.user_remark mentions both SI and Quote names
+    #   - The Advance Gross Profit report queries by account + SI name in
+    #     a separate SQL — it doesn't need reference_type to function.
     if reward_amt > 0:
         jv.append("accounts", {
             "account": accts["reward_expense"],
             "debit_in_account_currency": reward_amt,
             "cost_center": cost_center,
-            "reference_type": "Sales Invoice",
-            "reference_name": si_doc.name,
         })
         jv.append("accounts", {
             "account": accts["reward_payable"],
             "credit_in_account_currency": reward_amt,
             "cost_center": cost_center,
-            "reference_type": "Quotation",
-            "reference_name": quote.name,
         })
     if incentive_amt > 0:
         jv.append("accounts", {
             "account": accts["incentive_expense"],
             "debit_in_account_currency": incentive_amt,
             "cost_center": cost_center,
-            "reference_type": "Sales Invoice",
-            "reference_name": si_doc.name,
         })
         jv.append("accounts", {
             "account": accts["incentive_payable"],
             "credit_in_account_currency": incentive_amt,
             "cost_center": cost_center,
-            "reference_type": "Quotation",
-            "reference_name": quote.name,
         })
 
     if not jv.accounts:
