@@ -401,6 +401,10 @@ has_permission = {
     "Supplier Quotation": "avientek.api.quotation_access.has_permission_check",
     "Request for Quotation": "avientek.api.quotation_access.has_permission_check",
     "Opportunity": "avientek.api.quotation_access.has_permission_check",
+    # Customer: strict Sales Team check for direct doc reads (URL navigation,
+    # link autocomplete from other forms) — list view already enforced via
+    # customer_permission_query.
+    "Customer": "avientek.api.quotation_access.has_permission_check",
 }
 
 # DocType Class

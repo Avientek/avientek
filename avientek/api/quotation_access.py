@@ -709,6 +709,17 @@ def has_permission_check(doc, ptype, user):
 		if sales_team and not set(sales_team) & set(sp_perms):
 			return False
 
+	# Check Sales Person on Customer — strict: customer's Sales Team must
+	# include at least one of the user's permitted sales persons. Customers
+	# with no Sales Team at all are not visible. Mirrors the SQL filter in
+	# customer_permission_query; this guards direct doc reads (e.g. clicking
+	# a customer link from another doc) so an unrelated customer can't be
+	# opened by URL.
+	if sp_perms and doctype == "Customer":
+		sales_team = [st.sales_person for st in (doc.get("sales_team") or []) if st.sales_person]
+		if not sales_team or not set(sales_team) & set(sp_perms):
+			return False
+
 	# Check Sales Person (parent-level Link field)
 	if sp_perms and doctype in SALES_PERSON_PARENT_DOCTYPES:
 		doc_sp = doc.get("sales_person") or ""
@@ -1131,6 +1142,80 @@ def customer_permission_query(user):
 		)
 
 	return " AND ".join(parts)
+
+
+@frappe.whitelist()
+def debug_customer_perm(user=None):
+	"""Diagnostic: dump everything that affects Customer visibility for a user.
+
+	Use this to verify whether the strict Customer-by-Sales-Person filter
+	(commit 42965b0) is actually live on a given site.
+
+	Returns:
+	  - user
+	  - sales_person_ups (list of Sales Person UPs)
+	  - permission_query_sql (the SQL clause customer_permission_query returns)
+	  - total_customers_unfiltered
+	  - total_customers_with_perm_filter
+	  - sample_visible (first 10 names with the filter applied)
+	  - sample_blocked_no_sales_team (first 10 customers with empty sales_team
+	    that the strict filter would now hide)
+
+	Any logged-in non-Guest user can call it for their own user; only
+	System Manager / Administrator can call it for another user.
+	"""
+	caller = frappe.session.user
+	if caller == "Guest":
+		frappe.throw(_("Login required"))
+	target = user or caller
+	if target != caller and caller != "Administrator" and "System Manager" not in frappe.get_roles(caller):
+		frappe.throw(_("Not permitted to inspect another user"))
+
+	sp_perms = _get_user_sales_persons(target)
+	cg_perms = _get_user_customer_groups(target)
+	company_perms = _get_user_companies(target)
+
+	pq_sql = customer_permission_query(target) or ""
+
+	total_unfiltered = frappe.db.sql("SELECT COUNT(*) FROM `tabCustomer`")[0][0]
+
+	total_filtered = total_unfiltered
+	sample_visible = []
+	if pq_sql:
+		try:
+			total_filtered = frappe.db.sql(
+				f"SELECT COUNT(*) FROM `tabCustomer` WHERE {pq_sql}"
+			)[0][0]
+			sample_visible = frappe.db.sql(
+				f"SELECT name, customer_name FROM `tabCustomer` WHERE {pq_sql} ORDER BY modified DESC LIMIT 10",
+				as_dict=True,
+			)
+		except Exception as e:
+			pq_sql = f"<<error running SQL: {e}>>"
+
+	# Sample of customers that have NO sales_team at all — these should now
+	# be hidden from sales-restricted users.
+	sample_no_team = frappe.db.sql(
+		"""SELECT c.name, c.customer_name FROM `tabCustomer` c
+		   WHERE NOT EXISTS (
+		     SELECT 1 FROM `tabSales Team` st
+		     WHERE st.parent = c.name AND st.parenttype = 'Customer'
+		   )
+		   ORDER BY c.modified DESC LIMIT 10""",
+		as_dict=True,
+	)
+
+	return {
+		"user": target,
+		"sales_person_ups": sp_perms,
+		"customer_group_ups": cg_perms,
+		"company_ups": company_perms,
+		"permission_query_sql": pq_sql,
+		"total_customers_unfiltered": total_unfiltered,
+		"total_customers_with_perm_filter": total_filtered,
+		"sample_visible": sample_visible,
+		"sample_blocked_no_sales_team": sample_no_team,
+	}
 
 
 def item_permission_query(user):
