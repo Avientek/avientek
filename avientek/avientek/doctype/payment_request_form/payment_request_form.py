@@ -2065,15 +2065,27 @@ def get_payment_voucher_context(docname):
         currency_totals[curr] += amount_fc
         total_base += amount_base
 
+        # bill_no = Supplier Invoice No (printed in Invoice column on
+        # Payment Voucher per Sridhar 2026-04-27 #7). The PRF child stores
+        # bill_no when populated (for Purchase Invoice + Debit Note); fall
+        # back to reference_name (system ref) so the column never goes
+        # blank for manual / non-PI rows.
+        bill_no_value = (row.bill_no or "").strip() or row.reference_name or ""
+
         rows_data.append({
             "idx": row.idx,
             "reference_doctype": row.reference_doctype or "",
             "reference_name": row.reference_name or "",
+            "bill_no": bill_no_value,
             "invoice_date": formatdate(row.invoice_date, "dd-MM-yy") if row.invoice_date else "",
             "currency": curr,
             "amount_fc": fmt_money(amount_fc, currency=curr),
             "amount_base": fmt_money(amount_base, currency=company_currency),
-            "document_reference": row.document_reference or row.remarks or "",
+            # Reference and Remarks are kept SEPARATE per Sridhar 2026-04-27
+            # #8. Earlier the template collapsed both into one column which
+            # made the 'Remarks' column actually display reference numbers.
+            "document_reference": row.document_reference or "",
+            "remarks": row.remarks or "",
         })
 
     # Format currency totals

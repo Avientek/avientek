@@ -313,6 +313,7 @@ override_doctype_dashboards = {
 jinja = {
 	"methods": [
 		"avientek.avientek.doctype.payment_request_form.payment_request_form.get_payment_voucher_context",
+		"avientek.avientek.doctype.payment_request_form.payment_request_form.get_reference_attachment_images",
 	]
 }
 
