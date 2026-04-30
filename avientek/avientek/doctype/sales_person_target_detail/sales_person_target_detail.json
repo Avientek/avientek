@@ -1,0 +1,115 @@
+{
+ "actions": [],
+ "creation": "2026-04-30 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "month",
+  "item_group",
+  "brand",
+  "column_break_dim",
+  "territory",
+  "country",
+  "section_break_amounts",
+  "target_booking",
+  "target_billing",
+  "column_break_amounts",
+  "target_margin"
+ ],
+ "fields": [
+  {
+   "fieldname": "month",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Month",
+   "options": "\nJanuary\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember",
+   "reqd": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Group",
+   "options": "Item Group",
+   "description": "Empty = applies to all item groups (wildcard).",
+   "columns": 2
+  },
+  {
+   "fieldname": "brand",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Brand",
+   "options": "Brand",
+   "description": "Empty = applies to all brands (wildcard).",
+   "columns": 1
+  },
+  {
+   "fieldname": "column_break_dim",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "territory",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Territory",
+   "options": "Territory",
+   "columns": 1
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "section_break_amounts",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "target_booking",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Target Booking",
+   "options": "parent.currency",
+   "columns": 2,
+   "non_negative": 1
+  },
+  {
+   "fieldname": "target_billing",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Target Billing",
+   "options": "parent.currency",
+   "columns": 2,
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_amounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "target_margin",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Target Margin",
+   "options": "parent.currency",
+   "columns": 2,
+   "non_negative": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Sales Person Target Detail",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

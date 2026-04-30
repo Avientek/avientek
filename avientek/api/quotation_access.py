@@ -946,6 +946,59 @@ def sales_invoice_permission_query(user):
 	return _combined_permission_query(user, "Sales Invoice", "Sales Invoice Item")
 
 
+def sales_person_target_permission_query(user):
+	"""Permission query for Sales Person Target.
+
+	- Administrator / Sales Director / Finance Controller / Sales Manager /
+	  Finance Manager / System Manager: full access (return empty SQL).
+	- Other users: see only Sales Person Targets whose `sales_person` is
+	  the user's own Sales Person record (via Employee.user_id) OR a
+	  descendant in the Sales Person tree.
+	- User with no linked Sales Person and no bypass role: nothing.
+	"""
+	if user == "Administrator":
+		return ""
+	try:
+		roles = set(frappe.get_roles(user) or [])
+	except Exception:
+		roles = set()
+	BYPASS = {
+		"System Manager", "Sales Director", "Sales Manager",
+		"Finance Manager", "Finance Controller",
+	}
+	if roles & BYPASS:
+		return ""
+
+	# Own SP + descendants
+	roots = frappe.db.sql(
+		"""SELECT sp.name FROM `tabSales Person` sp
+		   INNER JOIN `tabEmployee` e ON sp.employee = e.name
+		   WHERE e.user_id = %s AND IFNULL(sp.enabled, 1) = 1""",
+		user, pluck="name",
+	) or []
+	if not roots:
+		return "1=0"  # block all
+
+	allowed = set(roots)
+	frontier = list(roots)
+	while frontier:
+		ph = ", ".join(["%s"] * len(frontier))
+		rows = frappe.db.sql(
+			f"""SELECT name FROM `tabSales Person`
+				WHERE parent_sales_person IN ({ph})
+				  AND IFNULL(enabled, 1) = 1""",
+			frontier, pluck="name",
+		)
+		new = [r for r in rows if r not in allowed]
+		allowed.update(new)
+		frontier = new
+
+	if not allowed:
+		return "1=0"
+	sps_sql = ", ".join(frappe.db.escape(s) for s in allowed)
+	return f"`tabSales Person Target`.`sales_person` IN ({sps_sql})"
+
+
 @frappe.whitelist()
 def ensure_sales_user_si_perm():
 	"""One-shot on-demand fix for the missing 'Sales User' DocPerm on

@@ -1,0 +1,268 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-04-30 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "is_submittable": 1,
+ "field_order": [
+  "naming_series",
+  "sales_person",
+  "fiscal_year",
+  "column_break_header",
+  "company",
+  "currency",
+  "amended_from",
+  "section_break_targets",
+  "targets",
+  "section_break_summary",
+  "total_target_booking",
+  "total_target_billing",
+  "column_break_summary",
+  "total_target_margin",
+  "section_break_descendants",
+  "include_descendant_targets",
+  "descendant_target_booking",
+  "descendant_target_billing",
+  "column_break_descendants",
+  "descendant_target_margin",
+  "section_break_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "SPT-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "SPT-.YYYY.-.####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sales_person",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sales Person",
+   "options": "Sales Person",
+   "reqd": 1
+  },
+  {
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Fiscal Year",
+   "options": "Fiscal Year",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "description": "Optional. Used by the Target vs Actual report to scope actuals to one company. Leave empty for cross-company targets."
+  },
+  {
+   "default": "USD",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Sales Person Target",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "section_break_targets",
+   "fieldtype": "Section Break",
+   "label": "Targets"
+  },
+  {
+   "fieldname": "targets",
+   "fieldtype": "Table",
+   "label": "Target Rows",
+   "options": "Sales Person Target Detail",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_summary",
+   "fieldtype": "Section Break",
+   "label": "This Sales Person — Direct Total"
+  },
+  {
+   "fieldname": "total_target_booking",
+   "fieldtype": "Currency",
+   "label": "Total Target Booking",
+   "options": "currency",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "total_target_billing",
+   "fieldtype": "Currency",
+   "label": "Total Target Billing",
+   "options": "currency",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_summary",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_target_margin",
+   "fieldtype": "Currency",
+   "label": "Total Target Margin",
+   "options": "currency",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_break_descendants",
+   "fieldtype": "Section Break",
+   "label": "Descendants Roll-up",
+   "collapsible": 1,
+   "description": "If this Sales Person has subordinates (children in the Sales Person tree), their submitted targets for the same fiscal year roll up here. The Target vs Actual report uses direct + descendant total when 'Include Descendant Targets' is on."
+  },
+  {
+   "default": "1",
+   "fieldname": "include_descendant_targets",
+   "fieldtype": "Check",
+   "label": "Include Descendant Targets in Reports"
+  },
+  {
+   "fieldname": "descendant_target_booking",
+   "fieldtype": "Currency",
+   "label": "Descendant Target Booking",
+   "options": "currency",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "descendant_target_billing",
+   "fieldtype": "Currency",
+   "label": "Descendant Target Billing",
+   "options": "currency",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_descendants",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "descendant_target_margin",
+   "fieldtype": "Currency",
+   "label": "Descendant Target Margin",
+   "options": "currency",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_break_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Sales Person Target",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "cancel": 1,
+   "amend": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Director",
+   "share": 1,
+   "submit": 1,
+   "cancel": 1,
+   "amend": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "submit": 1,
+   "cancel": 1,
+   "amend": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Controller",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Manager",
+   "share": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "sales_person",
+ "track_changes": 1
+}

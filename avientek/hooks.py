@@ -386,6 +386,7 @@ permission_query_conditions = {
     "Demo Unit Request": "avientek.api.quotation_access.demo_unit_request_permission_query",
     "Avientek Proforma Invoice": "avientek.api.quotation_access.proforma_invoice_permission_query",
     "Existing Quotation": "avientek.api.quotation_access.existing_quotation_permission_query",
+    "Sales Person Target": "avientek.api.quotation_access.sales_person_target_permission_query",
 }
 
 has_permission = {
