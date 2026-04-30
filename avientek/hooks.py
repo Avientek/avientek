@@ -259,6 +259,7 @@ doctype_js = {
 	"Request for Quotation": "public/js/request_for_quotation.js",
 	"Supplier Quotation": "public/js/supplier_quotation.js",
 	"Delivery Note": "public/js/delivery_note.js",
+	"Customer": "public/js/customer.js",
 }
 doctype_list_js = {
 	"Sales Order": ["public/js/sales_order_list.js", "public/js/report_download.js"],
@@ -431,6 +432,7 @@ doc_events = {
     "Customer": {
         "after_insert": "avientek.events.customer.after_insert",
         "validate": "avientek.events.customer.validate_alias",
+        "before_save": "avientek.events.customer.sync_credit_limit_totals",
     },
     "Purchase Order": {
         "before_validate": "avientek.events.utils.fill_missing_item_defaults",

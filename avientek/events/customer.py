@@ -1,4 +1,25 @@
 import frappe
+from frappe.utils import flt
+
+
+# ── Credit Limit roll-up ──
+# DocType Event: Customer, Before Save
+def sync_credit_limit_totals(doc, method=None):
+    """Set Customer Credit Limit row's `credit_limit` = custom_insured_limit
+    + custom_internal_limit on every save.
+
+    Why server-side too (when JS already does it on field-change): covers
+    data import, REST API writes, server scripts, and any other path that
+    bypasses the form. ERPNext's check_credit_limit (selling/customer.py
+    → get_credit_limit) reads `credit_limit` directly, so as long as
+    that field equals the sum, the existing block-on-overrun behaviour
+    on Sales Order / Sales Invoice / Delivery Note / Journal Entry stays
+    intact — no patch to ERPNext core needed.
+    """
+    for row in (doc.get("credit_limits") or []):
+        insured = flt(row.get("custom_insured_limit"))
+        internal = flt(row.get("custom_internal_limit"))
+        row.credit_limit = insured + internal
 
 
 # ── Server Script: "alias" ──
