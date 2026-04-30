@@ -1964,6 +1964,54 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
     return payment_history
 
 
+# ──────────────────────────── PARTY BALANCE IN DOC CURRENCY ───────────
+@frappe.whitelist()
+def get_party_balance_in_doc_currency(company, party_type, party, target_currency=None, posting_date=None):
+    """Return the party's outstanding balance expressed in target_currency.
+
+    Avientek 2026-04-27 #10: PRF was showing supplier balance in company
+    currency, but users want it in the Document currency for consistency
+    with the totals on the same form.
+
+    Mechanism:
+        1. ERPNext's get_party_details returns party_balance in COMPANY
+           currency.
+        2. If target_currency == company_currency (or empty), return the
+           company-currency balance unchanged.
+        3. Otherwise convert via Currency Exchange spot rate at
+           posting_date (target_currency → company_currency, then divide).
+    """
+    from frappe.utils import flt
+    from erpnext.accounts.doctype.payment_entry.payment_entry import get_party_details
+
+    if not (company and party_type and party):
+        return 0
+    try:
+        pdetails = get_party_details(
+            company=company, party_type=party_type, party=party,
+            date=posting_date,
+        ) or {}
+    except Exception:
+        pdetails = {}
+    company_balance = flt(pdetails.get("party_balance") or pdetails.get("balance") or 0)
+
+    company_currency = frappe.get_cached_value("Company", company, "default_currency")
+    if not target_currency or target_currency == company_currency:
+        return company_balance
+
+    try:
+        from erpnext.setup.utils import get_exchange_rate
+        rate_target_to_company = flt(
+            get_exchange_rate(target_currency, company_currency, posting_date)
+        ) or 1.0
+    except Exception:
+        rate_target_to_company = 1.0
+
+    if not rate_target_to_company:
+        return company_balance
+    return company_balance / rate_target_to_company
+
+
 # ──────────────────────────── FAST PRINT CONTEXT ────────────────────────────
 @frappe.whitelist()
 def get_payment_voucher_context(docname):
@@ -2093,11 +2141,39 @@ def get_payment_voucher_context(docname):
     for curr, amount in currency_totals.items():
         formatted_currency_totals.append(fmt_money(amount, currency=curr))
 
-    # TR/LC total
-    tr_total = sum(
-        flt(row.outstanding_amount or row.grand_total or 0)
-        for row in (doc.payment_references or [])
-    )
+    # TR/LC total — converted to the chosen TR currency so the printed
+    # label and amount match (per Sridhar 2026-04-27 #6: "currency
+    # showing company currency but amount is in Document currency").
+    #
+    # Rule:
+    #   tr_currency = doc.currency if set, else company_currency
+    #   For each row:
+    #       - if row.currency == tr_currency: use outstanding_amount/grand_total as-is
+    #       - else: use base_outstanding_amount/base_grand_total (in company currency)
+    #         and divide by tr_currency-to-company exchange rate to express in tr_currency.
+    #   This gives a single coherent total in tr_currency.
+    tr_currency_for_total = doc.currency or company_currency
+    tr_total = 0.0
+    for row in (doc.payment_references or []):
+        row_curr = row.currency or company_currency
+        row_fc = flt(row.outstanding_amount or row.grand_total or 0)
+        row_base = flt(row.base_outstanding_amount or row.base_grand_total or 0)
+        if row_curr == tr_currency_for_total:
+            tr_total += row_fc
+        elif tr_currency_for_total == company_currency:
+            # row in foreign, target in company → use the base value
+            tr_total += row_base
+        else:
+            # Both row & target are non-company; convert via the row's
+            # base value and the target's spot rate to company.
+            try:
+                from erpnext.setup.utils import get_exchange_rate
+                rate_target_to_company = flt(get_exchange_rate(
+                    tr_currency_for_total, company_currency, doc.posting_date
+                )) or 1.0
+            except Exception:
+                rate_target_to_company = 1.0
+            tr_total += (row_base / rate_target_to_company) if rate_target_to_company else row_base
 
     # Pre-fetch ALL attachment images in one batch (avoids per-row frappe.call in Jinja)
     ref_label_map = {
@@ -2157,7 +2233,9 @@ def get_payment_voucher_context(docname):
         "formatted_currency_totals": formatted_currency_totals,
         "total_base_formatted": fmt_money(total_base, currency=company_currency),
         "tr_total_formatted": "{:,.2f}".format(tr_total),
-        "tr_currency": doc.currency or company_currency,
+        # Always matches the currency tr_total was summed in (see TR/LC
+        # block above) so the printed label and amount stay coherent.
+        "tr_currency": tr_currency_for_total,
         "posting_date_fmt": formatdate(doc.posting_date, "d-M-yyyy") if doc.posting_date else "",
         "cheque_date_fmt": formatdate(doc.cheque_date, "d-M-yyyy") if doc.cheque_date else "",
         "issued_amount_fmt": fmt_money(flt(doc.issued_amount or 0), currency=doc.issued_currency or company_currency),

@@ -617,26 +617,24 @@ frappe.ui.form.on('Payment Request Form', {
 				return ;
 			}
 
-			// get_party_details works for Supplier, Customer, Employee
+			// Use Avientek helper that converts party_balance to the
+			// Document currency (Sridhar 2026-04-27 #10). Falls back to
+			// the company-currency balance when doc.currency matches the
+			// company default.
 			return frappe.call({
-				method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
+				method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_in_doc_currency",
 				args: {
 					company: frm.doc.company,
 					party_type: frm.doc.party_type,
 					party: frm.doc.party,
-					date: frm.doc.posting_date,
+					target_currency: frm.doc.currency,
+					posting_date: frm.doc.posting_date,
 				},
-				callback: function(r, rt) {
-					if(r.message) {
-						frappe.run_serially([
-							() => frm.set_value("supplier_balance", r.message.party_balance),
-							() => frm.clear_table("references"),
-							() => frm.set_df_property("party_balance", "options", r.message.party_account_currency),
-							() => frm.set_df_property("total_outstanding_amount", "options", r.message.party_account_currency),
-							() => frm.set_df_property("allocated_amount", "options", r.message.party_account_currency)
-						]);
+				callback: function(r) {
+					if (r.message != null) {
+						frm.set_value("supplier_balance", r.message);
 					}
-				}
+				},
 			});
 		}
 	}
@@ -1629,19 +1627,22 @@ function fetch_supplier_details(frm, force_update) {
         });
     }
 
-    // Fetch party balance only for new docs or when user changes party
+    // Fetch party balance only for new docs or when user changes party.
+    // Uses Avientek helper to express the balance in the Document
+    // currency (Sridhar 2026-04-27 #10).
     if (!frm.doc.supplier_balance || force_update) {
         frappe.call({
-            method: "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details",
+            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_in_doc_currency",
             args: {
                 company: frm.doc.company,
                 party_type: frm.doc.party_type,
                 party: frm.doc.party,
-                date: frm.doc.posting_date
+                target_currency: frm.doc.currency,
+                posting_date: frm.doc.posting_date,
             },
             callback: function(r) {
-                if (r.message) {
-                    set_if_changed(frm, "supplier_balance", r.message.party_balance);
+                if (r.message != null) {
+                    set_if_changed(frm, "supplier_balance", r.message);
                 }
             }
         });
