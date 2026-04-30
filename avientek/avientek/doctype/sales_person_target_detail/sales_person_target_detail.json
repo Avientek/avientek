@@ -34,7 +34,7 @@
    "label": "Item Group",
    "options": "Item Group",
    "description": "Empty = applies to all item groups (wildcard).",
-   "columns": 2
+   "columns": 1
   },
   {
    "fieldname": "brand",
