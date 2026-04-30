@@ -505,7 +505,11 @@ doc_events = {
             "avientek.events.sales_invoice.set_vat_emirate",
             "avientek.events.sales_invoice.sync_custom_sales_person",
         ],
-        "on_submit": "avientek.events.sales_invoice.create_incentive_journal_entry",
+        "on_submit": [
+            "avientek.events.sales_invoice.create_incentive_journal_entry",
+            "avientek.events.sales_invoice_reward_incentive.book_reward_incentive_jv",
+        ],
+        "on_cancel": "avientek.events.sales_invoice_reward_incentive.cancel_reward_incentive_jv",
     },
     "Delivery Note": {
         "before_validate": [

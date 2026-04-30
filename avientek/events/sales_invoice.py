@@ -86,7 +86,24 @@ def create_incentive_journal_entry(doc, method):
     • Calculate proportional incentive from Sales Order
     • Convert to company currency using plc_conversion_rate
     • Create Journal Entry if not already exists
+
+    NOTE: when Avientek Settings has reward_incentive_method configured
+    AND a company account mapping exists for this SI's company, defer
+    booking to sales_invoice_reward_incentive.book_reward_incentive_jv
+    (the newer per-company, reward + incentive aware path). Skip this
+    legacy function in that case to avoid double-booking incentive.
     """
+
+    # ─────────────────────────── 0) Defer to new method if configured
+    try:
+        s = frappe.get_single("Avientek Settings")
+        method_setting = (s.get("reward_incentive_method") or "").strip()
+        if method_setting in ("Quotation Wise", "Item Wise"):
+            for r in (s.get("reward_incentive_company_accounts") or []):
+                if r.get("company") == doc.company:
+                    return  # new path handles this SI
+    except Exception:
+        pass  # fall through to legacy logic on any settings error
 
     # ─────────────────────────── 1) Calculate proportional incentive from Sales Order
     total_inv_incentive = 0

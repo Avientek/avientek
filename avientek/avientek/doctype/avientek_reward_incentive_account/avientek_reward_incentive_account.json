@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "creation": "2026-04-30 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "column_break_accounts",
+  "reward_expense_account",
+  "reward_payable_account",
+  "column_break_incentive",
+  "incentive_expense_account",
+  "incentive_payable_account"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_accounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "reward_expense_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Reward Expense Account",
+   "options": "Account",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reward_payable_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Reward Payable Account",
+   "options": "Account",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_incentive",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "incentive_expense_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Incentive Expense Account",
+   "options": "Account",
+   "reqd": 1
+  },
+  {
+   "fieldname": "incentive_payable_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Incentive Payable Account",
+   "options": "Account",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Avientek Reward Incentive Account",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
