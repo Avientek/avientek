@@ -889,11 +889,25 @@ frappe.ui.form.on('Payment Request Form', {
         frappe.router.on("change", hide);
 
         function show_preview($el, ref_doctype, ref_name, key, row_idx) {
+            // Build a "Open Print View" link target. Print view shows
+            // the rendered HTML directly (text-selectable), so users can
+            // copy any field's value out of the document — image-based
+            // attachment previews don't allow selection. Per Sridhar
+            // 2026-04-27 #5: "from the documents view can we copy the
+            // text from documents".
+            const print_url = "/printview?doctype=" + encodeURIComponent(ref_doctype)
+                + "&name=" + encodeURIComponent(ref_name)
+                + "&trigger_print=0&no_letterhead=0";
+            const form_url = "/app/" + encodeURIComponent(frappe.router.slug(ref_doctype))
+                + "/" + encodeURIComponent(ref_name);
+
             $popup = $(`
                 <div class="inv-att-preview">
                     <div class="inv-att-hdr">
                         <span class="inv-att-title">${frappe.utils.escape_html(ref_name)}</span>
                         <div class="inv-att-btns">
+                            <a class="inv-att-btn" href="${print_url}" target="_blank" title="Open print view (text selectable, copy-friendly)">&#128424;</a>
+                            <a class="inv-att-btn" href="${form_url}" target="_blank" title="Open document">&#128279;</a>
                             <button class="inv-att-btn inv-att-max" title="Maximize">&#x26F6;</button>
                             <button class="inv-att-close" title="Close">&times;</button>
                         </div>
