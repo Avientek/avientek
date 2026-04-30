@@ -1,0 +1,124 @@
+// Copyright (c) 2026, Avientek and contributors
+// For license information, please see license.txt
+//
+// Advance Gross Profit — wraps ERPNext's Gross Profit report and adds
+// Reward Expense, Incentive Expense, Net Profit, Net Profit % columns
+// pulled from the Reward/Incentive JV booked on Sales Invoice submit.
+//
+// Filters mirror the standard Gross Profit report exactly so the
+// underlying upstream execute() runs the same way. Differences are
+// purely in post-processing on the server side.
+
+frappe.query_reports["Advance Gross Profit"] = {
+    filters: [
+        {
+            fieldname: "company",
+            label: __("Company"),
+            fieldtype: "Link",
+            options: "Company",
+            default: frappe.defaults.get_user_default("Company"),
+            reqd: 1,
+        },
+        {
+            fieldname: "from_date",
+            label: __("From Date"),
+            fieldtype: "Date",
+            default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[1],
+            reqd: 1,
+        },
+        {
+            fieldname: "to_date",
+            label: __("To Date"),
+            fieldtype: "Date",
+            default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[2],
+            reqd: 1,
+        },
+        {
+            fieldname: "sales_invoice",
+            label: __("Sales Invoice"),
+            fieldtype: "Link",
+            options: "Sales Invoice",
+        },
+        {
+            fieldname: "group_by",
+            label: __("Group By"),
+            fieldtype: "Select",
+            options: [
+                "Invoice",
+                "Item Code",
+                "Item Group",
+                "Brand",
+                "Warehouse",
+                "Customer",
+                "Customer Group",
+                "Sales Person",
+                "Project",
+                "Territory",
+                "Monthly",
+                "Payment Term",
+            ].join("\n"),
+            default: "Invoice",
+            description: __("Reward/Incentive columns are populated only for 'Invoice' grouping. Other groupings show 0 in v1."),
+        },
+        {
+            fieldname: "sales_person",
+            label: __("Sales Person"),
+            fieldtype: "Link",
+            options: "Sales Person",
+        },
+        {
+            fieldname: "warehouse",
+            label: __("Warehouse"),
+            fieldtype: "Link",
+            options: "Warehouse",
+            get_query: function () {
+                var company = frappe.query_report.get_filter_value("company");
+                return { filters: [["Warehouse", "company", "=", company]] };
+            },
+        },
+        {
+            fieldname: "cost_center",
+            label: __("Cost Center"),
+            fieldtype: "MultiSelectList",
+            options: "Cost Center",
+            get_data: function (txt) {
+                return frappe.db.get_link_options("Cost Center", txt, {
+                    company: frappe.query_report.get_filter_value("company"),
+                });
+            },
+        },
+        {
+            fieldname: "project",
+            label: __("Project"),
+            fieldtype: "MultiSelectList",
+            options: "Project",
+            get_data: function (txt) {
+                return frappe.db.get_link_options("Project", txt, {
+                    company: frappe.query_report.get_filter_value("company"),
+                });
+            },
+        },
+        {
+            fieldname: "include_returned_invoices",
+            label: __("Include Returned Invoices (Stand-alone)"),
+            fieldtype: "Check",
+            default: 1,
+        },
+    ],
+    tree: true,
+    name_field: "parent",
+    parent_field: "parent_invoice",
+    initial_depth: 3,
+    formatter: function (value, row, column, data, default_formatter) {
+        value = default_formatter(value, row, column, data);
+
+        if (data && (data.indent == 0.0 || (row[1] && row[1].content == "Total"))) {
+            value = $(`<span>${value}</span>`);
+            var $value = $(value).css("font-weight", "bold");
+            value = $value.wrap("<p></p>").parent().html();
+        }
+        return value;
+    },
+};
+
+erpnext.utils.add_dimensions("Advance Gross Profit", 15);
