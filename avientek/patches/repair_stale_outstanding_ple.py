@@ -335,6 +335,211 @@ def purge_duplicate_ple(dry_run=1, company=None, limit=None):
 
 
 @frappe.whitelist()
+def purge_extra_ple_against_reference(dry_run=1, company=None,
+                                      account=None, against_pairs=None,
+                                      created_after=None, limit=None):
+    """Delink Payment Ledger Entry rows that exceed the canonical
+    `Payment Entry Reference.allocated_amount` for a (PE, invoice) pair.
+
+    Why this exists
+    ---------------
+    `purge_duplicate_ple` only catches rows that are exact duplicates by
+    (voucher_no, account, party, against_voucher, amount). The KSA
+    `repost_ksa_full_gl_rebuild` patch (run 2026-04-14) regenerated PLE
+    for several Payment Entries by writing **one consolidated row** per
+    invoice reference instead of one row per allocation line — but the
+    original split rows from the PE submit were not removed. So the same
+    PE allocation appears in PLE twice with different amounts (e.g. one
+    row of -6,375.50 + an existing pair of -829.50 / -5,546.00 that sums
+    to the same value). Outstanding goes to -1× grand_total.
+
+    Forensic logic
+    --------------
+    For each (PE, invoice) pair on the receivable account:
+      • Read the canonical allocation set from `Payment Entry Reference`
+        (the source of truth — what the user actually allocated when
+        they submitted/edited the PE).
+      • Read all active PLE rows for that PE -> invoice on this account.
+      • Multi-set match: each Reference.allocated_amount must consume
+        exactly one PLE row of the same magnitude. Unmatched PLE rows
+        are duplicates → delink.
+      • If `created_after` is given, only PLE rows created on/after that
+        timestamp are eligible to be the duplicate (keeps the originals).
+
+    Args:
+        dry_run: 1 (default) reports only.
+        company: required to scope the receivable scan (e.g. KSA).
+        account: required — the receivable/payable account to scan.
+        against_pairs: optional list of [PE, invoice] pairs to limit the
+            scan. If omitted, scan every (PE, invoice) on the account
+            with active PLE.
+        created_after: ISO timestamp. PLE rows created strictly before
+            this stay protected.
+        limit: cap pairs processed.
+
+    Returns {pairs_scanned, pairs_with_excess, ple_delinked,
+             outstanding_updated, audit:[...]}.
+    """
+    dry_run = bool(int(dry_run)) if dry_run is not None else True
+    if not (company and account):
+        frappe.throw("company and account are both required")
+
+    # Collect (PE, invoice) pairs to inspect
+    if against_pairs:
+        # Accept JSON-string or list-of-2-tuples
+        import json as _json
+        if isinstance(against_pairs, str):
+            against_pairs = _json.loads(against_pairs)
+        pairs = [(p[0], p[1]) for p in against_pairs]
+    else:
+        rows = frappe.db.sql(
+            """SELECT DISTINCT voucher_no AS pe, against_voucher_no AS inv
+               FROM `tabPayment Ledger Entry`
+               WHERE company        = %(co)s
+                 AND account        = %(ac)s
+                 AND voucher_type   = 'Payment Entry'
+                 AND against_voucher_type IN ('Sales Invoice', 'Purchase Invoice')
+                 AND IFNULL(against_voucher_no, '') <> ''
+                 AND delinked = 0""",
+            {"co": company, "ac": account}, as_dict=True,
+        )
+        pairs = [(r.pe, r.inv) for r in rows]
+    if limit:
+        pairs = pairs[: int(limit)]
+
+    audit = []
+    delinked_total = 0
+    refresh_invoices = {}  # (vt, vn, ac, pt, pa) -> True
+
+    for pe_name, inv_name in pairs:
+        # Canonical reference allocations from PE (filter by reference name)
+        ref_rows = frappe.db.sql(
+            """SELECT name, allocated_amount
+               FROM `tabPayment Entry Reference`
+               WHERE parent = %s AND reference_name = %s AND docstatus < 2
+               ORDER BY idx""",
+            (pe_name, inv_name), as_dict=True,
+        )
+        ref_amounts = [flt(r.allocated_amount or 0) for r in ref_rows]
+        ref_sum = sum(ref_amounts)
+
+        # Active PLE rows for this PE -> invoice
+        ple_rows = frappe.db.sql(
+            """SELECT name, amount_in_account_currency AS amt, party_type, party,
+                      account, creation
+               FROM `tabPayment Ledger Entry`
+               WHERE voucher_no       = %s
+                 AND against_voucher_no = %s
+                 AND account          = %s
+                 AND delinked         = 0
+               ORDER BY creation, name""",
+            (pe_name, inv_name, account), as_dict=True,
+        )
+        if not ple_rows:
+            continue
+        # All PLE.amt are negative (credits to receivable). Compare magnitudes.
+        ple_magnitudes = [abs(flt(p.amt or 0)) for p in ple_rows]
+        ple_sum = sum(ple_magnitudes)
+
+        diff = ple_sum - ref_sum
+        # Tolerance for FX / rounding. Skip pairs where everything balances.
+        if diff <= _TOLERANCE:
+            continue
+
+        # Multi-set match: greedily mark each PLE row as 'matched' if its
+        # magnitude lines up with a remaining reference allocation. Unmatched
+        # rows are duplicates → candidates for delink.
+        remaining_refs = list(ref_amounts)
+        matched_idx = set()
+        for i, mag in enumerate(ple_magnitudes):
+            for j, ref in enumerate(remaining_refs):
+                if abs(mag - ref) <= _TOLERANCE:
+                    matched_idx.add(i)
+                    remaining_refs.pop(j)
+                    break
+
+        candidates = [ple_rows[i] for i in range(len(ple_rows)) if i not in matched_idx]
+
+        # Optional safety filter: only delink rows created on/after a date
+        # (used to avoid touching the original allocation set on first run).
+        if created_after:
+            candidates = [c for c in candidates
+                          if str(c.creation) >= str(created_after)]
+
+        if not candidates:
+            continue
+
+        # Sanity: never delink more value than the diff would justify.
+        # Sort candidates by magnitude DESC to consume the diff cleanly.
+        candidates.sort(key=lambda c: abs(flt(c.amt or 0)), reverse=True)
+        consumed = 0.0
+        to_delink = []
+        for c in candidates:
+            mag = abs(flt(c.amt or 0))
+            if consumed + mag <= diff + _TOLERANCE:
+                to_delink.append(c)
+                consumed += mag
+        if not to_delink:
+            continue
+
+        audit_entry = {
+            "pe": pe_name,
+            "invoice": inv_name,
+            "ref_sum": ref_sum,
+            "ple_sum_active": ple_sum,
+            "excess": diff,
+            "delink": [
+                {"name": c.name, "amt": flt(c.amt or 0), "creation": str(c.creation)}
+                for c in to_delink
+            ],
+        }
+        audit.append(audit_entry)
+        delinked_total += len(to_delink)
+
+        if not dry_run:
+            names = [c.name for c in to_delink]
+            for i in range(0, len(names), 500):
+                batch = names[i:i + 500]
+                frappe.db.sql(
+                    "UPDATE `tabPayment Ledger Entry` SET delinked=1 WHERE name IN %s",
+                    (tuple(batch),),
+                )
+            # Flag the invoice for outstanding refresh.
+            sample = to_delink[0]
+            inv_type = "Sales Invoice" if frappe.db.exists("Sales Invoice", inv_name) \
+                       else ("Purchase Invoice" if frappe.db.exists("Purchase Invoice", inv_name) else None)
+            if inv_type:
+                refresh_invoices[(inv_type, inv_name, account,
+                                  sample.party_type, sample.party)] = True
+
+    outstanding_updated = 0
+    if not dry_run:
+        for (vt, vn, ac, pt, pa) in refresh_invoices:
+            try:
+                new_os = _compute_outstanding(vt, vn, ac, pt, pa)
+                prec = frappe.get_precision(vt, "outstanding_amount") or 2
+                frappe.db.set_value(vt, vn, "outstanding_amount",
+                                    flt(new_os, prec), update_modified=False)
+                outstanding_updated += 1
+            except Exception:
+                # Best-effort; audit still captures the delink.
+                pass
+        frappe.db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "company": company,
+        "account": account,
+        "created_after": created_after,
+        "pairs_scanned": len(pairs),
+        "pairs_with_excess": len(audit),
+        "ple_delinked": delinked_total,
+        "outstanding_updated": outstanding_updated,
+        "audit": audit,
+    }
+
+
+@frappe.whitelist()
 def undo_repair(since=None, company=None, doctype=None):
     """Roll back a prior run of run_repair.
 
