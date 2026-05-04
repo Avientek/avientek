@@ -1710,10 +1710,22 @@ def restricted_query_report_run(
 	report_name=None, filters=None, page_length=None, are_default_filters=None,
 	is_custom_report=None, custom_columns=None, user=None,
 ):
-	"""Override frappe.desk.query_report.run to inject Brand/Item Group filters
-	for restricted users into Script Reports.
+	"""Override frappe.desk.query_report.run.
+
+	Two layers, applied in order:
+	  1. Inject Brand / Item Group filters for users on reports listed in
+	     BRAND_FILTER_REPORTS (legacy per-report safety net).
+	  2. After the report runs, apply the **global** User-Permission filter
+	     (avientek.api.report_permission_filter) so EVERY query report,
+	     including ones users create later, has rows trimmed to whatever
+	     each constrained DocType column permits the caller to see.
+	     Sridhar 2026-05-04: this is the global rule — new custom reports
+	     don't need to be edited one-by-one to honour User Permissions.
 	"""
 	from frappe.desk.query_report import run as original_run
+	from avientek.api.report_permission_filter import (
+		apply_global_user_permission_filter,
+	)
 	import json
 
 	current_user = frappe.session.user
@@ -1751,11 +1763,28 @@ def restricted_query_report_run(
 			if len(ig_perms) == 1:
 				filters["item_group"] = ig_perms[0]
 
-	return original_run(
+	result = original_run(
 		report_name=report_name, filters=json.dumps(filters), page_length=page_length,
 		are_default_filters=are_default_filters, is_custom_report=is_custom_report,
 		custom_columns=custom_columns, user=user,
 	)
+
+	# ── Layer 2: global User-Permission post-filter ──
+	# Wrapped in try/except so a misbehaving report never breaks the user
+	# experience — failures are logged and the unfiltered result is
+	# returned (visible in Error Log).
+	if isinstance(result, dict):
+		try:
+			result = apply_global_user_permission_filter(
+				result, user=current_user, report_name=report_name,
+			)
+		except Exception:
+			frappe.log_error(
+				title="Global UP filter failed: " + (report_name or "?"),
+				message=frappe.get_traceback(),
+			)
+
+	return result
 
 
 # ── Custom filtered export for restricted users ──

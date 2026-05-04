@@ -117,3 +117,68 @@ Pick a test user (e.g. `testqcs@gmail.com`) with limited permissions.
 Run any custom report from their session. Confirm rows are constrained
 to their allowed Companies / Item Groups / Customers / etc. If the
 report's author followed the helpers, this just works.
+
+## Global automatic filter (zero-config)
+
+Every query report — Script Report, Server Script Report, Query Report,
+Custom Report — runs through `frappe.desk.query_report.run`, which we
+override with our wrapper at `avientek.api.quotation_access.restricted_query_report_run`.
+After the original implementation runs, the wrapper calls
+`avientek.api.report_permission_filter.apply_global_user_permission_filter`
+which post-filters the rows by inspecting Link columns and the caller's
+User Permissions.
+
+What this means:
+
+* **A user can create a brand-new Custom Report and forget about User
+  Permissions.** Rows are still trimmed to their allowed values for
+  any Link column that points to a constrained DocType.
+* The set of constrained DocTypes is `DEFAULT_FILTERED_DOCTYPES` in
+  `avientek/api/report_permission_filter.py`. Default list:
+  Company, Sales Person, Item Group, Customer, Brand, Territory,
+  Warehouse, Cost Center, Project, Department, Employee.
+* System Manager and Administrator are bypassed (Frappe convention).
+
+### Limitations of the global filter
+
+The global filter only catches rows that **expose the constrained DocType
+as a Link column in their result**. If your report aggregates and
+strips the link column, the global filter cannot trim that dimension.
+For huge result sets, prefer pre-filtering at SQL using
+`build_permission_where_sql` — the global filter is a safety net, not
+a replacement.
+
+The global filter does NOT touch `report_summary`, `chart`, or
+`message`. Aggregated counts/totals baked into those keys may still
+expose figures beyond the user's scope. Authors who care about that
+should pre-filter at SQL.
+
+### Bypass switch (for diagnosis)
+
+If a missing-row complaint might be the global filter hiding the row,
+you have two ways to disable post-filtering temporarily:
+
+1. **Per-session** — set the Frappe flag in a Server Script:
+   ```python
+   frappe.flags.skip_global_user_permission_filter = True
+   ```
+2. **Site-wide** — set the System Setting
+   `avientek_skip_global_user_permission_filter` to 1 (will need a
+   matching Custom Field on `Avientek Settings`).
+
+Re-enable by clearing the flag / setting.
+
+### Adding a new DocType to the global filter
+
+Edit `DEFAULT_FILTERED_DOCTYPES` in
+`avientek/api/report_permission_filter.py`. No restart needed — Frappe
+re-imports on next request. The user must have `User Permission` rows
+on the new DocType for it to take effect.
+
+### When NOT to rely on the global filter
+
+* The report must be performant on UNFILTERED data, since post-filter
+  runs after the SQL. For million-row queries, pre-filter at SQL.
+* If the constrained DocType is computed in Python (not a real Link
+  column), the global filter can't see it — you must call
+  `filter_rows_by_user_permissions` yourself before returning.
