@@ -1,0 +1,48 @@
+{
+  "_comment": "Baseline Custom DocPerm rows that after_migrate enforces every migrate. Edit this file (or regenerate it from production via tools/sync_fixtures.py) instead of editing the hardcoded values in migrate.py. Each entry must specify parent (DocType), role, permlevel, and the perm flags to set.",
+  "_last_synced": null,
+  "_synced_from": null,
+  "rows": [
+    {
+      "parent": "Sales Invoice",
+      "role": "Sales Invoice- Custom",
+      "permlevel": 0,
+      "perms": {
+        "read": 1,
+        "write": 1,
+        "create": 1,
+        "delete": 0,
+        "submit": 1,
+        "cancel": 1,
+        "amend": 1,
+        "report": 1,
+        "export": 0,
+        "import": 1,
+        "share": 1,
+        "print": 1,
+        "email": 1,
+        "select": 1,
+        "if_owner": 0
+      },
+      "create_if_missing": true
+    },
+    {
+      "parent": "Sales Invoice",
+      "role": "Accounts Manager",
+      "permlevel": 0,
+      "perms": {
+        "export": 1
+      },
+      "create_if_missing": false
+    },
+    {
+      "parent": "Sales Invoice",
+      "role": "Accounts User",
+      "permlevel": 0,
+      "perms": {
+        "export": 1
+      },
+      "create_if_missing": false
+    }
+  ]
+}

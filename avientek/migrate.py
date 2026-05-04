@@ -297,54 +297,80 @@ def _fix_global_field_settings():
 
 def _enforce_custom_role_permissions():
 	"""Ensure custom role permissions stay as intended after every migrate.
-	Recreates the permission row if it was deleted, and enforces export=0.
-	Also cleans up duplicate rows that cause ValidationError on migrate."""
-	ROLE = "Sales Invoice- Custom"
-	DT = "Sales Invoice"
-	EXPECTED = {
-		"read": 1, "write": 1, "create": 1, "delete": 0,
-		"submit": 1, "cancel": 1, "amend": 1,
-		"report": 1, "export": 0, "import": 1,
-		"share": 1, "print": 1, "email": 1, "select": 1,
-		"if_owner": 0,
-	}
 
-	# Find ALL existing rows for this role (there may be duplicates)
-	all_rows = frappe.db.get_all(
-		"Custom DocPerm",
-		filters={"parent": DT, "role": ROLE, "permlevel": 0},
-		pluck="name",
-	)
+	Reads the baseline from `avientek/data/role_perm_baseline.json` instead
+	of using a hardcoded dict, so client-edited values that need to be
+	preserved can flow into the repo via `tools/sync_fixtures.py` and
+	become the new baseline on the next deploy. Avoids the trap where
+	migrate silently reverts client UI changes (Sridhar 2026-05-04).
 
-	if all_rows:
-		# Keep the first row, delete any duplicates
-		keep = all_rows[0]
-		for dup in all_rows[1:]:
-			frappe.db.sql("DELETE FROM `tabCustom DocPerm` WHERE name=%s", dup)
-		# Update the kept row with expected values
-		frappe.db.set_value("Custom DocPerm", keep, EXPECTED)
-	else:
-		# No existing row — safe to insert (no duplicate validation issue)
-		doc = frappe.new_doc("Custom DocPerm")
-		doc.parent = DT
-		doc.role = ROLE
-		doc.permlevel = 0
-		doc.update(EXPECTED)
-		doc.insert(ignore_permissions=True)
-
+	For each row in the baseline:
+	  - cleans up duplicate Custom DocPerm rows (legacy bug, keep oldest)
+	  - sets every perm flag listed under `perms` on the kept row
+	  - if no row exists and `create_if_missing` is true, inserts one
+	  - if no row exists and `create_if_missing` is false, skips silently
+	    (used for built-in roles whose row only exists on production)
+	"""
+	baseline = _load_role_perm_baseline()
+	if not baseline:
+		return
+	for row in baseline.get("rows", []):
+		dt = row.get("parent")
+		role = row.get("role")
+		permlevel = row.get("permlevel", 0)
+		perms = row.get("perms") or {}
+		create_if_missing = bool(row.get("create_if_missing"))
+		if not (dt and role and perms):
+			continue
+		all_rows = frappe.db.get_all(
+			"Custom DocPerm",
+			filters={"parent": dt, "role": role, "permlevel": permlevel},
+			pluck="name",
+			order_by="creation",
+		)
+		if all_rows:
+			keep = all_rows[0]
+			for dup in all_rows[1:]:
+				frappe.db.sql("DELETE FROM `tabCustom DocPerm` WHERE name=%s", dup)
+			frappe.db.set_value("Custom DocPerm", keep, perms)
+		elif create_if_missing:
+			doc = frappe.new_doc("Custom DocPerm")
+			doc.parent = dt
+			doc.role = role
+			doc.permlevel = permlevel
+			doc.update(perms)
+			doc.insert(ignore_permissions=True)
 	frappe.db.commit()
 
 
 def _enforce_export_permissions():
-	"""Ensure Accounts Manager and Accounts User always have export=1 on Sales Invoice.
-	Migrations can reset Custom DocPerm export to 0 — this restores it every time."""
-	for role in ["Accounts Manager", "Accounts User"]:
-		existing = frappe.db.exists("Custom DocPerm", {
-			"parent": "Sales Invoice", "role": role, "permlevel": 0,
-		})
-		if existing:
-			frappe.db.set_value("Custom DocPerm", existing, "export", 1)
-	frappe.db.commit()
+	"""Deprecated — kept as a stub so any external caller doesn't break.
+	Logic merged into `_enforce_custom_role_permissions` which now reads
+	all role baselines from `data/role_perm_baseline.json`."""
+	return
+
+
+def _load_role_perm_baseline():
+	"""Load `avientek/data/role_perm_baseline.json`. Returns dict or None
+	if the file is missing/unreadable — in which case migrate skips role
+	enforcement rather than failing (intentional: lets us land the JSON
+	migration in a safe order)."""
+	import json as _json
+	import os as _os
+	try:
+		path = _os.path.join(
+			frappe.get_app_path("avientek"), "data", "role_perm_baseline.json"
+		)
+		if not _os.path.isfile(path):
+			return None
+		with open(path) as fh:
+			return _json.load(fh)
+	except Exception:
+		frappe.log_error(
+			title="role_perm_baseline.json load failed",
+			message=frappe.get_traceback(),
+		)
+		return None
 
 
 def _deactivate_old_quotation_workflows():
