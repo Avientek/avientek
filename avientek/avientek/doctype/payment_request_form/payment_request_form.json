@@ -197,7 +197,7 @@
    "label": "Get Credit Note"
   },
   {
-   "depends_on": "eval:doc.payment_type==\"Pay\"\r\n",
+   "depends_on": "eval:doc.payment_type==\"Pay\" || doc.payment_type==\"Advance Pay\"\r\n",
    "fieldname": "reference_section",
    "fieldtype": "Section Break",
    "label": "Reference"
