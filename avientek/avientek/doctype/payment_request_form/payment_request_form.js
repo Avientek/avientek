@@ -492,6 +492,29 @@ if (!document.getElementById('inv-preview-styles')) {
     </style>`).appendTo('head');
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Naming series auto-pick by company.
+// Sridhar 2026-05-05 #12: each Avientek group company has its own
+// voucher series prefix. When the user picks a Company on a NEW PRF
+// (no name yet), auto-populate naming_series so the user doesn't have
+// to remember which prefix to choose. Existing docs are never touched.
+// ──────────────────────────────────────────────────────────────────────
+const NAMING_SERIES_BY_COMPANY = {
+    "Avientek FZCO":                                   "AVFZC-.###",
+    "Avientek Electronics Trading LLC":                "AVLLC-.###",
+    "Avientek Trading LLC":                            "AVKSA-.###",
+    "Avientek Trading WLL":                            "AVWLL-.###",
+    "Avientek Electronics Trading Pvt Ltd":            "AVLTD-.###",
+};
+
+function _apply_naming_series_by_company(frm) {
+    if (!frm.doc.company || !frm.is_new()) return;
+    const series = NAMING_SERIES_BY_COMPANY[frm.doc.company];
+    if (series && frm.doc.naming_series !== series) {
+        frm.set_value("naming_series", series);
+    }
+}
+
 frappe.ui.form.on('Payment Request Form', {
 	onload: function(frm) {
         // Fetch supplier details only if party exists and details are missing
@@ -499,6 +522,8 @@ frappe.ui.form.on('Payment Request Form', {
         if (frm.doc.party) {
             fetch_supplier_details(frm);
         }
+        // Auto-pick naming series for new docs
+        _apply_naming_series_by_company(frm);
 		frm.set_query("issued_bank", function() {
             return {
                 filters: {
@@ -549,6 +574,12 @@ frappe.ui.form.on('Payment Request Form', {
 
         // Update Type options based on party_type
         frm.events.update_reference_type_options(frm);
+    },
+
+    company: function(frm) {
+        // Auto-pick naming series when company changes on a new doc
+        // (Sridhar 2026-05-05 #12).
+        _apply_naming_series_by_company(frm);
     },
 
     refresh: function(frm) {
@@ -767,7 +798,7 @@ frappe.ui.form.on('Payment Request Form', {
 			// the company-currency balance when doc.currency matches the
 			// company default.
 			return frappe.call({
-				method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_with_jv_inclusion",
+				method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_cross_company",
 				args: {
 					company: frm.doc.company,
 					party_type: frm.doc.party_type,
@@ -1791,7 +1822,7 @@ function fetch_supplier_details(frm, force_update) {
     // currency (Sridhar 2026-04-27 #10).
     if (!frm.doc.supplier_balance || force_update) {
         frappe.call({
-            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_with_jv_inclusion",
+            method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_party_balance_cross_company",
             args: {
                 company: frm.doc.company,
                 party_type: frm.doc.party_type,

@@ -104,7 +104,7 @@
    "fieldname": "naming_series",
    "fieldtype": "Select",
    "label": "Series",
-   "options": "AVFZC-.###\nAVETLL-.###\nAVTLL-.###\nAVTWL-.###\nAVETPL-.###\nAVETL-.###\nEAWFCIT-.###\nAVG-.###"
+   "options": "AVFZC-.###\nAVLLC-.###\nAVKSA-.###\nAVWLL-.###\nAVLTD-.###\nAVETL-.###\nEAWFCIT-.###\nAVG-.###"
   },
   {
    "fieldname": "payment_type",

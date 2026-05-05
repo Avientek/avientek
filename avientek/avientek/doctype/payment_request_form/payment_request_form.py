@@ -1791,6 +1791,44 @@ def get_voucher_print_data(docname):
     }
 
 
+def _classify_payment_type(mode_of_payment):
+    """Map a Mode of Payment label to the short code shown in the
+    Previous Payment History table on PRF print formats and the form
+    popup. Sridhar 2026-05-05 #11: previous code defaulted everything
+    to "TR" and only overrode for TT/TELEGRAPHIC modes — Cheque, Cash,
+    LC, Advance, Online etc. all rendered as "TR" which confused users.
+
+    Mapping is keyword-based on the upper-cased mode string. Order
+    matters — first match wins. Falls back to the first 4 alpha chars
+    of the mode as a generic short code, or "PAY" if mode is blank.
+    """
+    if not mode_of_payment:
+        return "PAY"
+    mop = mode_of_payment.upper()
+    # Order matters — more specific patterns first. "LETTER" contains the
+    # substring "TT", so the LC rule must run before the TT rule, or
+    # Letter-of-Credit modes get misclassified as TT.
+    rules = (
+        (("LETTER OF CREDIT", "L/C", "LC ", "LC-"),    "LC"),
+        (("TRUST RECEIPT", "TRUST", "TR ", "TR-"),     "TR"),
+        (("TELEGRAPHIC", "WIRE", "SWIFT", "TT"),       "TT"),
+        (("ADVANCE", "ADV "),                          "ADV"),
+        (("CHEQUE", "CHQ", "CHECK"),                   "CHQ"),
+        (("CASH",),                                    "CASH"),
+        (("ONLINE", "PORTAL", "INTERNET"),             "ONL"),
+        (("VISA", "MASTERCARD", "CREDIT CARD", "CARD"),"CARD"),
+        (("BANK TRANSFER", "BT ", "NEFT", "RTGS",
+          "IMPS", "ACH"),                              "BT"),
+        (("DEMAND DRAFT", "DD"),                       "DD"),
+    )
+    for keywords, code in rules:
+        if any(k in mop for k in keywords):
+            return code
+    # Fallback: first 4 alpha chars of the mode (safer than blank).
+    short = "".join(ch for ch in mop if ch.isalpha())[:4]
+    return short or "PAY"
+
+
 @frappe.whitelist()
 def get_supplier_payment_history(supplier, company=None, limit=50):
     """
@@ -1859,11 +1897,7 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
             pbd = bank_account_map[pe.party_bank_account]
             beneficiary_account = pbd.get("iban") or pbd.get("bank_account_no") or ""
 
-        payment_type_code = "TR"
-        if pe.mode_of_payment:
-            mop = pe.mode_of_payment.upper()
-            if "TT" in mop or "TELEGRAPHIC" in mop:
-                payment_type_code = "TT"
+        payment_type_code = _classify_payment_type(pe.mode_of_payment)
 
         payment_history.append({
             "sl_no": 0,
@@ -1936,11 +1970,7 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
             bank_name = bd.get("bank") or ""
             debit_account_no = bd.get("bank_account_no") or ""
 
-        payment_type_code = "TR"
-        if je.mode_of_payment:
-            mop = je.mode_of_payment.upper()
-            if "TT" in mop or "TELEGRAPHIC" in mop:
-                payment_type_code = "TT"
+        payment_type_code = _classify_payment_type(je.mode_of_payment)
 
         payment_history.append({
             "sl_no": 0,
@@ -2154,6 +2184,118 @@ def get_party_balance_with_jv_inclusion(company, party_type, party, target_curre
     if not rate_target_to_company:
         return base + loose_company_currency
     return base + (loose_company_currency / rate_target_to_company)
+
+
+@frappe.whitelist()
+def get_party_balance_cross_company(company, party_type, party,
+                                     target_currency=None, posting_date=None):
+    """Return the party's TOTAL outstanding balance across EVERY company
+    they have GL postings in, expressed in target_currency.
+
+    Sridhar 2026-05-05 #4: "Outstanding not fetching for other companies …
+    if any balance is showing in outstanding those items should be
+    fetched." For an Avientek-group supplier with payable rows in (say)
+    Avientek FZCO + Avientek Trading LLC + Avientek Electronics Trading
+    LLC, the PRF supplier_balance field used to show only the originating
+    company's balance — the team had to look up the rest manually.
+
+    Mechanism:
+      1. Read tabGL Entry directly — covers every voucher type (PI, CrN,
+         DrN, JV with party tagged, PE allocations, etc.). Uses
+         account_currency column so amounts are already in the company
+         account currency.
+      2. Group by `company`. For each company, convert net (debit -
+         credit) from that company's default currency to target_currency
+         at posting_date FX.
+      3. Sum across companies + add the loose-JV exposure for the calling
+         company (preserves the existing `_with_jv_inclusion` behaviour
+         on the originating company; cross-company JVs with party fields
+         tagged are already in the GL Entry sweep).
+
+    `company` is the ORIGINATING company (the PRF's company); we still
+    keep it as required so the loose-JV scan stays scoped — those un-tagged
+    JVs are an originating-company hygiene problem, not a cross-company one.
+
+    Returns a single number (sum across companies), in target_currency.
+    """
+    from frappe.utils import flt
+
+    if not (party_type and party):
+        return 0
+
+    # 1. Standard cross-company sweep via tabGL Entry. is_cancelled=0
+    #    excludes voided rows. is_opening='No' would exclude opening
+    #    balances — the customer wants ALL outstanding so we KEEP them.
+    where = ["gle.party_type = %(pt)s",
+             "gle.party = %(p)s",
+             "gle.is_cancelled = 0"]
+    if posting_date:
+        where.append("gle.posting_date <= %(pd)s")
+    rows = frappe.db.sql(
+        f"""SELECT gle.company,
+                   COALESCE(SUM(IFNULL(gle.debit_in_account_currency, 0)
+                              - IFNULL(gle.credit_in_account_currency, 0)),
+                            0) AS net_account_ccy,
+                   gle.account_currency AS account_ccy
+            FROM `tabGL Entry` gle
+            WHERE {' AND '.join(where)}
+            GROUP BY gle.company, gle.account_currency
+            HAVING ABS(net_account_ccy) > 0.01""",
+        {"pt": party_type, "p": party, "pd": posting_date},
+        as_dict=True,
+    )
+
+    if not rows:
+        # Nothing in GL — fall back to the loose-JV inclusive helper for
+        # the originating company so callers still get a sensible number.
+        return get_party_balance_with_jv_inclusion(
+            company, party_type, party, target_currency, posting_date,
+        )
+
+    # 2. Convert each company-bucket to target_currency. Cache rates by
+    #    (from_ccy → target) so we don't hit get_exchange_rate per row.
+    target_currency = target_currency or frappe.get_cached_value(
+        "Company", company, "default_currency"
+    )
+    rate_cache = {}
+    try:
+        from erpnext.setup.utils import get_exchange_rate
+    except Exception:
+        get_exchange_rate = None
+
+    def _convert(amt, from_ccy):
+        if not amt:
+            return 0.0
+        if not from_ccy or from_ccy == target_currency:
+            return flt(amt)
+        if not get_exchange_rate:
+            return flt(amt)  # best-effort; better to over-estimate
+        rate = rate_cache.get(from_ccy)
+        if rate is None:
+            try:
+                rate = flt(get_exchange_rate(from_ccy, target_currency,
+                                             posting_date)) or 1.0
+            except Exception:
+                rate = 1.0
+            rate_cache[from_ccy] = rate
+        return flt(amt) * rate
+
+    grand_total = 0.0
+    for r in rows:
+        grand_total += _convert(r["net_account_ccy"], r["account_ccy"])
+
+    # 3. Layer in the loose-JV adjustment for the originating company.
+    #    GL sweep above already counts party-tagged JV rows; this just
+    #    adds the un-tagged ones (the historical Avientek pattern).
+    try:
+        loose_addition = flt(get_party_balance_with_jv_inclusion(
+            company, party_type, party, target_currency, posting_date,
+        )) - flt(get_party_balance_in_doc_currency(
+            company, party_type, party, target_currency, posting_date,
+        ))
+    except Exception:
+        loose_addition = 0.0
+    return grand_total + loose_addition
 
 
 # ──────────────────────────── FAST PRINT CONTEXT ────────────────────────────
