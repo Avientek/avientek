@@ -540,9 +540,6 @@ doc_events = {
             "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
         ],
     },
-    "User Permission": {
-        "before_delete": "avientek.avientek.doctype.user_permission_manager.user_permission_manager.prevent_managed_permission_deletion"
-    },
 }
 
 
