@@ -1,0 +1,16 @@
+{
+ "color": "#8D99A6",
+ "doctype": "Number Card",
+ "document_type": "Quotation",
+ "dynamic_filters_json": "[[\"Quotation\",\"owner\",\"=\",\"frappe.session.user\"]]",
+ "filters_json": "[[\"Quotation\",\"workflow_state\",\"=\",\"Draft\"]]",
+ "function": "Count",
+ "is_public": 1,
+ "is_standard": 1,
+ "label": "My Draft Quotations",
+ "module": "Avientek",
+ "name": "My Draft Quotations",
+ "show_percentage_stats": 1,
+ "stats_time_interval": "Daily",
+ "type": "Document Type"
+}

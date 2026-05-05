@@ -15,6 +15,7 @@ def after_migrate():
 	_enforce_custom_role_permissions()
 	_enforce_export_permissions()
 	_sync_payment_voucher_formats()
+	_sync_sales_team_workspace()
 
 
 def _sync_payment_voucher_formats():
@@ -32,6 +33,23 @@ def _sync_payment_voucher_formats():
 	except Exception:
 		frappe.log_error(
 			title="after_migrate: PV format sync failed",
+			message=frappe.get_traceback(),
+		)
+
+
+def _sync_sales_team_workspace():
+	"""Push the Sales Team workspace's `number_cards` table + content
+	from on-disk sales_team.json into the DB record. Frappe's reload-doc
+	doesn't always propagate child-table changes for Workspace, so without
+	this hook every migrate would leave the workspace stuck on whatever
+	rows were originally inserted. Idempotent — overwrites with the
+	on-disk state on every migrate. Sridhar 2026-05-06."""
+	try:
+		from avientek.scripts.sync_sales_team_workspace import run as _sync
+		_sync()
+	except Exception:
+		frappe.log_error(
+			title="after_migrate: Sales Team workspace sync failed",
 			message=frappe.get_traceback(),
 		)
 
