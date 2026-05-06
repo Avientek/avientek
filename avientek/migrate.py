@@ -16,6 +16,7 @@ def after_migrate():
 	_enforce_export_permissions()
 	_sync_payment_voucher_formats()
 	_sync_sales_team_workspace()
+	_block_prf_workflow_self_approval()
 
 
 def _sync_payment_voucher_formats():
@@ -33,6 +34,24 @@ def _sync_payment_voucher_formats():
 	except Exception:
 		frappe.log_error(
 			title="after_migrate: PV format sync failed",
+			message=frappe.get_traceback(),
+		)
+
+
+def _block_prf_workflow_self_approval():
+	"""Defensive re-assertion: set allow_self_approval=0 on every
+	transition of every Payment Request Form workflow on every migrate.
+	The patch in patches.txt does the one-shot retroactive fix; this
+	helper guards against someone toggling it back to 1 in the UI
+	(Sridhar 2026-05-06)."""
+	try:
+		from avientek.patches.block_prf_workflow_self_approval import (
+			enforce_no_self_approval,
+		)
+		enforce_no_self_approval()
+	except Exception:
+		frappe.log_error(
+			title="after_migrate: PRF self-approval block failed",
 			message=frappe.get_traceback(),
 		)
 
