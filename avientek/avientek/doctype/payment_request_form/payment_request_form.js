@@ -1958,13 +1958,28 @@ frappe.ui.form.on('Payment Request Reference', {
         ) {
             const dt = row.reference_doctype;
             const filters = {};
-            if (frm.doc.company) {
-                // Only apply company filter if the target doctype has it.
-                const has_company_field = frappe.get_meta(dt)
-                    && (frappe.get_meta(dt).fields || []).some(
-                        f => f.fieldname === "company",
-                    );
-                if (has_company_field) filters.company = frm.doc.company;
+            const dt_meta = frappe.get_meta(dt);
+            const has_field = (fn) => dt_meta && (dt_meta.fields || []).some(
+                f => f.fieldname === fn,
+            );
+            if (frm.doc.company && has_field("company")) {
+                filters.company = frm.doc.company;
+            }
+            // Sridhar/Jithin 2026-05-06: when party is set, restrict the
+            // picker to documents of that party so the user doesn't see
+            // every other supplier/customer's docs in the list.
+            if (frm.doc.party_type === "Supplier" && frm.doc.party
+                && has_field("supplier")) {
+                filters.supplier = frm.doc.party;
+            }
+            if (frm.doc.party_type === "Customer" && frm.doc.party
+                && has_field("customer")) {
+                filters.customer = frm.doc.party;
+            }
+            // Employee Advance / Expense Claim use `employee` field.
+            if (frm.doc.party_type === "Employee" && frm.doc.party
+                && has_field("employee")) {
+                filters.employee = frm.doc.party;
             }
             // Use frappe.prompt with a Link field — the cleanest typeahead
             // picker. Skips when frappe.prompt is not yet rendered (rare).

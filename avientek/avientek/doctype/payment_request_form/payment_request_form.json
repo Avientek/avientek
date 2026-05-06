@@ -276,7 +276,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "depends_on": "eval:doc.payment_type==\"Pay\"\r\n",
+   "depends_on": "eval:doc.payment_type==\"Pay\" || doc.payment_type==\"Advance Pay\"\r\n",
    "fieldname": "payment_mode",
    "fieldtype": "Link",
    "label": "Payment Mode",
