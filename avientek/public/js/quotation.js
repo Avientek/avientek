@@ -4,7 +4,63 @@
 // JS only provides instant preview + handles UI events.
 // ──────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────
+// High-Probability lock UI hint (Sridhar 2026-05-06).
+// Server enforces (avientek.api.quotation_high_probability.before_save).
+// JS just renders the form read-only + adds a banner so the user
+// understands BEFORE they try to edit. Whitelisted roles see a
+// different banner and editing stays enabled.
+// ──────────────────────────────────────────────────────────────
+const HIGH_PROB_THRESHOLD = 75;
+const _HIGH_PROB_WHITELIST = [
+    "Finance Controller", "Sales Director", "System Manager", "Administrator",
+];
+
+function _user_is_whitelisted_for_high_prob() {
+    const roles = frappe.user_roles || [];
+    return _HIGH_PROB_WHITELIST.some(r => roles.indexOf(r) !== -1);
+}
+
+function _apply_high_probability_lock(frm) {
+    if (frm.is_new()) { return; }
+    const prob = parseFloat(frm.doc.probability || 0);
+    if (prob < HIGH_PROB_THRESHOLD) {
+        frm.dashboard.clear_headline();
+        return;
+    }
+    if (_user_is_whitelisted_for_high_prob()) {
+        frm.dashboard.set_headline(
+            __("Probability is {0}% — high-prob lock waived for your role.",
+                [prob]),
+            "yellow",
+        );
+        return;
+    }
+    // Lock every field except `probability` itself.
+    const meta = frappe.get_meta(frm.doctype) || {};
+    (meta.fields || []).forEach(function (f) {
+        if (!f.fieldname || f.fieldname === "probability") { return; }
+        frm.set_df_property(f.fieldname, "read_only", 1);
+    });
+    frm.dashboard.set_headline(
+        __("Quotation locked: probability {0}% (>= {1}%). " +
+           "Only the Probability field is editable, and only to bump it " +
+           "to 100%. To Cancel / Amend / Resubmit, file a Quotation " +
+           "Action Request for two-level approval.",
+           [prob, HIGH_PROB_THRESHOLD]),
+        "orange",
+    );
+}
+
 frappe.ui.form.on('Quotation', {
+
+    refresh(frm) {
+        _apply_high_probability_lock(frm);
+    },
+
+    probability(frm) {
+        _apply_high_probability_lock(frm);
+    },
 
     // ── Save lifecycle ──────────────────────────────────────
     before_save(frm) {

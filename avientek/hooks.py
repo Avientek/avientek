@@ -476,7 +476,13 @@ doc_events = {
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
             "avientek.events.quotation.validate_total_discount",
+            # Sridhar 2026-05-06 — lock fields when probability >= 75.
+            "avientek.api.quotation_high_probability.before_save",
         ],
+        "before_cancel":
+            "avientek.api.quotation_high_probability.before_cancel",
+        "on_update_after_submit":
+            "avientek.api.quotation_high_probability.on_update_after_submit",
     },
     "Purchase Receipt": {
         "before_validate": "avientek.events.utils.fill_missing_item_defaults",
