@@ -881,11 +881,6 @@ def get_outstanding_reference_documents(args):
             except Exception:
                 frappe.log_error(frappe.get_traceback(), f"Error processing standalone debit note {dn.name}")
 
-    # Also include open Purchase Orders when fetching Purchase Invoices
-    if args.get("reference_doctype") == "Purchase Invoice":
-        po_rows = _get_outstanding_purchase_orders(args)
-        filtered_rows.extend(po_rows)
-
     # Deduplicate by (voucher_type, voucher_no) — Issue 3 fix
     # Keep only the first occurrence of each voucher to prevent duplicates
     seen = set()
