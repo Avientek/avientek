@@ -8,13 +8,7 @@
   "item_price_variation_in_quotation",
   "reward_incentive_section",
   "reward_incentive_method",
-  "reward_incentive_company_accounts",
-  "quote_high_prob_section",
-  "quote_high_prob_l1_role",
-  "quote_high_prob_l2_role",
-  "quote_high_prob_column_break",
-  "quote_high_prob_creator_role",
-  "quote_high_prob_restricted_roles"
+  "reward_incentive_company_accounts"
  ],
  "fields": [
   {
@@ -30,66 +24,25 @@
   },
   {
    "default": "Quotation Wise",
-   "description": "How to allocate Reward and Incentive amounts when a Sales Invoice is submitted. Quotation Wise = proportional to invoice value vs quote total. Item Wise = per Quotation Item using qty proportion.",
    "fieldname": "reward_incentive_method",
    "fieldtype": "Select",
    "label": "Reward & Incentive Method",
-   "options": "Quotation Wise\nItem Wise"
+   "options": "Quotation Wise\nItem Wise",
+   "description": "How to allocate Reward and Incentive amounts when a Sales Invoice is submitted. Quotation Wise = proportional to invoice value vs quote total. Item Wise = per Quotation Item using qty proportion."
   },
   {
-   "description": "Liability and expense accounts per company used when posting the Reward / Incentive Journal Entry on Sales Invoice submit.",
    "fieldname": "reward_incentive_company_accounts",
    "fieldtype": "Table",
    "label": "Company Account Mapping",
-   "options": "Avientek Reward Incentive Account"
-  },
-  {
-   "description": "Roles that drive the High-Probability Quotation lock + RBAC + dual-approval workflow.",
-   "fieldname": "quote_high_prob_section",
-   "fieldtype": "Section Break",
-   "label": "Quotation High-Probability Workflow"
-  },
-  {
-   "default": "GM-CS",
-   "description": "Role allowed to perform the L1 Approve transition on a Quotation Action Request. Cannot self-approve.",
-   "fieldname": "quote_high_prob_l1_role",
-   "fieldtype": "Link",
-   "label": "Quote Action Request \u2014 Level 1 Approver",
-   "options": "Role"
-  },
-  {
-   "default": "CS",
-   "description": "Role allowed to perform the L2 Approve transition. Cannot self-approve. L2 approval triggers automatic execution of the requested Cancel / Amend / Resubmit action.",
-   "fieldname": "quote_high_prob_l2_role",
-   "fieldtype": "Link",
-   "label": "Quote Action Request \u2014 Level 2 Approver",
-   "options": "Role"
-  },
-  {
-   "fieldname": "quote_high_prob_column_break",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "Sales support L2",
-   "description": "Role that owns Quotations and creates Action Requests. Members are also auto-whitelisted for the High-Probability lock.",
-   "fieldname": "quote_high_prob_creator_role",
-   "fieldtype": "Link",
-   "label": "Quotation Team Role",
-   "options": "Role"
-  },
-  {
-   "description": "Roles whose users see only Quotations where workflow_state='Approved' AND probability=100. Typically downstream teams: Dispatch, Procurement, Supply Chain, Logistics.",
-   "fieldname": "quote_high_prob_restricted_roles",
-   "fieldtype": "Table",
-   "label": "Restricted Roles (Read-only on Approved+100)",
-   "options": "Avientek Quotation Restricted Role"
+   "options": "Avientek Reward Incentive Account",
+   "description": "Liability and expense accounts per company used when posting the Reward / Incentive Journal Entry on Sales Invoice submit."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-06 15:49:48.535375",
+ "modified": "2026-04-30 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Avientek Settings",
