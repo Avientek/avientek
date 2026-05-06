@@ -8,6 +8,16 @@
 
 frappe.ui.form.on('Avientek Settings', {
     setup(frm) {
+        // Defensive: only register the set_query if the parent grid
+        // field exists. When a sibling field's child doctype isn't
+        // yet synced (e.g. right after pulling new code, before bench
+        // migrate), the meta load can leave fields_dict[parent]
+        // undefined and Frappe's set_query throws "Cannot read
+        // properties of undefined (reading 'grid')", blanking the
+        // entire form.
+        if (!frm.fields_dict.reward_incentive_company_accounts) {
+            return;
+        }
         const acct_fields = [
             'reward_expense_account',
             'reward_payable_account',
