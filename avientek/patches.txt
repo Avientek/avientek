@@ -25,3 +25,6 @@ avientek.patches.render_letter_head_content_as_jinja
 avientek.patches.sync_payment_voucher_formats_v2026_04_27
 avientek.patches.remove_user_permission_manager
 avientek.patches.block_prf_workflow_self_approval
+# seed_quotation_action_request_workflow runs from after_migrate only —
+# patches.txt phase happens BEFORE schema sync, so the QAR DocType
+# wouldn't exist yet when the seeder tries to create the Workflow.

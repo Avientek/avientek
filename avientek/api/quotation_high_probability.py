@@ -38,6 +38,13 @@ from frappe import _
 # created on the test/prod sites.
 # ─────────────────────────────────────────────────────────────────────
 
+# Set frappe.flags[_CONTEXT_BYPASS_FLAG] = True before performing a
+# Cancel/Amend/Resubmit when you're calling from an authorised path
+# (e.g. Quotation Action Request._execute). The before_save /
+# before_cancel / on_update_after_submit hooks then skip the lock
+# checks for that single transaction.
+_CONTEXT_BYPASS_FLAG = "_avtk_quotation_high_prob_bypass"
+
 HIGH_PROB_THRESHOLD = 75  # >= this => locked / approval-required
 RESTRICTED_ROLES = (
     "Dispatch",
@@ -69,7 +76,7 @@ def before_save(doc, method=None):
     """
     if doc.is_new() or doc.docstatus != 0:
         return
-    if _user_has_whitelist_role():
+    if _user_has_whitelist_role() or frappe.flags.get(_CONTEXT_BYPASS_FLAG):
         return
 
     db_prob = _flt(frappe.db.get_value("Quotation", doc.name, "probability"))
@@ -99,11 +106,11 @@ def before_save(doc, method=None):
 
 
 def before_cancel(doc, method=None):
-    """Block direct Cancel on a high-probability Quotation (#1.3 stub).
-
-    Phase 2 will replace this block with a real Action Request flow.
-    """
-    if _user_has_whitelist_role():
+    """Block direct Cancel on a high-probability Quotation. Phase 2:
+    the only authorised cancellation path is via a Quotation Action
+    Request that has reached the L2-Approved state — that path sets
+    `frappe.flags[_CONTEXT_BYPASS_FLAG]` so this guard skips."""
+    if _user_has_whitelist_role() or frappe.flags.get(_CONTEXT_BYPASS_FLAG):
         return
     db_prob = _flt(frappe.db.get_value("Quotation", doc.name, "probability"))
     if db_prob >= HIGH_PROB_THRESHOLD:
@@ -127,7 +134,7 @@ def on_update_after_submit(doc, method=None):
     by the approval flow. Phase 1 just blocks; Phase 2 replaces with
     Action Request.
     """
-    if _user_has_whitelist_role():
+    if _user_has_whitelist_role() or frappe.flags.get(_CONTEXT_BYPASS_FLAG):
         return
     db_prob = _flt(frappe.db.get_value("Quotation", doc.name, "probability"))
     if db_prob < HIGH_PROB_THRESHOLD:
