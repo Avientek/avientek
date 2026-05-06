@@ -446,5 +446,37 @@
   "property_type": "Code",
   "row_name": null,
   "value": "eval:doc.payment_type==\"Pay\" || doc.payment_type==\"Advance Pay\""
+ },
+ {
+  "default_value": null,
+  "doc_type": "Payment Request Form",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "custom_advance_amount",
+  "is_system_generated": 0,
+  "modified": "2026-05-06 16:00:00.000000",
+  "module": null,
+  "name": "Payment Request Form-custom_advance_amount-hidden",
+  "property": "hidden",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ },
+ {
+  "default_value": null,
+  "doc_type": "Payment Request Form",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "custom_advance_reference",
+  "is_system_generated": 0,
+  "modified": "2026-05-06 16:00:00.000000",
+  "module": null,
+  "name": "Payment Request Form-custom_advance_reference-hidden",
+  "property": "hidden",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
  }
 ]

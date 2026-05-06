@@ -582,6 +582,35 @@ frappe.ui.form.on('Payment Request Form', {
         _apply_naming_series_by_company(frm);
     },
 
+    payment_type: function(frm) {
+        // Sridhar 2026-05-06 #4: switching payment_type from Pay to
+        // Internal Transfer (or vice-versa) used to leave the prior
+        // party / supplier-address fields populated, so the saved
+        // Internal Transfer ended up with the supplier's address.
+        // Clear all party-side fields whenever payment_type changes
+        // and the doc is still in draft.
+        if (frm.doc.docstatus !== 0) return;
+        const party_fields = [
+            "party_type", "party", "party_name",
+            "supplier_bank_account", "party_bank_account",
+            "address_display", "contact_display",
+            "contact_email", "contact_mobile", "contact_person",
+            "supplier_balance",
+        ];
+        party_fields.forEach(function (f) {
+            if (frm.fields_dict[f]) {
+                frm.set_value(f, null);
+            }
+        });
+        // Also clear the references table — they were chosen for
+        // the old party.
+        if (Array.isArray(frm.doc.payment_references)
+            && frm.doc.payment_references.length) {
+            frm.clear_table("payment_references");
+            frm.refresh_field("payment_references");
+        }
+    },
+
     refresh: function(frm) {
         // Apply debit note row styling
         frm.events.apply_debit_note_styling(frm);
@@ -1852,21 +1881,59 @@ frappe.ui.form.on('Payment Request Reference', {
     reference_doctype: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
 
-        // For Manual type, set default exchange rate and currency
-        if (row.reference_doctype === "Manual") {
-            if (!row.exchange_rate) {
-                row.exchange_rate = 1;
+        // Sridhar 2026-05-06 #1b: when adding/changing a row's type,
+        // default the currency from the party's master record (e.g. the
+        // Supplier's billing currency). Falls back to company default
+        // if the party has none configured. This applies whether type
+        // is Manual or a real doctype — every row will benefit.
+        if (!row.currency) {
+            const party_type = frm.doc.party_type;
+            const party = frm.doc.party;
+            const company = frm.doc.company;
+            const set_currency = function (ccy) {
+                if (!ccy) return;
+                row.currency = ccy;
+                if (!row.exchange_rate) row.exchange_rate = 1;
+                frm.refresh_field("payment_references");
+                if (frm.events && frm.events.apply_debit_note_styling) {
+                    frm.events.apply_debit_note_styling(frm);
+                }
+            };
+            const fallback_company_ccy = function () {
+                if (!company) return;
+                frappe.db.get_value("Company", company, "default_currency")
+                    .then(r => set_currency(
+                        (r.message || {}).default_currency,
+                    ));
+            };
+            if (party_type && party) {
+                // Master-currency lookup per party type.
+                const ccy_field_map = {
+                    "Supplier": ["Supplier", "default_currency"],
+                    "Customer": ["Customer", "default_currency"],
+                    "Employee": null,  // Employee has no master currency
+                };
+                const spec = ccy_field_map[party_type];
+                if (spec) {
+                    frappe.db.get_value(spec[0], party, spec[1]).then(r => {
+                        const ccy = (r.message || {})[spec[1]];
+                        if (ccy) {
+                            set_currency(ccy);
+                        } else {
+                            fallback_company_ccy();
+                        }
+                    });
+                } else {
+                    fallback_company_ccy();
+                }
+            } else {
+                fallback_company_ccy();
             }
-            // Default to company currency if not set
-            if (!row.currency && frm.doc.company) {
-                frappe.db.get_value('Company', frm.doc.company, 'default_currency').then(r => {
-                    if (r.message) {
-                        row.currency = r.message.default_currency;
-                        frm.refresh_field("payment_references");
-                        frm.events.apply_debit_note_styling(frm);
-                    }
-                });
-            }
+        }
+
+        // For Manual type, also set exchange_rate to 1 if blank.
+        if (row.reference_doctype === "Manual" && !row.exchange_rate) {
+            row.exchange_rate = 1;
         }
         frm.refresh_field("payment_references");
         frm.events.apply_debit_note_styling(frm);
