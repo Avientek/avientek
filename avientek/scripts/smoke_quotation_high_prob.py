@@ -79,11 +79,11 @@ def run():
     #     reload of roles via patching frappe.get_roles for the test.
     real_get_roles = frappe.get_roles
     try:
-        frappe.get_roles = lambda u=None: ["Dispatch"]
-        sql_dispatch = restricted_visibility_condition("dispatch_user@example.com")
+        frappe.get_roles = lambda u=None: ["Procurement L2"]
+        sql_dispatch = restricted_visibility_condition("procurement_user@example.com")
     finally:
         frappe.get_roles = real_get_roles
-    print(f"  faux Dispatch    -> {sql_dispatch[:120]}{'…' if len(sql_dispatch) > 120 else ''}")
+    print(f"  faux Procurement L2 -> {sql_dispatch[:120]}{'…' if len(sql_dispatch) > 120 else ''}")
     ok = ("workflow_state" in sql_dispatch
           and "probability = 100" in sql_dispatch
           and "tabQuotation" in sql_dispatch)
@@ -177,8 +177,8 @@ def run():
     from avientek.api.quotation_access import quotation_permission_query
     real_get_roles = frappe.get_roles
     try:
-        frappe.get_roles = lambda u=None: ["Sales User", "Dispatch"]
-        sql = quotation_permission_query("dispatch_user@example.com")
+        frappe.get_roles = lambda u=None: ["Sales User", "Procurement L2"]
+        sql = quotation_permission_query("procurement_user@example.com")
         ok = "probability = 100" in (sql or "")
         flag = "OK" if ok else "FAIL"
         print(f"  {flag}  combined SQL: {sql[:160]}…")

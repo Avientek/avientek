@@ -12,9 +12,30 @@
 // different banner and editing stays enabled.
 // ──────────────────────────────────────────────────────────────
 const HIGH_PROB_THRESHOLD = 75;
-const _HIGH_PROB_WHITELIST = [
-    "Finance Controller", "Sales Director", "System Manager", "Administrator",
+// Default whitelist — overwritten on first form load by the server's
+// Avientek Settings via avientek.api.quotation_high_probability
+// .get_role_config (Sridhar 2026-05-06: roles are now configurable).
+let _HIGH_PROB_WHITELIST = [
+    "GM-CS", "CS", "Sales support L2", "System Manager", "Administrator",
 ];
+let _HIGH_PROB_CONFIG_LOADED = false;
+
+function _load_high_prob_role_config() {
+    // Cache once per page load — the settings doc is small and stable.
+    if (_HIGH_PROB_CONFIG_LOADED) { return Promise.resolve(); }
+    return frappe.call({
+        method: "avientek.api.quotation_high_probability.get_role_config",
+    }).then(r => {
+        if (r.message && r.message.whitelisted) {
+            _HIGH_PROB_WHITELIST = r.message.whitelisted;
+        }
+        _HIGH_PROB_CONFIG_LOADED = true;
+    }).catch(() => {
+        // Network blip — keep the defaults; the server is authoritative
+        // anyway, JS lock is just a UX hint.
+        _HIGH_PROB_CONFIG_LOADED = true;
+    });
+}
 
 function _user_is_whitelisted_for_high_prob() {
     const roles = frappe.user_roles || [];
@@ -115,11 +136,15 @@ function _open_or_create_action_request(frm, action) {
 frappe.ui.form.on('Quotation', {
 
     refresh(frm) {
-        _apply_high_probability_lock(frm);
+        _load_high_prob_role_config().then(() => {
+            _apply_high_probability_lock(frm);
+        });
     },
 
     probability(frm) {
-        _apply_high_probability_lock(frm);
+        _load_high_prob_role_config().then(() => {
+            _apply_high_probability_lock(frm);
+        });
     },
 
     // ── Save lifecycle ──────────────────────────────────────

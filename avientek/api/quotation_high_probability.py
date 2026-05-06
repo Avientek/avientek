@@ -46,18 +46,90 @@ from frappe import _
 _CONTEXT_BYPASS_FLAG = "_avtk_quotation_high_prob_bypass"
 
 HIGH_PROB_THRESHOLD = 75  # >= this => locked / approval-required
-RESTRICTED_ROLES = (
-    "Dispatch",
-    "Procurement",
-    "Supply Chain",
-    "Logistics",
+
+# ─────────────────────────────────────────────────────────────────────
+# Role configuration — Sridhar 2026-05-06 confirmed roles, then asked
+# us to make them Avientek-Settings-driven so renames don't need a
+# code change. The constants below are the FALLBACK defaults; live
+# values are read from `Avientek Settings` via _settings_roles().
+# ─────────────────────────────────────────────────────────────────────
+
+DEFAULT_RESTRICTED_ROLES = (
+    "Procurement L2",
 )
-WHITELISTED_ROLES = (
-    "Finance Controller",
-    "Sales Director",
+DEFAULT_WHITELISTED_ROLES = (
+    "GM-CS",
+    "CS",
+    "Sales support L2",
     "System Manager",
     "Administrator",
 )
+DEFAULT_L1_ROLE = "GM-CS"
+DEFAULT_L2_ROLE = "CS"
+DEFAULT_CREATOR_ROLE = "Sales support L2"
+
+# Cache key — busted automatically when Avientek Settings is saved
+# (frappe.cache invalidates cached_doc).
+_SETTINGS_CACHE_KEY = "_avtk_quote_high_prob_roles"
+
+
+def _settings_roles():
+    """Read role config from Avientek Settings (single doctype). Cached
+    in process memory; cache busts when the settings doc is saved
+    (frappe.clear_cache fires that). Falls back to module defaults if
+    any setting is blank."""
+    cached = frappe.local.flags.get(_SETTINGS_CACHE_KEY)
+    if cached is not None:
+        return cached
+    try:
+        s = frappe.get_cached_doc("Avientek Settings")
+        l1 = s.get("quote_high_prob_l1_role") or DEFAULT_L1_ROLE
+        l2 = s.get("quote_high_prob_l2_role") or DEFAULT_L2_ROLE
+        creator = s.get("quote_high_prob_creator_role") or DEFAULT_CREATOR_ROLE
+        restricted = tuple(
+            r.role for r in (s.get("quote_high_prob_restricted_roles") or [])
+            if r.role
+        ) or DEFAULT_RESTRICTED_ROLES
+    except Exception:
+        l1, l2, creator = DEFAULT_L1_ROLE, DEFAULT_L2_ROLE, DEFAULT_CREATOR_ROLE
+        restricted = DEFAULT_RESTRICTED_ROLES
+
+    # Whitelist = L1 + L2 + Creator + System Manager + Administrator.
+    whitelisted = tuple({l1, l2, creator, "System Manager", "Administrator"})
+
+    cfg = {
+        "l1_role": l1,
+        "l2_role": l2,
+        "creator_role": creator,
+        "whitelisted": whitelisted,
+        "restricted": restricted,
+    }
+    frappe.local.flags[_SETTINGS_CACHE_KEY] = cfg
+    return cfg
+
+
+# Backward-compatible accessors so any external import keeps working.
+# (Real reads always go through _settings_roles() at runtime.)
+@frappe.whitelist()
+def get_role_config():
+    """Public read for the JS layer — returns the resolved role
+    configuration as a plain dict. Whitelist client-callable."""
+    return _settings_roles()
+
+
+def _whitelisted_roles():
+    return set(_settings_roles()["whitelisted"])
+
+
+def _restricted_roles():
+    return set(_settings_roles()["restricted"])
+
+
+# Compatibility aliases for old code paths that imported the module-
+# level constants directly. These now reflect *defaults* only — if you
+# care about the live values, call _settings_roles() / get_role_config().
+RESTRICTED_ROLES = DEFAULT_RESTRICTED_ROLES
+WHITELISTED_ROLES = DEFAULT_WHITELISTED_ROLES
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -177,9 +249,9 @@ def restricted_visibility_condition(user):
     if not user or user == "Administrator":
         return ""
     roles = set(frappe.get_roles(user) or [])
-    if any(r in roles for r in WHITELISTED_ROLES):
+    if roles & _whitelisted_roles():
         return ""
-    if not any(r in roles for r in RESTRICTED_ROLES):
+    if not (roles & _restricted_roles()):
         return ""
 
     # Build the restrictive clause: Approved + probability=100 OR they own
@@ -218,7 +290,7 @@ def _user_has_whitelist_role(user=None):
     if user == "Administrator":
         return True
     roles = set(frappe.get_roles(user) or [])
-    return any(r in roles for r in WHITELISTED_ROLES)
+    return bool(roles & _whitelisted_roles())
 
 
 def _user_parent_sales_persons(user):
