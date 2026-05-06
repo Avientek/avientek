@@ -1935,6 +1935,59 @@ frappe.ui.form.on('Payment Request Reference', {
         if (row.reference_doctype === "Manual" && !row.exchange_rate) {
             row.exchange_rate = 1;
         }
+
+        // Sridhar 2026-05-06 #3 (option B): picker dialog so the user
+        // can pick a real document for `document_reference` whenever
+        // they set reference_doctype to a non-Manual type. Manual stays
+        // free-text (as before). Only auto-prompt when the field is
+        // empty — re-selecting the same type later does not re-prompt
+        // and clobber an already-entered reference. Filters can be
+        // tightened later (e.g. company match) per dt.
+        if (
+            row.reference_doctype
+            && row.reference_doctype !== "Manual"
+            && !row.document_reference
+            && frappe.db.exists("DocType", row.reference_doctype)
+        ) {
+            const dt = row.reference_doctype;
+            const filters = {};
+            if (frm.doc.company) {
+                // Only apply company filter if the target doctype has it.
+                const has_company_field = frappe.get_meta(dt)
+                    && (frappe.get_meta(dt).fields || []).some(
+                        f => f.fieldname === "company",
+                    );
+                if (has_company_field) filters.company = frm.doc.company;
+            }
+            // Use frappe.prompt with a Link field — the cleanest typeahead
+            // picker. Skips when frappe.prompt is not yet rendered (rare).
+            try {
+                frappe.prompt(
+                    [{
+                        fieldtype: "Link",
+                        fieldname: "doc_name",
+                        label: __("Select {0}", [dt]),
+                        options: dt,
+                        get_query: () => ({ filters: filters }),
+                        reqd: 1,
+                    }],
+                    function (values) {
+                        frappe.model.set_value(
+                            cdt, cdn, "document_reference", values.doc_name,
+                        );
+                        frappe.model.set_value(
+                            cdt, cdn, "reference_name", values.doc_name,
+                        );
+                        frm.refresh_field("payment_references");
+                    },
+                    __("Pick {0}", [dt]),
+                    __("Set Reference"),
+                );
+            } catch (_e) {
+                // Fall back silently — user can type the name manually.
+            }
+        }
+
         frm.refresh_field("payment_references");
         frm.events.apply_debit_note_styling(frm);
     },
