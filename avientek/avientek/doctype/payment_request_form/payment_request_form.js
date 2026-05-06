@@ -658,7 +658,14 @@ frappe.ui.form.on('Payment Request Form', {
             }, 1500);
         }
 
-        if (frm.doc.payment_type == "Pay" && !frm.doc.__islocal) {
+        // Sridhar 2026-05-06: show "Download Combined PDF" for every
+        // submitted payment type — Internal Transfer + Advance Pay
+        // were missing the button. The backend already handles the
+        // case of zero attachments (just renders the voucher PDF).
+        if (
+            !frm.doc.__islocal
+            && ["Pay", "Advance Pay", "Internal Transfer"].includes(frm.doc.payment_type)
+        ) {
             // Combined PDF can take well over the 60-90 sec gateway timeout
             // for vouchers with many references. Queue it on a background
             // worker; the worker attaches the file to this PRF and emits
