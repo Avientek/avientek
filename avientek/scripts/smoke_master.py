@@ -10,6 +10,10 @@ Aggregates results from:
   3. DocPerm fix (commit 7fd0ad9 — Sales Invoice- Custom / Sales User /
                    CSM survive migrate via customize-form perms)
   4. Global UP filter (commit 1575bdf — every query report respects UP)
+  5. Sridhar followups 2026-05-07 (#1/#2/#3/#5/#7/#8 — TR docs by
+                   tr_type, Supplier PI input, Open PO endpoint, PV
+                   Supplier Invoice No column, dynamic ref-type code,
+                   per-company naming series)
 
 Single PASS/FAIL verdict at the end. Designed to be run after every
 deploy to local to catch regressions before they reach production.
@@ -106,6 +110,20 @@ def run():
             f"qr={ret.get('query_report_pass')} "
             f"so_admin={ret.get('admin_so_count')} "
             f"so_user={ret.get('user_so_count')}",
+        ))
+
+    # ── 5. Sridhar followups 2026-05-07 ──
+    from avientek.scripts.smoke_sridhar_followups import run as srid_run
+    ret, out, err = _capture(srid_run)
+    if err:
+        summary.append(("Sridhar followups 2026-05-07", "ERROR", err))
+    else:
+        ok = (ret or {}).get("fail", 1) == 0
+        summary.append((
+            f"Sridhar followups 2026-05-07 — {ret.get('pass', 0)} pass / "
+            f"{ret.get('fail', 0)} fail",
+            "PASS" if ok else "FAIL",
+            out,
         ))
 
     # ── Verdict ──
