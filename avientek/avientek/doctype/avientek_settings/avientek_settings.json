@@ -47,7 +47,7 @@
    "fieldname": "quote_high_prob_section",
    "fieldtype": "Section Break",
    "label": "Quotation High-Probability Workflow",
-   "description": "Roles that drive the High-Probability Quotation lock + RBAC + dual-approval workflow. Sridhar 2026-05-06 spec."
+   "description": "Roles that drive the High-Probability Quotation lock + RBAC + dual-approval workflow."
   },
   {
    "fieldname": "quote_high_prob_l1_role",
