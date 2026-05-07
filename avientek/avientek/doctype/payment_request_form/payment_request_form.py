@@ -2490,6 +2490,42 @@ def get_payment_voucher_context(docname):
         frappe.db.get_value("User", doc.owner, "full_name") if doc.owner else ""
     ) or (doc.owner or "")
 
+    # Signature image lookup from Avientek Settings → signature_images.
+    # Map keyed on signature_key (workflow role label or free-form name).
+    # Each value: {"name": <display name>, "designation": <text>, "image": <url>}.
+    # Also auto-attach image to dynamic signers when linked_user matches the
+    # signing user — so a workflow Approved-by user gets their image rendered
+    # without having to maintain a per-role row.
+    signature_images = {}
+    try:
+        sett = frappe.get_cached_doc("Avientek Settings")
+        for row in (sett.get("signature_images") or []):
+            key = (row.signature_key or "").strip()
+            if not key or not row.image:
+                continue
+            signature_images[key] = {
+                "name": row.signer_name or "",
+                "designation": row.designation or "",
+                "image": row.image,
+                "linked_user": row.linked_user or "",
+            }
+        # Hydrate each signer dict with .signature_image when we can find one.
+        # Priority: linked_user match → role label match → none.
+        user_to_image = {
+            v["linked_user"]: v["image"]
+            for v in signature_images.values() if v.get("linked_user")
+        }
+        for role_label, sig in (signers or {}).items():
+            if not isinstance(sig, dict):
+                continue
+            user_email = sig.get("user") or sig.get("email") or ""
+            if user_email and user_email in user_to_image:
+                sig["signature_image"] = user_to_image[user_email]
+            elif role_label in signature_images:
+                sig["signature_image"] = signature_images[role_label]["image"]
+    except Exception:
+        signature_images = {}
+
     return {
         "company_currency": company_currency,
         "issued_bank_details": issued_bank_details,
@@ -2497,6 +2533,7 @@ def get_payment_voucher_context(docname):
         "supplier_bank": supplier_bank,
         "supplier_swift": supplier_swift,
         "signers": signers,
+        "signature_images": signature_images,
         "prepared_by_name": prepared_by_name,
         "issued_bank_currency": doc.issued_currency or company_currency,
         "receiving_bank_currency": doc.receiving_currency or company_currency,

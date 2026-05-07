@@ -14,7 +14,9 @@
   "quote_high_prob_l2_role",
   "quote_high_prob_column_break",
   "quote_high_prob_creator_role",
-  "quote_high_prob_restricted_roles"
+  "quote_high_prob_restricted_roles",
+  "signature_images_section",
+  "signature_images"
  ],
  "fields": [
   {
@@ -83,6 +85,18 @@
    "options": "Avientek Quotation Restricted Role",
    "label": "Restricted Roles (Read-only on Approved+100)",
    "description": "Roles whose users see only Quotations where workflow_state='Approved' AND probability=100. Typically downstream teams: Dispatch, Procurement, Supply Chain, Logistics."
+  },
+  {
+   "fieldname": "signature_images_section",
+   "fieldtype": "Section Break",
+   "label": "Signature Images for Print Formats",
+   "description": "Upload signature PNGs that render dynamically on Payment Voucher print formats. The 'Signature Slot' on each row is what the print template looks up — use a workflow role label ('Approved Level 1', 'Approved Level 2', 'Authorised', 'Released') for dynamic signers, or a free-form name ('Siby Joy', 'Siby Thomas John') for static signers."
+  },
+  {
+   "fieldname": "signature_images",
+   "fieldtype": "Table",
+   "label": "Signature Images",
+   "options": "Avientek Signature Image"
   }
  ],
  "grid_page_length": 50,
