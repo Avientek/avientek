@@ -4,6 +4,45 @@ from frappe.model.mapper import get_mapped_doc
 from frappe.utils import flt
 
 
+def strip_quotation_optional_items(doc, method=None):
+    """Remove SO Item rows whose source Quotation Item belongs to the
+    `custom_service_items` table (Quotation's "Optional Items" section).
+
+    Frappe's get_mapped_doc iterates *every* table on the source whose
+    doctype matches the table_map key. Because the avientek custom field
+    `Quotation.custom_service_items` is also a `Quotation Item` table,
+    rows from there get merged into Sales Order's items table alongside
+    the regular `items` rows. Optional Items are quote-time-only — they
+    must not flow into a Sales Order.
+
+    Runs on before_save for new SOs only. Identifies offending rows by
+    looking up the source Quotation Item's parentfield via the
+    `quotation_item` field set by ERPNext's standard mapper.
+    """
+    if doc.docstatus != 0 or not doc.is_new() or not doc.items:
+        return
+
+    qi_names = [it.quotation_item for it in doc.items if getattr(it, "quotation_item", None)]
+    if not qi_names:
+        return
+
+    optional_qi = set(frappe.db.get_all(
+        "Quotation Item",
+        filters={"name": ["in", qi_names], "parentfield": "custom_service_items"},
+        pluck="name",
+    ))
+    if not optional_qi:
+        return
+
+    kept = [it for it in doc.items if it.quotation_item not in optional_qi]
+    if len(kept) == len(doc.items):
+        return
+
+    doc.items = kept
+    for i, it in enumerate(doc.items, 1):
+        it.idx = i
+
+
 def carry_forward_quotation_fields(doc, method=None):
     """Restore payment terms and other fields from source Quotation.
 

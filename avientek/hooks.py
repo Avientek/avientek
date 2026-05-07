@@ -461,6 +461,7 @@ doc_events = {
             "avientek.events.sales_order.validate_exchange_rate_v2",
         ],
         "before_save": [
+            "avientek.events.sales_order.strip_quotation_optional_items",
             "avientek.events.sales_order.carry_forward_quotation_fields",
             "avientek.events.sales_order.validate_item_tax_template",
         ],
