@@ -516,6 +516,47 @@ function _apply_naming_series_by_company(frm) {
 }
 
 frappe.ui.form.on('Payment Request Form', {
+    update_self_approval_hint: function(frm) {
+        // Banner shown to the creator on a Draft PRF explaining why no
+        // Authorise / Approve / Release button is visible to them.
+        // Self-approval is intentionally blocked per Sridhar's
+        // 2026-05-06 audit policy (commit c38aa36 + patch
+        // block_prf_workflow_self_approval). Frappe silently hides the
+        // workflow action button when the current user authored the
+        // last save and the transition has allow_self_approval=0.
+        try {
+            if (frm.doc.docstatus === 1 || frm.doc.docstatus === 2) {
+                frm.set_intro && frm.set_intro("");
+                return;
+            }
+            const ws = frm.doc.workflow_state || "";
+            const same_user = frm.doc.owner && frm.doc.owner === frappe.session.user;
+            // Map workflow_state → role(s) that can transition AWAY from it.
+            // Note: Approved Level 2 is docstatus=1 and skipped above; only
+            // unsubmitted states need the hint.
+            const next_roles_by_state = {
+                "Draft": "Accounts User or Accounts Manager",
+                "Authorised": "Finance Manager (Approve Level 1) or Accounts Manager / Finance Manager / GM / Director (Reject)",
+                "Approved Level 1": "General Manager or Director (Approve Level 2) or Accounts Manager / Finance Manager / GM / Director (Reject)",
+            };
+            const need = next_roles_by_state[ws];
+            if (same_user && need) {
+                frm.set_intro(
+                    __("You are the creator of this PRF. Per audit policy, " +
+                       "another user with role <b>{0}</b> must take the next " +
+                       "workflow action — the button is hidden from you to " +
+                       "prevent self-approval.", [need]),
+                    "blue"
+                );
+            } else {
+                frm.set_intro && frm.set_intro("");
+            }
+        } catch (e) {
+            // Banner is best-effort — never block the form.
+            console.warn("update_self_approval_hint:", e);
+        }
+    },
+
 	onload: function(frm) {
         // Fetch supplier details only if party exists and details are missing
         // (fetch_supplier_details has internal checks to avoid overwriting existing data)
@@ -614,6 +655,12 @@ frappe.ui.form.on('Payment Request Form', {
     refresh: function(frm) {
         // Apply debit note row styling
         frm.events.apply_debit_note_styling(frm);
+
+        // Self-approval hint — Sridhar 2026-05-06 audit policy blocks
+        // self-approval, so Frappe silently hides the Authorise button
+        // from the creator. Show an explicit banner so the creator
+        // doesn't think the workflow is broken.
+        frm.events.update_self_approval_hint(frm);
 
         // Setup invoice drill-down links and View buttons
         frm.events.setup_invoice_drilldown(frm);
