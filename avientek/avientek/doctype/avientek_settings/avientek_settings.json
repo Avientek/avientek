@@ -8,7 +8,13 @@
   "item_price_variation_in_quotation",
   "reward_incentive_section",
   "reward_incentive_method",
-  "reward_incentive_company_accounts"
+  "reward_incentive_company_accounts",
+  "quote_high_prob_section",
+  "quote_high_prob_l1_role",
+  "quote_high_prob_l2_role",
+  "quote_high_prob_column_break",
+  "quote_high_prob_creator_role",
+  "quote_high_prob_restricted_roles"
  ],
  "fields": [
   {
@@ -36,6 +42,47 @@
    "label": "Company Account Mapping",
    "options": "Avientek Reward Incentive Account",
    "description": "Liability and expense accounts per company used when posting the Reward / Incentive Journal Entry on Sales Invoice submit."
+  },
+  {
+   "fieldname": "quote_high_prob_section",
+   "fieldtype": "Section Break",
+   "label": "Quotation High-Probability Workflow",
+   "description": "Roles that drive the High-Probability Quotation lock + RBAC + dual-approval workflow. Sridhar 2026-05-06 spec."
+  },
+  {
+   "fieldname": "quote_high_prob_l1_role",
+   "fieldtype": "Link",
+   "options": "Role",
+   "label": "Quote Action Request — Level 1 Approver",
+   "default": "GM-CS",
+   "description": "Role allowed to perform the L1 Approve transition on a Quotation Action Request. Cannot self-approve."
+  },
+  {
+   "fieldname": "quote_high_prob_l2_role",
+   "fieldtype": "Link",
+   "options": "Role",
+   "label": "Quote Action Request — Level 2 Approver",
+   "default": "CS",
+   "description": "Role allowed to perform the L2 Approve transition. Cannot self-approve. L2 approval triggers automatic execution of the requested Cancel / Amend / Resubmit action."
+  },
+  {
+   "fieldname": "quote_high_prob_column_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "quote_high_prob_creator_role",
+   "fieldtype": "Link",
+   "options": "Role",
+   "label": "Quotation Team Role",
+   "default": "Sales support L2",
+   "description": "Role that owns Quotations and creates Action Requests. Members are also auto-whitelisted for the High-Probability lock."
+  },
+  {
+   "fieldname": "quote_high_prob_restricted_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quotation Restricted Role",
+   "label": "Restricted Roles (Read-only on Approved+100)",
+   "description": "Roles whose users see only Quotations where workflow_state='Approved' AND probability=100. Typically downstream teams: Dispatch, Procurement, Supply Chain, Logistics."
   }
  ],
  "grid_page_length": 50,

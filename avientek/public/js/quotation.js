@@ -4,7 +4,148 @@
 // JS only provides instant preview + handles UI events.
 // ──────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────
+// High-Probability lock UI hint (Sridhar 2026-05-06).
+// Server enforces (avientek.api.quotation_high_probability.before_save).
+// JS just renders the form read-only + adds a banner so the user
+// understands BEFORE they try to edit. Whitelisted roles see a
+// different banner and editing stays enabled.
+// ──────────────────────────────────────────────────────────────
+const HIGH_PROB_THRESHOLD = 75;
+// Default whitelist — overwritten on first form load by the server's
+// Avientek Settings via avientek.api.quotation_high_probability
+// .get_role_config (Sridhar 2026-05-06: roles are now configurable).
+let _HIGH_PROB_WHITELIST = [
+    "GM-CS", "CS", "Sales support L2", "System Manager", "Administrator",
+];
+let _HIGH_PROB_CONFIG_LOADED = false;
+
+function _load_high_prob_role_config() {
+    // Cache once per page load — the settings doc is small and stable.
+    if (_HIGH_PROB_CONFIG_LOADED) { return Promise.resolve(); }
+    return frappe.call({
+        method: "avientek.api.quotation_high_probability.get_role_config",
+    }).then(r => {
+        if (r.message && r.message.whitelisted) {
+            _HIGH_PROB_WHITELIST = r.message.whitelisted;
+        }
+        _HIGH_PROB_CONFIG_LOADED = true;
+    }).catch(() => {
+        // Network blip — keep the defaults; the server is authoritative
+        // anyway, JS lock is just a UX hint.
+        _HIGH_PROB_CONFIG_LOADED = true;
+    });
+}
+
+function _user_is_whitelisted_for_high_prob() {
+    const roles = frappe.user_roles || [];
+    return _HIGH_PROB_WHITELIST.some(r => roles.indexOf(r) !== -1);
+}
+
+function _apply_high_probability_lock(frm) {
+    if (frm.is_new()) { return; }
+    const prob = parseFloat(frm.doc.probability || 0);
+    if (prob < HIGH_PROB_THRESHOLD) {
+        frm.dashboard.clear_headline();
+        return;
+    }
+    if (_user_is_whitelisted_for_high_prob()) {
+        frm.dashboard.set_headline(
+            __("Probability is {0}% — high-prob lock waived for your role.",
+                [prob]),
+            "yellow",
+        );
+        return;
+    }
+    // Lock every field except `probability` itself.
+    const meta = frappe.get_meta(frm.doctype) || {};
+    (meta.fields || []).forEach(function (f) {
+        if (!f.fieldname || f.fieldname === "probability") { return; }
+        frm.set_df_property(f.fieldname, "read_only", 1);
+    });
+    frm.dashboard.set_headline(
+        __("Quotation locked: probability {0}% (>= {1}%). " +
+           "Only the Probability field is editable, and only to bump it " +
+           "to 100%. To Cancel / Amend / Resubmit, file a Quotation " +
+           "Action Request for two-level approval.",
+           [prob, HIGH_PROB_THRESHOLD]),
+        "orange",
+    );
+    // Add "Request Cancel/Amend/Resubmit" buttons (Phase 2).
+    _add_action_request_buttons(frm);
+}
+
+function _add_action_request_buttons(frm) {
+    const actions = ["Cancel", "Amend", "Resubmit"];
+    actions.forEach(function (action) {
+        frm.add_custom_button(
+            __("Request {0}", [action]),
+            () => _open_or_create_action_request(frm, action),
+            __("Action Request"),
+        );
+    });
+}
+
+function _open_or_create_action_request(frm, action) {
+    frappe.call({
+        method: "avientek.avientek.doctype.quotation_action_request" +
+                ".quotation_action_request.has_open_request",
+        args: { quotation: frm.doc.name, action: action },
+        callback: function (r) {
+            if (r.message) {
+                frappe.set_route(
+                    "Form", "Quotation Action Request", r.message,
+                );
+                return;
+            }
+            const d = new frappe.ui.Dialog({
+                title: __("Request {0} Approval", [action]),
+                fields: [
+                    {
+                        fieldtype: "Small Text",
+                        fieldname: "reason",
+                        label: __("Reason"),
+                        reqd: 1,
+                    },
+                ],
+                primary_action_label: __("Submit Request"),
+                primary_action(values) {
+                    frappe.db.insert({
+                        doctype: "Quotation Action Request",
+                        quotation: frm.doc.name,
+                        action: action,
+                        reason: values.reason,
+                        workflow_state: "Pending",
+                    }).then(doc => {
+                        d.hide();
+                        frappe.show_alert({
+                            message: __("Action Request {0} created", [doc.name]),
+                            indicator: "green",
+                        });
+                        frappe.set_route(
+                            "Form", "Quotation Action Request", doc.name,
+                        );
+                    });
+                },
+            });
+            d.show();
+        },
+    });
+}
+
 frappe.ui.form.on('Quotation', {
+
+    refresh(frm) {
+        _load_high_prob_role_config().then(() => {
+            _apply_high_probability_lock(frm);
+        });
+    },
+
+    probability(frm) {
+        _load_high_prob_role_config().then(() => {
+            _apply_high_probability_lock(frm);
+        });
+    },
 
     // ── Save lifecycle ──────────────────────────────────────
     before_save(frm) {
