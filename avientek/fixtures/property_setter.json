@@ -494,5 +494,18 @@
   "property_type": "Code",
   "row_name": null,
   "value": "eval:doc.payment_type==\"Pay\" || doc.payment_type==\"Advance Pay\""
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Quotation",
+  "field_name": "probability",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Quotation-probability-allow_on_submit",
+  "property": "allow_on_submit",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
  }
 ]

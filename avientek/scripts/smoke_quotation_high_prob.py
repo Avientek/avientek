@@ -172,6 +172,66 @@ def run():
         finally:
             qhp._user_has_whitelist_role = real_helper
 
+    # ── 4b. Sridhar 2026-05-07 — submitted <75% allows inline probability edit
+    print(_hr("[4b] on_update_after_submit allows inline probability for <75%"))
+    low_rows = frappe.db.sql(
+        """SELECT name, probability FROM `tabQuotation`
+           WHERE probability < %s AND docstatus = 1 LIMIT 1""",
+        (THRESH,), as_dict=True,
+    )
+    if not low_rows:
+        print(f"  no submitted Quotation with prob < {THRESH}; skip")
+    else:
+        q = low_rows[0]
+        import avientek.api.quotation_high_probability as qhp
+        real_helper = qhp._user_has_whitelist_role
+        try:
+            qhp._user_has_whitelist_role = lambda u=None: False
+            doc = frappe.get_doc("Quotation", q.name)
+            # case A: only probability changed → allow
+            doc.probability = (q.probability or 0) + 1 if (q.probability or 0) < 74 else 50
+            try:
+                on_update_after_submit(doc)
+                print(f"  ✓ inline probability change allowed on {q.name}")
+                pass_n += 1
+            except frappe.ValidationError as e:
+                print(f"  ✗ unexpected block: {e}")
+                fail_n += 1
+            # case B: another field changed → block
+            doc.tc_name = (doc.tc_name or "") + "-test-edit"
+            try:
+                on_update_after_submit(doc)
+                print(f"  ✗ non-probability change should have been blocked")
+                fail_n += 1
+            except frappe.ValidationError:
+                print(f"  ✓ non-probability change blocked on {q.name}")
+                pass_n += 1
+        finally:
+            qhp._user_has_whitelist_role = real_helper
+
+    # ── 4c. allow_on_submit Property Setter present on probability ──
+    print(_hr("[4c] Property Setter enables allow_on_submit on probability"))
+    ps_val = frappe.db.get_value(
+        "Property Setter",
+        "Quotation-probability-allow_on_submit",
+        "value",
+    )
+    if ps_val in ("1", 1, True):
+        print("  ✓ Property Setter Quotation-probability-allow_on_submit = 1")
+        pass_n += 1
+    else:
+        print(f"  ✗ Property Setter missing or wrong (value={ps_val!r})")
+        fail_n += 1
+    # also reflected on meta
+    meta = frappe.get_meta("Quotation", cached=False)
+    fld = next((f for f in meta.fields if f.fieldname == "probability"), None)
+    if fld and getattr(fld, "allow_on_submit", 0):
+        print("  ✓ meta.allow_on_submit = 1 on probability")
+        pass_n += 1
+    else:
+        print(f"  ✗ meta.allow_on_submit not set ({fld and fld.allow_on_submit})")
+        fail_n += 1
+
     # ── 5. RBAC chained into quotation_permission_query ──
     print(_hr("[5] quotation_permission_query chains the RBAC layer"))
     from avientek.api.quotation_access import quotation_permission_query

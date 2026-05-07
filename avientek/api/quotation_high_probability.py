@@ -199,18 +199,37 @@ def before_cancel(doc, method=None):
 
 
 def on_update_after_submit(doc, method=None):
-    """Catch Resubmit / Amend-like updates on submitted high-prob quotes.
+    """Catch Resubmit / Amend-like updates on submitted Quotations.
 
     Frappe fires `on_update_after_submit` on any allow_on_submit field
-    change AFTER docstatus=1. For high-prob quotes this is also gated
-    by the approval flow. Phase 1 just blocks; Phase 2 replaces with
-    Action Request.
+    change AFTER docstatus=1.
+
+    Sridhar BRD correction 2026-05-07: For Quotations with current
+    `db.probability < 75`, allow inline updates to the probability
+    field WITHOUT Cancel + Amend. Other field changes still require
+    the Cancel + Amend audit trail. (probability gets allow_on_submit=1
+    via Property Setter; this validator polices what may go through.)
+
+    Above-threshold rule unchanged: high-prob quotes only permit the
+    whitelist 75->100 bump; any other change requires a Quotation
+    Action Request through the L1/L2 workflow.
     """
     if _user_has_whitelist_role() or frappe.flags.get(_CONTEXT_BYPASS_FLAG):
         return
     db_prob = _flt(frappe.db.get_value("Quotation", doc.name, "probability"))
+
     if db_prob < HIGH_PROB_THRESHOLD:
+        # Inline probability edit is the only allow_on_submit path.
+        if not _changed_fields(doc, exclude={"probability"}):
+            return
+        frappe.throw(
+            _("Submitted Quotation: only the Probability field can be "
+              "updated inline. To change other fields, use Cancel + "
+              "Amend."),
+            title=_("Edit Restricted"),
+        )
         return
+
     # Permit the whitelist 75->100 bump even after submit.
     new_prob = _flt(doc.probability)
     if new_prob == 100 and not _changed_fields(doc, exclude={"probability"}):
