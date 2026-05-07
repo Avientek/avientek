@@ -11,15 +11,17 @@ Pending **BRD signoff** before merging to master.
 
 ### Roles required on the site
 
-| Role | Purpose | Notes |
-|---|---|---|
-| `Sales support L2` | Quotation team / quote creator | Verify ≥1 user assigned |
-| `GM-CS` | Quote Action Request — Level 1 approver | Verify ≥1 user assigned |
-| `CS` | Quote Action Request — Level 2 approver | Verify ≥1 user assigned (audit on local showed **0** — assign before testing) |
-| `Procurement L2` | Restricted — read-only on Approved+100 quotes | If the production role has a different name, set it via Avientek Settings → Restricted Roles table instead of creating |
-| `System Manager` | Bypass everything | Standard |
+> **All four high-prob roles are configured dynamically via Avientek Settings → "Quotation High-Probability Workflow"**. The names below are the **defaults** that ship with the app and act as a fallback when the corresponding Avientek Settings field is blank. To rename or reassign a role on a site, just edit Avientek Settings and Save — no code change. The workflow seeder re-reads the config on every migrate.
 
-Run `bench --site <site> execute avientek.scripts.check_quote_high_prob_roles.run` to audit existence + user counts.
+| Avientek Settings field | Default role | Purpose | Notes |
+|---|---|---|---|
+| `Quotation Team Role` | `Sales support L2` | Quote creators — file Quotation Action Requests | Verify ≥1 user assigned |
+| `Quote Action Request — Level 1 Approver` | `GM-CS` | L1 transition on QAR | Verify ≥1 user assigned |
+| `Quote Action Request — Level 2 Approver` | `CS` | L2 transition on QAR | Verify ≥1 user assigned (audit on local showed **0** — assign before testing) |
+| `Restricted Roles` (child table) | `Procurement L2` | Read-only on Approved+100 quotes | Add/replace rows in the table on the site; the listed role(s) just need to exist |
+| `System Manager` (built-in) | — | Bypass everything | Standard, not configured |
+
+Run `bench --site <site> execute avientek.scripts.check_quote_high_prob_roles.run` to audit existence + user counts (resolves live values from Avientek Settings).
 
 ### Test users
 

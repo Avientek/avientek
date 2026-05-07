@@ -1,6 +1,10 @@
-"""Verify the roles Sridhar mapped (2026-05-06) actually exist in the
-DB on this site. If any are missing, the workflow seeder will refuse
-to create transitions for them.
+"""Verify the high-prob roles configured in Avientek Settings actually
+exist on this site. If any are missing, the workflow seeder will
+refuse to create transitions for them.
+
+Pulls live config from Avientek Settings (with the module fallbacks)
+so that renaming a role in the UI is reflected here too. The
+Restricted Roles list comes from the child table on Avientek Settings.
 
 Run:
     bench --site avientekv21.local execute \
@@ -9,14 +13,24 @@ Run:
 import frappe
 
 
-REQUIRED = [
-    # (role_name, purpose)
-    ("Sales support L2",  "Quotation team / Quote creators / can create QAR"),
-    ("GM-CS",             "Quote L1 approver"),
-    ("CS",                "Quote L2 approver"),
-    ("Procurement L2",    "Restricted (Dispatch team) — sees only Approved+100"),
-    ("System Manager",    "Bypass"),
-]
+def _required_from_settings():
+    """Resolve the role list dynamically from Avientek Settings."""
+    from avientek.api.quotation_high_probability import _settings_roles
+    cfg = _settings_roles()
+    rows = [
+        (cfg["creator_role"], "Quotation team / Quote creators / can create QAR"),
+        (cfg["l1_role"],      "Quote L1 approver"),
+        (cfg["l2_role"],      "Quote L2 approver"),
+    ]
+    seen = {r for r, _ in rows}
+    for r in cfg["restricted"]:
+        if r in seen:
+            continue
+        rows.append((r, "Restricted (Dispatch team) — sees only Approved+100"))
+        seen.add(r)
+    if "System Manager" not in seen:
+        rows.append(("System Manager", "Bypass"))
+    return rows
 
 
 def run():
@@ -24,6 +38,7 @@ def run():
     print(f"QUOTATION HIGH-PROB — role existence check on {frappe.local.site}")
     print("=" * 70)
     missing = []
+    REQUIRED = _required_from_settings()
     for role, purpose in REQUIRED:
         exists = bool(frappe.db.exists("Role", role))
         # Count enabled users assigned to this role.
@@ -55,4 +70,4 @@ def run():
     else:
         print(f"✅  all {len(REQUIRED)} roles present.")
     return {"missing": missing,
-            "roles": [r for r, _ in REQUIRED]}
+            "roles": [r for r, _ in _required_from_settings()]}
