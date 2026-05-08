@@ -522,6 +522,131 @@ def _get_outstanding_expense_claims(args):
     return rows
 
 
+def _get_outstanding_party_journal_entries(args):
+    """Generic JV-by-party fetcher (Sridhar 2026-05-09).
+
+    Mirrors _get_outstanding_employee_journal_entries but works for any
+    party_type (Supplier / Customer / Employee). Returns one row per
+    (Journal Entry, currency) pair where the JE has a credit (or debit
+    for Customer payable side) on the requested party.
+
+    For Supplier and Employee: company OWES them — pull rows where the
+    party's account row has a CREDIT.
+    For Customer: OWES the company — pull rows where the party's
+    account row has a DEBIT.
+    """
+    from frappe.utils import flt
+
+    party = args.get("party")
+    party_type = args.get("party_type")
+    company = args.get("company")
+    if not party or not company or not party_type:
+        return []
+
+    company_currency = frappe.get_cached_value(
+        "Company", company, "default_currency"
+    )
+
+    # Direction depends on party_type
+    if party_type == "Customer":
+        amount_field = "debit_in_account_currency"
+        base_field = "debit"
+    else:
+        amount_field = "credit_in_account_currency"
+        base_field = "credit"
+
+    je_accounts = frappe.get_all(
+        "Journal Entry Account",
+        filters={
+            "party_type": party_type,
+            "party": party,
+            amount_field: [">", 0],
+            "docstatus": 1,
+        },
+        fields=["parent", amount_field, base_field, "account_currency",
+                 "exchange_rate"],
+    )
+
+    rows = []
+    seen_je = set()
+    for jea in je_accounts:
+        if jea.parent in seen_je:
+            continue
+        seen_je.add(jea.parent)
+
+        je = frappe.get_doc("Journal Entry", jea.parent)
+        if je.company != company or je.docstatus != 1:
+            continue
+
+        # Same Payment Ledger Entry offset check used for employees —
+        # if the JE has been fully reconciled, skip it.
+        try:
+            ple_outstanding = frappe.db.sql(
+                """
+                SELECT COALESCE(SUM(amount), 0)
+                FROM `tabPayment Ledger Entry`
+                WHERE against_voucher_type = 'Journal Entry'
+                AND against_voucher_no = %s
+                AND party_type = %s
+                AND party = %s
+                AND delinked = 0
+                """,
+                (je.name, party_type, party),
+            )[0][0] or 0
+        except Exception:
+            ple_outstanding = None
+
+        # Group party-row totals by account currency so multi-currency JEs
+        # produce one row per currency.
+        currency_groups = {}
+        for acc in je.accounts:
+            if acc.party_type != party_type or acc.party != party:
+                continue
+            amt_fc = flt(getattr(acc, amount_field, 0))
+            amt_base = flt(getattr(acc, base_field, 0))
+            if amt_fc <= 0:
+                continue
+            curr = acc.account_currency or company_currency
+            grp = currency_groups.setdefault(curr, {
+                "amount": 0, "base_amount": 0,
+                "exchange_rate": flt(acc.exchange_rate) or 1,
+            })
+            grp["amount"] += amt_fc
+            grp["base_amount"] += amt_base
+
+        if ple_outstanding is not None and abs(ple_outstanding) < 0.01:
+            ple_has_entries = frappe.db.exists(
+                "Payment Ledger Entry",
+                {"voucher_no": je.name, "party": party, "delinked": 0},
+            )
+            if ple_has_entries:
+                continue
+
+        for curr, data in currency_groups.items():
+            if data["amount"] <= 0:
+                continue
+            rows.append({
+                "voucher_type": "Journal Entry",
+                "voucher_no": je.name,
+                # Bill_no / reference_name stay blank for JV (no supplier
+                # invoice number for journal entries) — user can type a
+                # remark if needed.
+                "bill_no": "",
+                "posting_date": je.posting_date,
+                "due_date": je.posting_date,
+                "grand_total": data["amount"],
+                "base_grand_total": data["base_amount"],
+                "outstanding": data["amount"],
+                "base_outstanding": data["base_amount"],
+                "currency": curr,
+                "exchange_rate": data["exchange_rate"],
+                "is_return": 0,
+                "return_against": "",
+                "document_reference": je.name,
+            })
+    return rows
+
+
 def _get_outstanding_purchase_orders(args):
     """Fetch outstanding Purchase Orders for a supplier (for advance payments).
 
@@ -880,6 +1005,28 @@ def get_outstanding_reference_documents(args):
                 filtered_rows.append(dn_row)
             except Exception:
                 frappe.log_error(frappe.get_traceback(), f"Error processing standalone debit note {dn.name}")
+
+    # Sridhar 2026-05-09: when payment_type='Advance Pay' AND the user
+    # is fetching Purchase Invoices, also include outstanding Purchase
+    # Orders. Advance Pay can be against either a PI or an open PO that
+    # hasn't been invoiced yet. Pay flow stays PI-only per Jithin's
+    # 2026-05-07 fix (commit 36a4aa4) — no PO/JV pollution there.
+    if (
+        args.get("reference_doctype") == "Purchase Invoice"
+        and (args.get("payment_type") or "") == "Advance Pay"
+    ):
+        po_rows = _get_outstanding_purchase_orders(args)
+        filtered_rows.extend(po_rows)
+
+    # Sridhar 2026-05-09: also include outstanding Journal Entries
+    # against the party when fetching Purchase Invoices (for Supplier)
+    # or Sales Invoices (for Customer). These represent JV-recorded
+    # receivables/payables that need to be paid. Skip for Pay flow if
+    # we're matching the same "no JV pollution" rule — but Sridhar
+    # explicitly asked for JV inclusion via Get Outstanding Invoice.
+    if args.get("reference_doctype") in ("Purchase Invoice", "Sales Invoice"):
+        je_rows = _get_outstanding_party_journal_entries(args)
+        filtered_rows.extend(je_rows)
 
     # Deduplicate by (voucher_type, voucher_no) — Issue 3 fix
     # Keep only the first occurrence of each voucher to prevent duplicates
@@ -2096,6 +2243,141 @@ def get_party_balance_in_doc_currency(company, party_type, party, target_currenc
 
 
 @frappe.whitelist()
+def party_link_query(doctype, txt, searchfield, start, page_len, filters):
+    """Custom Link-field query for the manual document picker on PRF.
+
+    Frappe's standard Link query filters by parent-doc fields only. JV
+    and PE keep `party` info on a child row (Journal Entry Account /
+    or as `party` on PE parent), so passing supplier/customer in the
+    standard `filters` dict doesn't work for these.
+
+    This method handles the special doctypes by joining to the child
+    table and filtering on `party`. For all other doctypes it falls
+    back to the standard `frappe.client.get_list`-style query so the
+    same JS code path works for every reference type.
+
+    Sridhar 2026-05-09: triggered from the PRF reference picker JS.
+
+    Args:
+      doctype  : the picker's target doctype (Journal Entry, Payment
+                 Entry, Purchase Invoice, etc.)
+      filters  : dict — comes from JS get_query.  Custom keys we care
+                 about:
+                   _party        — string, the supplier/customer/employee
+                   _party_type   — Supplier / Customer / Employee
+                   _company      — company filter
+                   _is_return    — 0/1 for PI / SI flavor split
+                   _docstatus    — submit-only filter
+    """
+    import json as _json
+    if isinstance(filters, str):
+        try:
+            filters = _json.loads(filters)
+        except Exception:
+            filters = {}
+    filters = filters or {}
+    party = filters.pop("_party", None)
+    party_type = filters.pop("_party_type", None)
+    company = filters.pop("_company", None)
+    is_return = filters.pop("_is_return", None)
+    ds = filters.pop("_docstatus", None)
+    txt = (txt or "").strip()
+    like = f"%{txt}%"
+
+    if doctype == "Journal Entry":
+        # Filter via child Journal Entry Account.party
+        sql = """
+            SELECT DISTINCT je.name, je.posting_date, je.user_remark
+            FROM `tabJournal Entry` je
+            INNER JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+            WHERE 1=1
+        """
+        params = []
+        if company:
+            sql += " AND je.company = %s"
+            params.append(company)
+        if ds in ("1", 1):
+            sql += " AND je.docstatus = 1"
+        elif ds in ("!=2", "not 2"):
+            sql += " AND je.docstatus != 2"
+        if party and party_type:
+            sql += " AND jea.party_type = %s AND jea.party = %s"
+            params.extend([party_type, party])
+        if txt:
+            sql += " AND (je.name LIKE %s OR je.user_remark LIKE %s)"
+            params.extend([like, like])
+        sql += " ORDER BY je.posting_date DESC, je.name DESC LIMIT %s, %s"
+        params.extend([int(start or 0), int(page_len or 20)])
+        return frappe.db.sql(sql, tuple(params))
+
+    if doctype == "Payment Entry":
+        # PE has party_type + party as parent fields.
+        sql = """
+            SELECT pe.name, pe.posting_date, pe.party_name
+            FROM `tabPayment Entry` pe
+            WHERE 1=1
+        """
+        params = []
+        if company:
+            sql += " AND pe.company = %s"
+            params.append(company)
+        if ds in ("1", 1):
+            sql += " AND pe.docstatus = 1"
+        elif ds in ("!=2", "not 2"):
+            sql += " AND pe.docstatus != 2"
+        if party and party_type:
+            sql += " AND pe.party_type = %s AND pe.party = %s"
+            params.extend([party_type, party])
+        if txt:
+            sql += " AND (pe.name LIKE %s OR pe.party_name LIKE %s)"
+            params.extend([like, like])
+        sql += " ORDER BY pe.posting_date DESC, pe.name DESC LIMIT %s, %s"
+        params.extend([int(start or 0), int(page_len or 20)])
+        return frappe.db.sql(sql, tuple(params))
+
+    # Default: standard Link query — Frappe's get_link_value or
+    # frappe.client.get_list flow works fine since the parent doctype
+    # already has the party field (supplier / customer / employee).
+    fr_filters = {}
+    if company:
+        fr_filters["company"] = company
+    if party and party_type == "Supplier":
+        fr_filters["supplier"] = party
+    elif party and party_type == "Customer":
+        fr_filters["customer"] = party
+    elif party and party_type == "Employee":
+        fr_filters["employee"] = party
+    if ds in ("1", 1):
+        fr_filters["docstatus"] = 1
+    elif ds in ("!=2", "not 2"):
+        fr_filters["docstatus"] = ["!=", 2]
+    if is_return in ("1", 1):
+        fr_filters["is_return"] = 1
+    elif is_return in ("0", 0):
+        fr_filters["is_return"] = 0
+    # Workflow status exclusions matching the JS filters for the manual
+    # picker. Mirrors the bulk-fetch exclusions so JV/PE custom-query
+    # path returns the same actionable subset.
+    if doctype == "Purchase Order":
+        fr_filters["status"] = [
+            "not in", ["Completed", "Cancelled", "Closed", "On Hold", "Delivered"]
+        ]
+    elif doctype in ("Purchase Invoice", "Sales Invoice"):
+        fr_filters["status"] = ["not in", ["Paid", "Cancelled", "Return"]]
+    if txt:
+        fr_filters["name"] = ["like", like]
+    rows = frappe.get_all(
+        doctype,
+        filters=fr_filters,
+        fields=["name"],
+        limit_start=int(start or 0),
+        limit_page_length=int(page_len or 20),
+        order_by="modified desc",
+    )
+    return [(r["name"],) for r in rows]
+
+
+@frappe.whitelist()
 def get_party_balance_with_jv_inclusion(company, party_type, party, target_currency=None, posting_date=None):
     """Like get_party_balance_in_doc_currency, plus any Journal Entry
     Account postings to the party's default receivable / payable account
@@ -2407,6 +2689,9 @@ def get_payment_voucher_context(docname):
             "reference_name": row.reference_name or "",
             "bill_no": bill_no_value,
             "invoice_date": formatdate(row.invoice_date, "dd-MM-yy") if row.invoice_date else "",
+            # Sridhar 2026-05-09: Due Date column added to PV Fast / Pro
+            # invoice details table.
+            "due_date": formatdate(row.due_date, "dd-MM-yy") if row.due_date else "",
             "currency": curr,
             "amount_fc": fmt_money(amount_fc, currency=curr),
             "amount_base": fmt_money(amount_base, currency=company_currency),

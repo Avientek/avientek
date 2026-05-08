@@ -95,8 +95,10 @@ function _show_po_picker_dialog(frm, rows) {
             }
             const by_name = Object.fromEntries(rows.map(r => [r.name, r]));
             const existing_refs = new Set(
+                // Match against document_reference (the canonical PO link)
+                // OR the legacy reference_name location.
                 (frm.doc.payment_references || [])
-                    .map(r => `${r.reference_doctype}|${r.reference_name}`)
+                    .map(r => `${r.reference_doctype}|${r.document_reference || r.reference_name}`)
             );
             let added = 0;
             for (const po_name of picked) {
@@ -105,7 +107,12 @@ function _show_po_picker_dialog(frm, rows) {
                 const r = by_name[po_name];
                 const new_row = frm.add_child("payment_references");
                 new_row.reference_doctype = "Purchase Order";
-                new_row.reference_name = po_name;
+                // Sridhar 2026-05-09: PO rows put the PO ref in
+                // document_reference (system link, read-only) and leave
+                // reference_name (Invoice column) blank so the user can
+                // type the supplier's invoice number once they receive it.
+                new_row.document_reference = po_name;
+                new_row.reference_name = "";
                 new_row.currency = r.currency;
                 new_row.exchange_rate = r.conversion_rate || 1;
                 new_row.grand_total = r.grand_total;
@@ -984,8 +991,23 @@ frappe.ui.form.on('Payment Request Form', {
 					$.each(r.message, function(i, d) {
 						let c = frm.add_child("payment_references");
 						c.reference_doctype = d.voucher_type;
-						c.reference_name = d.voucher_no;
-						c.bill_no = d.bill_no;
+						// Sridhar 2026-05-09: PO + JV rows put the system
+						// reference in document_reference and leave the
+						// Invoice column (reference_name) + bill_no blank
+						// (no supplier invoice number for these types).
+						// PI / Debit Note / Sales Invoice etc. populate
+						// reference_name with the supplier invoice no
+						// (bill_no) as before.
+						if (d.voucher_type === "Purchase Order"
+							|| d.voucher_type === "Journal Entry") {
+							c.reference_name = "";
+							c.bill_no = "";
+							c.document_reference = d.voucher_no;
+						} else {
+							c.reference_name = d.voucher_no;
+							c.bill_no = d.bill_no;
+							c.document_reference = d.document_reference;
+						}
 						c.due_date = d.due_date;
 						c.invoice_date = d.posting_date;
 						c.grand_total = d.grand_total;
@@ -994,7 +1016,6 @@ frappe.ui.form.on('Payment Request Form', {
 						c.base_outstanding_amount = d.base_outstanding;
 						c.exchange_rate = d.exchange_rate;
 						c.currency = d.currency;
-						c.document_reference = d.document_reference;
 						c.is_return = d.is_return || 0;
 						c.return_against = d.return_against || "";
 					});
@@ -1020,7 +1041,12 @@ frappe.ui.form.on('Payment Request Form', {
             "company": frm.doc.company,
             "party": frm.doc.party,
             "party_type": frm.doc.party_type,
-            "reference_doctype": reference_doctype
+            "reference_doctype": reference_doctype,
+            // Sridhar 2026-05-09: pass payment_type so the server can
+            // include outstanding Purchase Orders alongside PIs when
+            // payment_type='Advance Pay'. Pay flow stays PI-only per
+            // Jithin's 2026-05-07 fix.
+            "payment_type": frm.doc.payment_type || ""
         };
 
 		return frappe.call({
@@ -1033,8 +1059,20 @@ frappe.ui.form.on('Payment Request Form', {
 					$.each(r.message, function(i, d) {
                         let c = frm.add_child("payment_references");
                         c.reference_doctype = d.voucher_type;
-                        c.reference_name = d.voucher_no;
-                        c.bill_no = d.bill_no;
+                        // Sridhar 2026-05-09: PO + JV rows put the system
+                        // reference in document_reference and leave the
+                        // Invoice column (reference_name) + bill_no blank
+                        // (no supplier invoice number for these types).
+                        if (d.voucher_type === "Purchase Order"
+                            || d.voucher_type === "Journal Entry") {
+                            c.reference_name = "";
+                            c.bill_no = "";
+                            c.document_reference = d.voucher_no;
+                        } else {
+                            c.reference_name = d.voucher_no;
+                            c.bill_no = d.bill_no;
+                            c.document_reference = d.document_reference;
+                        }
                         c.due_date = d.due_date;
                         c.invoice_date = d.posting_date;
                         c.grand_total = d.grand_total;
@@ -1043,7 +1081,6 @@ frappe.ui.form.on('Payment Request Form', {
                         c.base_outstanding_amount = d.base_outstanding;
                         c.exchange_rate = d.exchange_rate;
                         c.currency = d.currency;
-                        c.document_reference = d.document_reference;
                         // Debit note / return flags
                         c.is_return = d.is_return || 0;
                         c.return_against = d.return_against || "";
@@ -1073,6 +1110,174 @@ frappe.ui.form.on('Payment Request Form', {
         return map[ref_doctype] || null;
     },
 
+    // Sridhar 2026-05-09: after picking a single doc via the manual
+    // picker, fetch the same set of fields the bulk Get Outstanding
+    // Invoice fetch populates — invoice_date, due_date, currency,
+    // exchange_rate, grand_total, base_grand_total, outstanding_amount,
+    // base_outstanding_amount. So a single-pick row looks identical to
+    // a bulk-pick row.
+    _populate_row_from_source: function(frm, cdt, cdn, ref_doctype, actual_dt, doc_name) {
+        // Map of (actual DocType) → {fields to fetch, mapper function
+        // that returns {row_field: value, ...} given the fetched values}.
+        const RECIPES = {
+            "Purchase Invoice": {
+                fields: ["bill_no", "posting_date", "due_date", "currency",
+                         "conversion_rate", "grand_total", "base_grand_total",
+                         "outstanding_amount", "is_return"],
+                mapper: function (v) {
+                    const out = {};
+                    // For Purchase Invoice / Debit Note: Invoice column
+                    // gets bill_no (supplier inv no), bill_no field too.
+                    // For PO and other types we don't auto-fill the
+                    // Invoice column.
+                    if (v.bill_no) {
+                        out.reference_name = v.bill_no;
+                        out.bill_no = v.bill_no;
+                    }
+                    out.invoice_date = v.posting_date || "";
+                    out.due_date = v.due_date || "";
+                    out.currency = v.currency || "";
+                    out.exchange_rate = parseFloat(v.conversion_rate || 1) || 1;
+                    out.grand_total = parseFloat(v.grand_total || 0) || 0;
+                    out.base_grand_total = parseFloat(v.base_grand_total || 0) || 0;
+                    out.outstanding_amount = parseFloat(v.outstanding_amount || 0) || 0;
+                    out.base_outstanding_amount = (
+                        out.outstanding_amount * out.exchange_rate
+                    );
+                    out.is_return = parseInt(v.is_return || 0) || 0;
+                    return out;
+                },
+            },
+            "Sales Invoice": {
+                fields: ["posting_date", "due_date", "currency",
+                         "conversion_rate", "grand_total", "base_grand_total",
+                         "outstanding_amount", "is_return"],
+                mapper: function (v) {
+                    return {
+                        reference_name: doc_name,
+                        invoice_date: v.posting_date || "",
+                        due_date: v.due_date || "",
+                        currency: v.currency || "",
+                        exchange_rate: parseFloat(v.conversion_rate || 1) || 1,
+                        grand_total: parseFloat(v.grand_total || 0) || 0,
+                        base_grand_total: parseFloat(v.base_grand_total || 0) || 0,
+                        outstanding_amount: parseFloat(v.outstanding_amount || 0) || 0,
+                        base_outstanding_amount: parseFloat(v.outstanding_amount || 0)
+                            * (parseFloat(v.conversion_rate || 1) || 1),
+                        is_return: parseInt(v.is_return || 0) || 0,
+                    };
+                },
+            },
+            "Purchase Order": {
+                fields: ["transaction_date", "schedule_date", "currency",
+                         "conversion_rate", "grand_total", "base_grand_total",
+                         "advance_paid"],
+                mapper: function (v) {
+                    const ex = parseFloat(v.conversion_rate || 1) || 1;
+                    const base_grand = parseFloat(v.base_grand_total || 0) || 0;
+                    const advance_paid = parseFloat(v.advance_paid || 0) || 0;
+                    const base_os = Math.max(0, base_grand - advance_paid);
+                    const os_fc = ex ? (base_os / ex) : base_os;
+                    return {
+                        // Invoice column blank for PO — user types
+                        // supplier invoice when goods arrive.
+                        invoice_date: v.transaction_date || "",
+                        due_date: v.schedule_date || v.transaction_date || "",
+                        currency: v.currency || "",
+                        exchange_rate: ex,
+                        grand_total: parseFloat(v.grand_total || 0) || 0,
+                        base_grand_total: base_grand,
+                        outstanding_amount: os_fc,
+                        base_outstanding_amount: base_os,
+                    };
+                },
+            },
+            "Journal Entry": {
+                fields: ["posting_date", "due_date", "total_debit",
+                         "total_credit"],
+                mapper: function (v) {
+                    // Sridhar 2026-05-09: JV Invoice column stays blank
+                    // (no supplier invoice number for journal entries).
+                    // Use total_debit as the gross amount — the user
+                    // can adjust if the party-specific portion differs.
+                    const total = parseFloat(
+                        v.total_debit || v.total_credit || 0
+                    ) || 0;
+                    return {
+                        invoice_date: v.posting_date || "",
+                        due_date: v.due_date || v.posting_date || "",
+                        grand_total: total,
+                        base_grand_total: total,
+                        outstanding_amount: total,
+                        base_outstanding_amount: total,
+                    };
+                },
+            },
+            "Expense Claim": {
+                fields: ["posting_date", "total_sanctioned_amount"],
+                mapper: function (v) {
+                    return {
+                        reference_name: doc_name,
+                        invoice_date: v.posting_date || "",
+                        grand_total: parseFloat(v.total_sanctioned_amount || 0) || 0,
+                        base_grand_total: parseFloat(v.total_sanctioned_amount || 0) || 0,
+                        outstanding_amount: parseFloat(v.total_sanctioned_amount || 0) || 0,
+                    };
+                },
+            },
+            "Employee Advance": {
+                fields: ["posting_date", "advance_amount", "paid_amount"],
+                mapper: function (v) {
+                    const adv = parseFloat(v.advance_amount || 0) || 0;
+                    const paid = parseFloat(v.paid_amount || 0) || 0;
+                    return {
+                        reference_name: doc_name,
+                        invoice_date: v.posting_date || "",
+                        grand_total: adv,
+                        base_grand_total: adv,
+                        outstanding_amount: Math.max(0, adv - paid),
+                    };
+                },
+            },
+            "Payment Entry": {
+                fields: ["posting_date", "paid_amount"],
+                mapper: function (v) {
+                    return {
+                        reference_name: doc_name,
+                        invoice_date: v.posting_date || "",
+                        grand_total: parseFloat(v.paid_amount || 0) || 0,
+                    };
+                },
+            },
+        };
+        const recipe = RECIPES[actual_dt];
+        if (!recipe) {
+            frm.refresh_field("payment_references");
+            return;
+        }
+        frappe.db.get_value(actual_dt, doc_name, recipe.fields).then(function (r) {
+            const v = (r && r.message) || {};
+            const updates = recipe.mapper(v) || {};
+            const promises = [];
+            for (const k of Object.keys(updates)) {
+                if (updates[k] !== undefined && updates[k] !== null && updates[k] !== "") {
+                    promises.push(
+                        frappe.model.set_value(cdt, cdn, k, updates[k])
+                    );
+                }
+            }
+            Promise.all(promises).then(function () {
+                frm.refresh_field("payment_references");
+                if (frm.events.recalculate_totals) {
+                    frm.events.recalculate_totals(frm);
+                }
+                if (frm.events.apply_debit_note_styling) {
+                    frm.events.apply_debit_note_styling(frm);
+                }
+            });
+        });
+    },
+
     // Add clickable drill-down links on invoice names and render View buttons in static cells
     setup_invoice_drilldown: function(frm) {
         function apply_drilldown() {
@@ -1091,16 +1296,21 @@ frappe.ui.form.on('Payment Request Form', {
 
                 let $row_el = $(row.row);
 
-                // --- Document Reference drill-down link ---
-                let $ref_cell = $row_el.find(
-                    ".grid-static-col[data-fieldname='document_reference'], " +
-                    "[data-fieldname='document_reference'] .static-area, " +
-                    "[data-field='document_reference'] .static-area, " +
-                    "[data-fieldname='document_reference']"
-                ).first();
-                // Legacy fallback: also bind on reference_name for old rows
-                // where document_reference might be empty.
-                if (!$ref_cell.length || !row.doc.document_reference) {
+                // --- Drill-down link cell selection ---
+                // Bind the click on whichever cell HAS visible content.
+                // If document_reference is set, that's the cell. If only
+                // reference_name has content (legacy rows), use that.
+                // This prevents an empty Invoice cell on JV / PO rows
+                // from navigating when clicked.
+                let $ref_cell = null;
+                if (row.doc.document_reference) {
+                    $ref_cell = $row_el.find(
+                        ".grid-static-col[data-fieldname='document_reference'], " +
+                        "[data-fieldname='document_reference'] .static-area, " +
+                        "[data-field='document_reference'] .static-area, " +
+                        "[data-fieldname='document_reference']"
+                    ).first();
+                } else if (row.doc.reference_name) {
                     $ref_cell = $row_el.find(
                         ".grid-static-col[data-fieldname='reference_name'], " +
                         "[data-fieldname='reference_name'] .static-area, " +
@@ -1108,6 +1318,7 @@ frappe.ui.form.on('Payment Request Form', {
                         "[data-fieldname='reference_name']"
                     ).first();
                 }
+                if (!$ref_cell || !$ref_cell.length) return;
                 if ($ref_cell.length && !$ref_cell.data("drilldown-bound")) {
                     $ref_cell.data("drilldown-bound", true);
                     $ref_cell.addClass("inv-ref-link");
@@ -1303,80 +1514,84 @@ frappe.ui.form.on('Payment Request Form', {
 
         function render_preview($popup, data, ref_name, ref_doctype) {
             const $body = $popup.find(".inv-att-body");
-            let html = "";
             const doc_label = ref_doctype || "Document";
+            // Sridhar 2026-05-09: View popup is now a CLICKABLE LIST
+            // (no inline images / iframes). Each entry: icon + filename
+            // + size hint + Open button. Open button opens the file in
+            // a new tab (PDF / image / Excel / etc. — browser handles
+            // it). The first list entry is the source doc's print
+            // view; the rest are attached files + linked PO + costing
+            // sheet.
+            function _icon_for(name) {
+                const n = (name || "").toLowerCase();
+                if (n.endsWith(".pdf")) return "📕";
+                if (/\.(jpe?g|png|gif|webp)$/i.test(n)) return "🖼";
+                if (/\.(xlsx?|csv)$/i.test(n)) return "📊";
+                if (/\.(docx?)$/i.test(n)) return "📝";
+                if (/\.(zip|rar|7z)$/i.test(n)) return "🗜";
+                return "📄";
+            }
+            function _row(icon, title, subtitle, href, target) {
+                target = target || "_blank";
+                const ROW_CSS = "display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e2e6ea;border-radius:6px;margin-bottom:6px;background:#fff;";
+                const ICON_CSS = "font-size:22px;width:32px;text-align:center;";
+                const META_CSS = "flex:1;min-width:0;";
+                const TITLE_CSS = "font-weight:500;color:#1f2a38;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+                const SUB_CSS = "font-size:11px;color:#6c757d;";
+                return `<div style="${ROW_CSS}">
+                    <span style="${ICON_CSS}">${icon}</span>
+                    <div style="${META_CSS}">
+                        <div style="${TITLE_CSS}">${frappe.utils.escape_html(title)}</div>
+                        ${subtitle ? `<div style="${SUB_CSS}">${frappe.utils.escape_html(subtitle)}</div>` : ""}
+                    </div>
+                    <a href="${href}" target="${target}" class="btn btn-xs btn-default" style="white-space:nowrap;">Open</a>
+                </div>`;
+            }
+            const items = [];
+            // 1. Source doc print view + form view
+            const print_url = "/printview?doctype=" + encodeURIComponent(ref_doctype)
+                + "&name=" + encodeURIComponent(ref_name)
+                + "&trigger_print=0&no_letterhead=0";
+            const form_url = "/app/" + encodeURIComponent(frappe.router.slug(ref_doctype))
+                + "/" + encodeURIComponent(ref_name);
+            items.push(_row("🖨", `${doc_label} — Print Format`, ref_name, print_url));
+            items.push(_row("🔗", `${doc_label} — Open Form`, ref_name, form_url));
 
-            // Section 1: File attachments (uploaded PDFs/images)
-            const att_images = data.attachment_images || [];
+            // 2. File attachments on the source doc
             const file_list = data.file_list || [];
-            if (att_images.length) {
-                html += '<div class="inv-att-section-title">Attached Documents</div>';
-                for (const img of att_images) {
-                    html += `<img src="${img}" loading="lazy" />`;
-                }
-            } else if (file_list.length) {
-                // Issue 11: Render PDFs inline, images inline, Excel/other as styled badge with download icon
-                html += '<div class="inv-att-section-title">Attached Documents</div>';
-                for (const f of file_list) {
-                    const name = (f.file_name || "").toLowerCase();
-                    const url = f.file_url || "";
-                    if (name.endsWith(".pdf")) {
-                        html += `<iframe src="${url}#toolbar=0&navpanes=0" style="width:100%;height:800px;border:1px solid #eee;border-radius:4px;margin-bottom:10px;" loading="lazy"></iframe>`;
-                    } else if (/\.(jpe?g|png|gif|webp)$/i.test(name)) {
-                        html += `<img src="${url}" loading="lazy" />`;
-                    } else {
-                        // Excel, Word, CSV, other — show as clickable file badge
-                        let icon = "📄";
-                        if (/\.(xlsx?|csv)$/i.test(name)) icon = "📊";
-                        else if (/\.(docx?)$/i.test(name)) icon = "📝";
-                        else if (/\.(zip|rar|7z)$/i.test(name)) icon = "🗜";
-                        html += `<div style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #d6dde5;border-radius:6px;margin-bottom:8px;background:#f8f9fb;">
-                            <span style="font-size:24px;">${icon}</span>
-                            <div style="flex:1;">
-                                <div style="font-weight:500;color:#1f2a38;">${frappe.utils.escape_html(f.file_name)}</div>
-                                <div style="font-size:11px;color:#6c757d;">Click to open or download</div>
-                            </div>
-                            <a href="${url}" target="_blank" class="btn btn-xs btn-default">Open</a>
-                        </div>`;
-                    }
-                }
-            } else {
-                html += `<div class="inv-att-no-files">No file attachments on this ${frappe.utils.escape_html(doc_label)}</div>`;
+            for (const f of file_list) {
+                items.push(_row(
+                    _icon_for(f.file_name),
+                    f.file_name || "(untitled)",
+                    "Attachment",
+                    f.file_url || "#"
+                ));
             }
 
-            // Section 2: Print format preview
-            const print_images = data.print_images || [];
-            if (print_images.length) {
-                html += `<div class="inv-att-section-title" style="margin-top:16px;">${frappe.utils.escape_html(doc_label)} Print Preview</div>`;
-                for (const img of print_images) {
-                    html += `<img src="${img}" loading="lazy" />`;
-                }
-            }
-
-            // Section 3 (Issue 4): Linked Purchase Order preview
-            const po_images = data.po_images || [];
+            // 3. Linked Purchase Order
             const po_name = data.po_name || "";
-            if (po_images.length && po_name) {
-                html += `<div class="inv-att-section-title" style="margin-top:16px;">Linked Purchase Order: ${frappe.utils.escape_html(po_name)}</div>`;
-                for (const img of po_images) {
-                    html += `<img src="${img}" loading="lazy" />`;
-                }
+            if (po_name) {
+                const po_print = "/printview?doctype=Purchase%20Order&name="
+                    + encodeURIComponent(po_name) + "&trigger_print=0&no_letterhead=0";
+                const po_form = "/app/purchase-order/" + encodeURIComponent(po_name);
+                items.push(_row("🛒", `Linked PO — Print`, po_name, po_print));
+                items.push(_row("🛒", `Linked PO — Open Form`, po_name, po_form));
             }
 
-            // Section 4 (Issue 4): Costing Sheet attached on PRF row
-            const costing_images = data.costing_images || [];
+            // 4. Costing Sheet attached on PRF row
             const costing_url = data.costing_url || "";
-            if (costing_images.length) {
-                html += `<div class="inv-att-section-title" style="margin-top:16px;">Costing Sheet</div>`;
-                for (const img of costing_images) {
-                    html += `<img src="${img}" loading="lazy" />`;
-                }
-            } else if (costing_url) {
-                html += `<div class="inv-att-section-title" style="margin-top:16px;">Costing Sheet</div>`;
-                html += `<a href="${costing_url}" target="_blank" class="inv-att-file-link">Open Costing Sheet</a>`;
+            if (costing_url) {
+                const fname = costing_url.split("/").pop() || "Costing Sheet";
+                items.push(_row("📊", "Costing Sheet", fname, costing_url));
             }
 
-            $body.html(html || `<div class="inv-att-empty">No data found for this ${frappe.utils.escape_html(doc_label)}</div>`);
+            let html = `<div class="inv-att-section-title">Documents (${items.length})</div>`;
+            if (items.length) {
+                html += '<div class="inv-att-list">' + items.join("") + '</div>';
+            } else {
+                html += `<div class="inv-att-no-files">No documents to show for ${frappe.utils.escape_html(doc_label)}</div>`;
+            }
+            $body.html(html);
         }
     },
 
@@ -1463,8 +1678,8 @@ frappe.ui.form.on('Payment Request Form', {
                         <th style="padding: 8px 12px;">Currency</th>
                         <th style="padding: 8px 12px; text-align: right;">Billing Amount</th>
                         <th style="padding: 8px 12px; text-align: right;">Base Amount (${company_currency})</th>
-                        <th style="padding: 8px 12px; text-align: right;">Outstanding</th>
-                        <th style="padding: 8px 12px; text-align: right;">Base Outstanding (${company_currency})</th>
+                        <th style="padding: 8px 12px; text-align: right;">Net Payment</th>
+                        <th style="padding: 8px 12px; text-align: right;">Base Net Payment (${company_currency})</th>
                     </tr>
                 </thead>
                 <tbody>`;
@@ -2049,7 +2264,15 @@ frappe.ui.form.on('Payment Request Reference', {
             && row.reference_doctype !== "Manual"
             && !row.document_reference
         ) {
-            const dt = row.reference_doctype;
+            const ref_doctype = row.reference_doctype;
+            // Sridhar 2026-05-09: Debit Note / Credit Note aren't real
+            // DocTypes — they're Purchase Invoice / Sales Invoice rows
+            // with is_return=1. Map to the actual DocType, then add
+            // is_return=1 as a filter further down.
+            const dt = frm.events._get_actual_doctype(ref_doctype) || ref_doctype;
+            const is_return_flavor = (
+                ref_doctype === "Debit Note" || ref_doctype === "Credit Note"
+            );
             // Wrap in with_doctype so dt meta is guaranteed loaded before
             // we build filters. Without this, the FIRST open of the picker
             // gets a null meta → has_field() returns false for every field
@@ -2080,39 +2303,102 @@ frappe.ui.form.on('Payment Request Reference', {
                     filters.employee = frm.doc.party;
                 }
                 // Sridhar 2026-05-09: never show cancelled docs in the
-                // picker. For submittable doctypes, also default to
-                // "submitted only" — drafts are not actionable as
-                // payment references.
-                if (has_field("docstatus")) {
-                    if (dt_meta.is_submittable) {
-                        filters.docstatus = 1;
-                    } else {
-                        filters.docstatus = ["!=", 2];
-                    }
+                // picker. docstatus is a Frappe default field (not in
+                // meta.fields) — always apply the filter.
+                if (dt_meta.is_submittable) {
+                    filters.docstatus = 1;
+                } else {
+                    filters.docstatus = ["!=", 2];
+                }
+                // For Debit Note / Credit Note flavors, restrict to
+                // is_return=1 (those are returns of the parent doctype);
+                // for the parent itself (Purchase Invoice / Sales Invoice),
+                // exclude returns so the lists are clearly separated.
+                if (has_field("is_return")) {
+                    filters.is_return = is_return_flavor ? 1 : 0;
+                }
+                // Sridhar 2026-05-09: Purchase Order's `status` is a
+                // workflow status (not docstatus) — values like
+                // 'Closed' / 'Completed' / 'On Hold' / 'Cancelled' are
+                // not actionable for new payment requests. Match the
+                // bulk-fetcher's status exclusion so the manual picker
+                // shows the same set.
+                if (dt === "Purchase Order" && has_field("status")) {
+                    filters.status = ["not in",
+                        ["Completed", "Cancelled", "Closed", "On Hold", "Delivered"]
+                    ];
+                }
+                // Purchase Invoice / Sales Invoice: drop fully-paid invoices
+                // — same idea, no outstanding to pay.
+                if ((dt === "Purchase Invoice" || dt === "Sales Invoice")
+                    && has_field("status")) {
+                    filters.status = ["not in", ["Paid", "Cancelled", "Return"]];
+                }
+                // Sridhar 2026-05-09: Journal Entry and Payment Entry
+                // store party info differently (JV: child table; PE:
+                // parent's party_type + party fields, NOT supplier).
+                // Use the custom party_link_query server method for
+                // those two doctypes so the picker filters correctly.
+                const NEEDS_CUSTOM_QUERY = ["Journal Entry", "Payment Entry"];
+                const use_custom_query = NEEDS_CUSTOM_QUERY.includes(dt);
+                let custom_query_args = null;
+                if (use_custom_query) {
+                    custom_query_args = {
+                        _party: frm.doc.party || "",
+                        _party_type: frm.doc.party_type || "",
+                        _company: frm.doc.company || "",
+                        _docstatus: dt_meta.is_submittable ? 1 : "!=2",
+                    };
                 }
                 try {
                     frappe.prompt(
                         [{
                             fieldtype: "Link",
                             fieldname: "doc_name",
-                            label: __("Select {0}", [dt]),
+                            label: __("Select {0}", [ref_doctype]),
                             options: dt,
-                            get_query: () => ({ filters: filters }),
+                            get_query: () => {
+                                if (use_custom_query) {
+                                    return {
+                                        query: "avientek.avientek.doctype.payment_request_form.payment_request_form.party_link_query",
+                                        filters: custom_query_args,
+                                    };
+                                }
+                                return { filters: filters };
+                            },
                             reqd: 1,
                         }],
                         function (values) {
-                            // Sridhar 2026-05-09: only set document_reference
-                            // (the system PO/PI/JV reference). Leave
-                            // reference_name (Invoice column) blank so the
-                            // user can type their supplier invoice number
-                            // manually. Document Reference column shows the
-                            // linked doc; Invoice column is user input.
+                            // Sridhar 2026-05-09:
+                            // - document_reference always = the picked
+                            //   doc name (system reference, read-only)
+                            // - For Purchase Invoice: also pull the
+                            //   source doc's bill_no into the Invoice
+                            //   column so the supplier invoice number
+                            //   appears automatically.
+                            // - For Purchase Order (and others): leave
+                            //   the Invoice column blank — user types
+                            //   the supplier invoice number when goods
+                            //   arrive.
                             frappe.model.set_value(
                                 cdt, cdn, "document_reference", values.doc_name,
                             );
-                            frm.refresh_field("payment_references");
+                            // Sridhar 2026-05-09: also pull invoice_date,
+                            // due_date, currency, exchange_rate, grand_total,
+                            // base_grand_total, outstanding_amount from the
+                            // source doc — same fields the bulk Get
+                            // Outstanding Invoice fetch populates. So the
+                            // single-pick row is consistent with bulk-pick
+                            // rows.
+                            if (values.doc_name) {
+                                frm.events._populate_row_from_source(
+                                    frm, cdt, cdn, ref_doctype, dt, values.doc_name
+                                );
+                            } else {
+                                frm.refresh_field("payment_references");
+                            }
                         },
-                        __("Pick {0}", [dt]),
+                        __("Pick {0}", [ref_doctype]),
                         __("Set Reference"),
                     );
                 } catch (_e) {
