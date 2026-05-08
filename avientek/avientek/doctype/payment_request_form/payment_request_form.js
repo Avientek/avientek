@@ -517,40 +517,68 @@ function _apply_naming_series_by_company(frm) {
 
 frappe.ui.form.on('Payment Request Form', {
     update_self_approval_hint: function(frm) {
-        // Banner shown to the creator on a Draft PRF explaining why no
-        // Authorise / Approve / Release button is visible to them.
-        // Self-approval is intentionally blocked per Sridhar's
-        // 2026-05-06 audit policy (commit c38aa36 + patch
-        // block_prf_workflow_self_approval). Frappe silently hides the
-        // workflow action button when the current user authored the
-        // last save and the transition has allow_self_approval=0.
+        // Banner shown to the creator on a Draft / Authorised / Approved
+        // Level 1 PRF explaining why no Authorise / Approve / Release
+        // button is visible to them. Self-approval is intentionally
+        // blocked per Sridhar's 2026-05-06 audit policy (commit c38aa36
+        // + patch block_prf_workflow_self_approval). Frappe silently
+        // hides the workflow action button when the current user
+        // authored the last save and the transition has
+        // allow_self_approval=0.
+        //
+        // Implementation note: this Frappe version's `frm.set_intro`
+        // APPENDS instead of replaces — calling it on every refresh
+        // tick stacks duplicate banners. Using a singleton DOM element
+        // (same pattern as the Combined PDF banner above) — every
+        // refresh just updates the textContent of the same node.
         try {
-            if (frm.doc.docstatus === 1 || frm.doc.docstatus === 2) {
-                frm.set_intro && frm.set_intro("");
-                return;
-            }
+            const should_show = (
+                frm.doc.docstatus === 0 &&
+                frm.doc.owner &&
+                frm.doc.owner === frappe.session.user
+            );
             const ws = frm.doc.workflow_state || "";
-            const same_user = frm.doc.owner && frm.doc.owner === frappe.session.user;
-            // Map workflow_state → role(s) that can transition AWAY from it.
-            // Note: Approved Level 2 is docstatus=1 and skipped above; only
-            // unsubmitted states need the hint.
             const next_roles_by_state = {
                 "Draft": "Accounts User or Accounts Manager",
                 "Authorised": "Finance Manager (Approve Level 1) or Accounts Manager / Finance Manager / GM / Director (Reject)",
                 "Approved Level 1": "General Manager or Director (Approve Level 2) or Accounts Manager / Finance Manager / GM / Director (Reject)",
             };
-            const need = next_roles_by_state[ws];
-            if (same_user && need) {
-                frm.set_intro(
-                    __("You are the creator of this PRF. Per audit policy, " +
-                       "another user with role <b>{0}</b> must take the next " +
-                       "workflow action — the button is hidden from you to " +
-                       "prevent self-approval.", [need]),
-                    "blue"
-                );
-            } else {
-                frm.set_intro && frm.set_intro("");
+            const need = should_show ? next_roles_by_state[ws] : null;
+
+            // Singleton banner element — created once, reused.
+            let el = frm._prf_self_approval_banner_el;
+            if (!need) {
+                if (el && el.parentNode) el.parentNode.removeChild(el);
+                frm._prf_self_approval_banner_el = null;
+                return;
             }
+
+            const html = __(
+                "You are the creator of this PRF. Per audit policy, " +
+                "another user with role <b>{0}</b> must take the next " +
+                "workflow action — the button is hidden from you to " +
+                "prevent self-approval.", [need]
+            );
+
+            if (el && document.body.contains(el)) {
+                if (el.innerHTML !== html) el.innerHTML = html;
+                return;
+            }
+
+            // Create fresh — mount at top of dashboard wrapper.
+            let mount = null;
+            try { mount = frm.dashboard && frm.dashboard.wrapper; } catch (e) {}
+            if (!mount || !mount.length) {
+                try { mount = frm.layout && frm.layout.wrapper; } catch (e) {}
+            }
+            if (!mount || !mount.length) return;
+
+            el = document.createElement("div");
+            el.className = "prf-self-approval-banner";
+            el.style.cssText = "margin:8px 0; padding:12px 16px; background:#eaf4ff; border-left:4px solid #1f7e4f; border-radius:4px;";
+            el.innerHTML = html;
+            $(mount).prepend(el);
+            frm._prf_self_approval_banner_el = el;
         } catch (e) {
             // Banner is best-effort — never block the form.
             console.warn("update_self_approval_hint:", e);
