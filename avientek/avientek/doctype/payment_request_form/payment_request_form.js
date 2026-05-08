@@ -1080,18 +1080,34 @@ frappe.ui.form.on('Payment Request Form', {
             if (!grid || !grid.grid_rows) return;
 
             grid.grid_rows.forEach(function(row) {
-                if (!row.doc || !row.doc.reference_name) return;
+                if (!row.doc) return;
                 if (row.doc.reference_doctype === "Manual") return;
+                // Use document_reference as the canonical link target —
+                // reference_name is the user-typed supplier invoice number
+                // (Sridhar 2026-05-09). Fall back to reference_name for
+                // legacy rows that pre-date this change.
+                const link_target = row.doc.document_reference || row.doc.reference_name;
+                if (!link_target) return;
 
                 let $row_el = $(row.row);
 
-                // --- Invoice drill-down link — wider selector for all Frappe v15 variants ---
+                // --- Document Reference drill-down link ---
                 let $ref_cell = $row_el.find(
-                    ".grid-static-col[data-fieldname='reference_name'], " +
-                    "[data-fieldname='reference_name'] .static-area, " +
-                    "[data-field='reference_name'] .static-area, " +
-                    "[data-fieldname='reference_name']"
+                    ".grid-static-col[data-fieldname='document_reference'], " +
+                    "[data-fieldname='document_reference'] .static-area, " +
+                    "[data-field='document_reference'] .static-area, " +
+                    "[data-fieldname='document_reference']"
                 ).first();
+                // Legacy fallback: also bind on reference_name for old rows
+                // where document_reference might be empty.
+                if (!$ref_cell.length || !row.doc.document_reference) {
+                    $ref_cell = $row_el.find(
+                        ".grid-static-col[data-fieldname='reference_name'], " +
+                        "[data-fieldname='reference_name'] .static-area, " +
+                        "[data-field='reference_name'] .static-area, " +
+                        "[data-fieldname='reference_name']"
+                    ).first();
+                }
                 if ($ref_cell.length && !$ref_cell.data("drilldown-bound")) {
                     $ref_cell.data("drilldown-bound", true);
                     $ref_cell.addClass("inv-ref-link");
@@ -1100,8 +1116,8 @@ frappe.ui.form.on('Payment Request Form', {
                         e.stopPropagation();
                         e.preventDefault();
                         let actual_dt = frm.events._get_actual_doctype(row.doc.reference_doctype);
-                        if (actual_dt && row.doc.reference_name) {
-                            frappe.set_route("Form", actual_dt, row.doc.reference_name);
+                        if (actual_dt && link_target) {
+                            frappe.set_route("Form", actual_dt, link_target);
                         } else {
                             frappe.msgprint(__("Cannot navigate - reference doctype or name missing"));
                         }
@@ -1120,7 +1136,7 @@ frappe.ui.form.on('Payment Request Form', {
                     $view_cell.find(".inv-view-btn").on("click", function(e) {
                         e.stopPropagation();
                         e.preventDefault();
-                        frm.events._show_view_preview(frm, row.doc.reference_doctype, row.doc.reference_name, row.doc.idx);
+                        frm.events._show_view_preview(frm, row.doc.reference_doctype, link_target, row.doc.idx);
                     });
                 }
             });
@@ -1955,8 +1971,11 @@ let row_updating = {};
 frappe.ui.form.on('Payment Request Reference', {
     view_document: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        if (row.reference_name && row.reference_doctype !== "Manual") {
-            frm.events._show_view_preview(frm, row.reference_doctype, row.reference_name, row.idx);
+        // Sridhar 2026-05-09: prefer document_reference as the link target;
+        // fall back to reference_name for legacy rows.
+        const link_target = row.document_reference || row.reference_name;
+        if (link_target && row.reference_doctype !== "Manual") {
+            frm.events._show_view_preview(frm, row.reference_doctype, link_target, row.idx);
         }
     },
 
@@ -2082,11 +2101,14 @@ frappe.ui.form.on('Payment Request Reference', {
                             reqd: 1,
                         }],
                         function (values) {
+                            // Sridhar 2026-05-09: only set document_reference
+                            // (the system PO/PI/JV reference). Leave
+                            // reference_name (Invoice column) blank so the
+                            // user can type their supplier invoice number
+                            // manually. Document Reference column shows the
+                            // linked doc; Invoice column is user input.
                             frappe.model.set_value(
                                 cdt, cdn, "document_reference", values.doc_name,
-                            );
-                            frappe.model.set_value(
-                                cdt, cdn, "reference_name", values.doc_name,
                             );
                             frm.refresh_field("payment_references");
                         },

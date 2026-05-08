@@ -8,6 +8,7 @@
  "field_order": [
   "reference_doctype",
   "reference_name",
+  "document_reference",
   "view_document",
   "invoice_date",
   "due_date",
@@ -31,7 +32,6 @@
   "costing_sheet_attachment",
   "previous_payment_details",
   "column_break_fxiw",
-  "document_reference",
   "payment_term"
  ],
  "fields": [
@@ -124,10 +124,13 @@
    "options": "Currency"
   },
   {
+   "columns": 2,
    "fieldname": "document_reference",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Document Reference",
-   "read_only": 1
+   "read_only": 1,
+   "description": "System reference (Purchase Order / Purchase Invoice / etc.) that this payment line is against. Auto-set when you pick a doc from the Type picker."
   },
   {
    "columns": 1,
