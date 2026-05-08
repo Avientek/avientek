@@ -17,7 +17,7 @@ def after_migrate():
 	_sync_payment_voucher_formats()
 	_sync_sales_team_workspace()
 	_block_prf_workflow_self_approval()
-	_seed_quotation_action_request_workflow()
+	_seed_quotation_approval_v3_workflow()
 
 
 def _sync_payment_voucher_formats():
@@ -39,18 +39,19 @@ def _sync_payment_voucher_formats():
 		)
 
 
-def _seed_quotation_action_request_workflow():
-	"""Idempotent seed/refresh of the Quotation Action Request Approval
-	workflow on every migrate (Sridhar 2026-05-06 Phase 2). Source of
-	truth lives in `avientek/patches/seed_quotation_action_request_workflow.py`."""
+def _seed_quotation_approval_v3_workflow():
+	"""Idempotent seed/refresh of the Quotation Approval Workflow Avientek (V3)
+	on every migrate (Rahul/Sridhar 2026-05-08 — replaced the QAR 2-level
+	flow with the SO-style Document Approval pattern). Source of truth lives
+	in `avientek/patches/seed_quotation_approval_v3_workflow.py`."""
 	try:
-		from avientek.patches.seed_quotation_action_request_workflow import (
+		from avientek.patches.seed_quotation_approval_v3_workflow import (
 			seed,
 		)
 		seed()
 	except Exception:
 		frappe.log_error(
-			title="after_migrate: QAR workflow seed failed",
+			title="after_migrate: Quotation V3 workflow seed failed",
 			message=frappe.get_traceback(),
 		)
 

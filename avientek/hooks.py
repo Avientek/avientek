@@ -482,8 +482,12 @@ doc_events = {
         ],
         "before_cancel":
             "avientek.api.quotation_high_probability.before_cancel",
-        "on_update_after_submit":
+        "on_update_after_submit": [
             "avientek.api.quotation_high_probability.on_update_after_submit",
+            # Rahul/Sridhar 2026-05-08 — fire notification when probability
+            # transitions to 100% (the unlock event for downstream teams).
+            "avientek.api.quotation_high_probability.notify_probability_100",
+        ],
     },
     "Purchase Receipt": {
         "before_validate": "avientek.events.utils.fill_missing_item_defaults",

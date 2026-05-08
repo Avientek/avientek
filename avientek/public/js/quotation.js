@@ -66,71 +66,12 @@ function _apply_high_probability_lock(frm) {
     frm.dashboard.set_headline(
         __("Quotation locked: probability {0}% (>= {1}%). " +
            "Only the Probability field is editable, and only to bump it " +
-           "to 100%. To Cancel / Amend / Resubmit, file a Quotation " +
-           "Action Request for two-level approval.",
+           "to 100%. To Cancel / Amend / Resubmit, scroll down to the " +
+           "<b>Document Approval</b> section, tick <i>Request for Update</i> " +
+           "or <i>Cancellation Check</i>, fill the note, and Save.",
            [prob, HIGH_PROB_THRESHOLD]),
         "orange",
     );
-    // Add "Request Cancel/Amend/Resubmit" buttons (Phase 2).
-    _add_action_request_buttons(frm);
-}
-
-function _add_action_request_buttons(frm) {
-    const actions = ["Cancel", "Amend", "Resubmit"];
-    actions.forEach(function (action) {
-        frm.add_custom_button(
-            __("Request {0}", [action]),
-            () => _open_or_create_action_request(frm, action),
-            __("Action Request"),
-        );
-    });
-}
-
-function _open_or_create_action_request(frm, action) {
-    frappe.call({
-        method: "avientek.avientek.doctype.quotation_action_request" +
-                ".quotation_action_request.has_open_request",
-        args: { quotation: frm.doc.name, action: action },
-        callback: function (r) {
-            if (r.message) {
-                frappe.set_route(
-                    "Form", "Quotation Action Request", r.message,
-                );
-                return;
-            }
-            const d = new frappe.ui.Dialog({
-                title: __("Request {0} Approval", [action]),
-                fields: [
-                    {
-                        fieldtype: "Small Text",
-                        fieldname: "reason",
-                        label: __("Reason"),
-                        reqd: 1,
-                    },
-                ],
-                primary_action_label: __("Submit Request"),
-                primary_action(values) {
-                    frappe.db.insert({
-                        doctype: "Quotation Action Request",
-                        quotation: frm.doc.name,
-                        action: action,
-                        reason: values.reason,
-                        workflow_state: "Pending",
-                    }).then(doc => {
-                        d.hide();
-                        frappe.show_alert({
-                            message: __("Action Request {0} created", [doc.name]),
-                            indicator: "green",
-                        });
-                        frappe.set_route(
-                            "Form", "Quotation Action Request", doc.name,
-                        );
-                    });
-                },
-            });
-            d.show();
-        },
-    });
 }
 
 frappe.ui.form.on('Quotation', {

@@ -10,8 +10,7 @@
   "reward_incentive_method",
   "reward_incentive_company_accounts",
   "quote_high_prob_section",
-  "quote_high_prob_l1_role",
-  "quote_high_prob_l2_role",
+  "quote_approval_role",
   "quote_high_prob_column_break",
   "quote_high_prob_creator_role",
   "quote_high_prob_restricted_roles",
@@ -49,23 +48,15 @@
    "fieldname": "quote_high_prob_section",
    "fieldtype": "Section Break",
    "label": "Quotation High-Probability Workflow",
-   "description": "Roles that drive the High-Probability Quotation lock + RBAC + dual-approval workflow."
+   "description": "Roles that drive the High-Probability Quotation lock, the Document Approval flow (Request for Update / Cancellation Check), and the Restricted-Roles RBAC."
   },
   {
-   "fieldname": "quote_high_prob_l1_role",
+   "fieldname": "quote_approval_role",
    "fieldtype": "Link",
    "options": "Role",
-   "label": "Quote Action Request — Level 1 Approver",
-   "default": "GM-CS",
-   "description": "Role allowed to perform the L1 Approve transition on a Quotation Action Request. Cannot self-approve."
-  },
-  {
-   "fieldname": "quote_high_prob_l2_role",
-   "fieldtype": "Link",
-   "options": "Role",
-   "label": "Quote Action Request — Level 2 Approver",
+   "label": "Quote Approval Role",
    "default": "CS",
-   "description": "Role allowed to perform the L2 Approve transition. Cannot self-approve. L2 approval triggers automatic execution of the requested Cancel / Amend / Resubmit action."
+   "description": "Single role that approves Document Approval transitions on submitted high-probability quotes (Request for Update, Cancellation Check, Send for Approval). Mirrors the Sales Order 'Supply Chain Head' pattern. Cannot self-approve."
   },
   {
    "fieldname": "quote_high_prob_column_break",
@@ -77,7 +68,7 @@
    "options": "Role",
    "label": "Quotation Team Role",
    "default": "Sales support L2",
-   "description": "Role that owns Quotations and creates Action Requests. Members are also auto-whitelisted for the High-Probability lock."
+   "description": "Role that owns Quotations and submits Document Approval requests. Members are also auto-whitelisted for the High-Probability lock."
   },
   {
    "fieldname": "quote_high_prob_restricted_roles",
@@ -103,7 +94,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-04-30 12:00:00.000000",
+ "modified": "2026-05-09 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Avientek Settings",

@@ -507,5 +507,57 @@
   "property_type": "Check",
   "row_name": null,
   "value": "1"
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Quotation Item",
+  "field_name": "custom_special_price",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Quotation Item-custom_special_price-allow_on_submit",
+  "property": "allow_on_submit",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Quotation Item",
+  "field_name": "custom_special_rate",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Quotation Item-custom_special_rate-allow_on_submit",
+  "property": "allow_on_submit",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Quotation Item",
+  "field_name": "custom_special_price_note",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Quotation Item-custom_special_price_note-allow_on_submit",
+  "property": "allow_on_submit",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Quotation Item",
+  "field_name": "custom_addl_discount_amount",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Quotation Item-custom_addl_discount_amount-allow_on_submit",
+  "property": "allow_on_submit",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
  }
 ]
