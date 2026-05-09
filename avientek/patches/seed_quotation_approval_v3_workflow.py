@@ -39,6 +39,13 @@ STATES = [
     ("Sent for Revision",      "1", "Warning"),
     ("Cancellation Requested", "1", "Danger"),
     ("Cancelled",              "2", "Danger"),
+    # Sridhar 2026-05-10: bridge legacy V2 states so quotes that were
+    # mid-V2-flow at deploy time (e.g. Pending Level 2 Approval) become
+    # actionable in V3. Without these, Frappe shows NO transitions for
+    # any quote whose workflow_state isn't in the active workflow's
+    # State table — approver button silently hidden.
+    ("Pending Level 1 Approval", "0", "Warning"),
+    ("Pending Level 2 Approval", "0", "Warning"),
 ]
 
 
@@ -86,6 +93,17 @@ def _build_transitions(creator, approver):
         ("Cancellation Requested", "Approve Cancellation",  "Cancelled",              approver,  0, ""),
         ("Cancellation Requested", "Reject Cancellation",   "Approved",               approver,  0, ""),
         ("Cancellation Requested", "Cancel Request",        "Approved",               creator,   1, "not doc.custom_cancellation_check"),
+
+        # Sridhar 2026-05-10: bridge transitions for legacy V2 states.
+        # Quotes that were mid-V2-flow at the V3 deploy carry these
+        # workflow_state values. Approver can flush them to V3
+        # 'Approved' (= equivalent of L2-approved in V2) or 'Cancelled'
+        # if no longer relevant. allow_self_approval=0 keeps the audit
+        # rule (creator can't approve own quote).
+        ("Pending Level 1 Approval", "Approve",              "Approved",               approver,  0, ""),
+        ("Pending Level 1 Approval", "Reject",               "Cancelled",              approver,  0, ""),
+        ("Pending Level 2 Approval", "Approve",              "Approved",               approver,  0, ""),
+        ("Pending Level 2 Approval", "Reject",               "Cancelled",              approver,  0, ""),
     ]
 
 
