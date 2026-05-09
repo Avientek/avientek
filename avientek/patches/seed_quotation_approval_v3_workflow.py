@@ -97,13 +97,15 @@ def _build_transitions(creator, approver):
         # Sridhar 2026-05-10: bridge transitions for legacy V2 states.
         # Quotes that were mid-V2-flow at the V3 deploy carry these
         # workflow_state values. Approver can flush them to V3
-        # 'Approved' (= equivalent of L2-approved in V2) or 'Cancelled'
-        # if no longer relevant. allow_self_approval=0 keeps the audit
-        # rule (creator can't approve own quote).
+        # 'Approved' (= equivalent of L2-approved in V2). Reject routes
+        # to 'Draft' (NOT Cancelled — Frappe forbids doc_status 0→2
+        # transitions; the legacy states are doc_status=0). Sales rep
+        # can then revise and re-submit. allow_self_approval=0 keeps
+        # the audit rule.
         ("Pending Level 1 Approval", "Approve",              "Approved",               approver,  0, ""),
-        ("Pending Level 1 Approval", "Reject",               "Cancelled",              approver,  0, ""),
+        ("Pending Level 1 Approval", "Reject",               "Draft",                  approver,  0, ""),
         ("Pending Level 2 Approval", "Approve",              "Approved",               approver,  0, ""),
-        ("Pending Level 2 Approval", "Reject",               "Cancelled",              approver,  0, ""),
+        ("Pending Level 2 Approval", "Reject",               "Draft",                  approver,  0, ""),
     ]
 
 
