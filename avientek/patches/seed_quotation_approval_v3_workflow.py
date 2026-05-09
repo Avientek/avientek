@@ -179,20 +179,33 @@ def seed():
             "style": color,
         })
 
-    # Transitions — skip any whose role doesn't exist on this site
+    # Transitions — fallback to System Manager if the configured role
+    # is missing, so we never silently drop transitions (Sridhar
+    # 2026-05-10: orders.mea couldn't approve because the bridge had
+    # been silently skipped when GM role was misconfigured).
     wf.set("transitions", [])
     skipped = 0
+    fallbacks = 0
     for s, action, ns, role, self_app, cond in transitions:
+        actual_role = role
         if role not in ("All",) and not frappe.db.exists("Role", role):
-            print(f"[seed_quotation_approval_v3_workflow] WARN role {role!r} "
-                  f"missing — skipping transition {s} -[{action}]-> {ns}")
-            skipped += 1
-            continue
+            if frappe.db.exists("Role", "System Manager"):
+                actual_role = "System Manager"
+                fallbacks += 1
+                print(f"[seed_quotation_approval_v3_workflow] WARN role "
+                      f"{role!r} missing — falling back to System Manager "
+                      f"for {s} -[{action}]-> {ns}")
+            else:
+                print(f"[seed_quotation_approval_v3_workflow] WARN role "
+                      f"{role!r} missing AND System Manager missing — "
+                      f"skipping {s} -[{action}]-> {ns}")
+                skipped += 1
+                continue
         wf.append("transitions", {
             "state": s,
             "action": action,
             "next_state": ns,
-            "allowed": role,
+            "allowed": actual_role,
             "allow_self_approval": self_app,
             "condition": cond or "",
         })
