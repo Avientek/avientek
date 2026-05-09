@@ -2230,16 +2230,122 @@ def patch_shared_document_filter():
 
 
 @frappe.whitelist()
-def export_report_as_excel(data, doctype):
-	"""Generate Excel file from Report Download data and return as download."""
+def export_report_as_excel(data, doctype, col_types=None, col_options=None):
+	"""Generate Excel file from Report Download data and return as download.
+
+	Sridhar 2026-05-10: writes Currency / Float / Int / Percent columns as
+	proper Excel number cells (with number_format) instead of strings, so
+	users can sum / sort / filter numerically. Date columns also write as
+	Excel date when ISO-parseable. Falls back to legacy make_xlsx if
+	openpyxl import fails.
+	"""
 	import json as json_mod
-	from frappe.utils.xlsxutils import make_xlsx
+	import io as _io
+	import datetime as _dt
 
-	rows = json_mod.loads(data)
-	xlsx_file = make_xlsx(rows, doctype)
+	rows = json_mod.loads(data) if isinstance(data, str) else data
+	col_types = json_mod.loads(col_types) if isinstance(col_types, str) else (col_types or [])
+	col_options = json_mod.loads(col_options) if isinstance(col_options, str) else (col_options or [])
 
+	try:
+		from openpyxl import Workbook
+		from openpyxl.utils import get_column_letter
+	except Exception:
+		from frappe.utils.xlsxutils import make_xlsx
+		xlsx_file = make_xlsx(rows, doctype)
+		frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
+		frappe.response["filecontent"] = xlsx_file.getvalue()
+		frappe.response["type"] = "download"
+		return
+
+	# Excel number-format strings keyed on Frappe fieldtype.
+	NUMERIC_TYPES = {"Currency", "Float", "Int", "Percent", "Long Int"}
+	def _number_format(ftype):
+		if ftype == "Int" or ftype == "Long Int":
+			return "#,##0"
+		if ftype == "Percent":
+			return "0.00%"
+		# Currency + Float — generic 2-decimal thousands grouping. We don't
+		# embed currency symbols because reports often mix multiple
+		# currencies in one column.
+		return "#,##0.00"
+
+	wb = Workbook()
+	ws = wb.active
+	ws.title = (doctype or "Report")[:31]  # Excel sheet name limit
+
+	if not rows:
+		buf = _io.BytesIO()
+		wb.save(buf)
+		frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
+		frappe.response["filecontent"] = buf.getvalue()
+		frappe.response["type"] = "download"
+		return
+
+	# Header row
+	header = rows[0]
+	for ci, value in enumerate(header, start=1):
+		ws.cell(row=1, column=ci, value=str(value or ""))
+
+	# Data rows
+	n_cols = len(header)
+	for ri, row in enumerate(rows[1:], start=2):
+		for ci in range(n_cols):
+			val = row[ci] if ci < len(row) else ""
+			ftype = col_types[ci] if ci < len(col_types) else "Data"
+			cell = ws.cell(row=ri, column=ci + 1)
+
+			if val == "" or val is None:
+				cell.value = None
+				continue
+
+			if ftype in NUMERIC_TYPES:
+				try:
+					n = float(val)
+					cell.value = n
+					cell.number_format = _number_format(ftype)
+				except Exception:
+					cell.value = str(val)
+			elif ftype in ("Date", "Datetime"):
+				try:
+					if isinstance(val, str) and len(val) >= 10:
+						# Try ISO date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
+						dt = _dt.datetime.fromisoformat(val[:19]) if "T" in val or " " in val else _dt.date.fromisoformat(val[:10])
+						cell.value = dt
+						cell.number_format = "yyyy-mm-dd" if ftype == "Date" else "yyyy-mm-dd hh:mm:ss"
+					else:
+						cell.value = str(val)
+				except Exception:
+					cell.value = str(val)
+			elif ftype == "Check":
+				try:
+					cell.value = int(val)
+					cell.number_format = "0"
+				except Exception:
+					cell.value = str(val)
+			else:
+				cell.value = str(val)
+
+	# Auto-width: simple heuristic — max 50 chars
+	for ci in range(1, n_cols + 1):
+		max_len = 0
+		col_letter = get_column_letter(ci)
+		for cell in ws[col_letter]:
+			v = cell.value
+			if v is None:
+				continue
+			s = str(v)
+			if len(s) > max_len:
+				max_len = len(s)
+		ws.column_dimensions[col_letter].width = min(50, max(10, max_len + 2))
+
+	# Freeze header row
+	ws.freeze_panes = "A2"
+
+	buf = _io.BytesIO()
+	wb.save(buf)
 	frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
-	frappe.response["filecontent"] = xlsx_file.getvalue()
+	frappe.response["filecontent"] = buf.getvalue()
 	frappe.response["type"] = "download"
 
 

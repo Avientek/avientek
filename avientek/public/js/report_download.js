@@ -74,7 +74,8 @@ function open_download_dialog(rv) {
 		primary_action_label: __("Download"),
 		primary_action: function (values) {
 			d.hide();
-			_rd_export_all(rv, dt, spec.headers, spec.keys, spec.parent_keys, values.file_type);
+			_rd_export_all(rv, dt, spec.headers, spec.keys, spec.parent_keys,
+				spec.col_types, spec.col_options, values.file_type);
 		},
 	});
 	d.show();
@@ -101,6 +102,13 @@ function _rd_build_column_spec(rv) {
 	var headers = [];
 	var keys = [];
 	var parent_keys = [];
+	// Sridhar 2026-05-10: track Frappe fieldtype + options per column so
+	// the server writes Currency / Float / Int / Percent / Date as proper
+	// Excel typed cells (with number_format) instead of strings. The
+	// previous version sent everything as String(v) → Excel rendered
+	// Grand Total / Net Rate / Amount as text, breaking sum/sort.
+	var col_types = [];
+	var col_options = [];
 
 	cols.forEach(function (c) {
 		var id = c.id || (c.df && c.df.fieldname) || c.name;
@@ -108,33 +116,61 @@ function _rd_build_column_spec(rv) {
 		if (id === "_checkbox" || id === "_liked_by" || id === "name:no_display") return;
 
 		var label = (c.df && c.df.label) || c.name || id;
+		var ftype = (c.df && c.df.fieldtype) || "Data";
+		var fopts = (c.df && c.df.options) || "";
 		var child_dt = (c.docfield && c.docfield.parent) || null;
 		var is_child = child_dt && child_dt !== dt;
 
-		// Keep child-column labels distinguishable even if two tables share a
-		// fieldname — e.g. "Sales Person (Sales Team)" rather than just
-		// "Sales Person"
 		if (is_child && label && label.indexOf("(") === -1) {
 			label = label + " (" + child_dt + ")";
 		}
 
 		headers.push(label);
 		keys.push(id);
+		col_types.push(ftype);
+		col_options.push(fopts);
 		if (!is_child) parent_keys.push(id);
 	});
 
-	// Fallback: if we somehow didn't get columns metadata, use whatever keys
-	// the first row carries. Parent keys are those without a colon.
 	if (!keys.length && (rv.data || []).length) {
 		Object.keys(rv.data[0]).forEach(function (k) {
 			if (!k || k === "_comment_count" || k === "docstatus" || k[0] === "_") return;
 			headers.push(k.indexOf(":") >= 0 ? k : k);
 			keys.push(k);
+			col_types.push("Data");
+			col_options.push("");
 			if (k.indexOf(":") === -1) parent_keys.push(k);
 		});
 	}
 
-	return { headers: headers, keys: keys, parent_keys: parent_keys };
+	return {
+		headers: headers,
+		keys: keys,
+		parent_keys: parent_keys,
+		col_types: col_types,
+		col_options: col_options,
+	};
+}
+
+
+// Frappe fieldtypes that should be written as numeric cells.
+var _RD_NUMERIC_TYPES = {
+	"Currency": 1, "Float": 1, "Int": 1, "Percent": 1, "Long Int": 1,
+};
+
+function _rd_coerce_value(raw, ftype) {
+	if (raw == null || raw === "") return "";
+	if (_RD_NUMERIC_TYPES[ftype]) {
+		if (typeof raw === "number") return raw;
+		// Strip commas / spaces / leading currency symbols (د.إ, ر.س, $, etc.)
+		var s = String(raw).replace(/[\s,]/g, "")
+			.replace(/^[^\d\-+\.]+/, "")
+			.replace(/[^\d\.\-eE]+$/, "");
+		if (s === "" || s === "-") return "";
+		var n = parseFloat(s);
+		return isNaN(n) ? "" : n;
+	}
+	return String(raw);
 }
 
 
@@ -145,7 +181,7 @@ function _rd_build_column_spec(rv) {
  *   - Otherwise → bump page_length and refresh to fetch every row
  *     matching the current filters, then export.
  */
-function _rd_export_all(rv, dt, headers, keys, parent_keys, file_type) {
+function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_options, file_type) {
 	var selected_names = [];
 	try {
 		var checked = (rv.get_checked_items && rv.get_checked_items()) || [];
@@ -161,18 +197,23 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, file_type) {
 		}
 		_rd_denormalize_parent_fields(data, parent_keys);
 
+		// Header row: always strings
 		var rows = [headers];
 		data.forEach(function (r) {
-			rows.push(keys.map(function (k) {
-				var v = r[k];
-				return v == null ? "" : String(v);
+			rows.push(keys.map(function (k, i) {
+				return _rd_coerce_value(r[k], (col_types || [])[i] || "Data");
 			}));
 		});
 
 		if (file_type === "Excel") {
 			open_url_post(
 				"/api/method/avientek.api.quotation_access.export_report_as_excel",
-				{ data: JSON.stringify(rows), doctype: dt }
+				{
+					data: JSON.stringify(rows),
+					doctype: dt,
+					col_types: JSON.stringify(col_types || []),
+					col_options: JSON.stringify(col_options || []),
+				}
 			);
 		} else {
 			_rd_download_csv(rows, dt);
