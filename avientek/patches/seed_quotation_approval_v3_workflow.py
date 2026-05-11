@@ -80,10 +80,15 @@ def _build_transitions(creator, approver):
         # numeric field isn't reliably synced on this site. We take the
         # max of both so an unset Data value still falls back to the
         # numeric field if that was the canonical source.
-        # Note: avoid `max()` here — Frappe's workflow safe_eval doesn't
-        # expose it (NameError). Equivalent: max(a,b)<75  ==  a<75 and b<75.
-        ("Approved",               "Cancel",                "Cancelled",              "All",     1, "flt(doc.probability or 0) < 75 and flt((doc.probabilities or '0').replace('%','')) < 75"),
-        ("Submitted",              "Cancel",                "Cancelled",              "All",     1, "flt(doc.probability or 0) < 75 and flt((doc.probabilities or '0').replace('%','')) < 75"),
+        # Note: Frappe's workflow safe_eval (frappe/utils/safe_exec.py
+        # WHITELISTED_SAFE_EVAL_GLOBALS) only exposes int/float/round.
+        # No flt/cint/max/min, no string methods on attributes. So we
+        # check the numeric `probability` against 75 and the Data
+        # `probabilities` against a literal tuple of the high-prob
+        # values that the Avientek picker emits. Cancel is allowed only
+        # when BOTH fields are low.
+        ("Approved",               "Cancel",                "Cancelled",              "All",     1, "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"),
+        ("Submitted",              "Cancel",                "Cancelled",              "All",     1, "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"),
 
         # Approver decides on the update request
         ("Requested for update",   "Approve",               "Approved for Update",    approver,  0, ""),
