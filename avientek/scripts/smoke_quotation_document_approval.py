@@ -101,14 +101,16 @@ def run():
                      not other_active,
                      f"others active: {[r[0] for r in other_active]}" if other_active else "")
 
-    # ── 3. Transitions reference the dynamic approver role ──
-    print(_hr("[3] V3 transitions reference dynamic approver role"))
+    # ── 3. Transitions reference the dynamic approver roles ──
+    print(_hr("[3] V3 transitions reference dynamic approver roles"))
     from avientek.api.quotation_high_probability import _settings_roles
     cfg = _settings_roles()
-    approver = cfg.get("approver_role")
-    creator = cfg.get("creator_role")
-    _check("approver_role resolved", bool(approver), f"={approver!r}")
-    _check("creator_role resolved", bool(creator), f"={creator!r}")
+    approver_roles = cfg.get("approver_roles") or (cfg.get("approver_role"),)
+    creator_roles = cfg.get("creator_roles") or (cfg.get("creator_role"),)
+    approver = approver_roles[0] if approver_roles else None
+    creator = creator_roles[0] if creator_roles else None
+    _check("approver_roles resolved", bool(approver), f"={list(approver_roles)!r}")
+    _check("creator_roles resolved", bool(creator), f"={list(creator_roles)!r}")
 
     # Find at least one transition each — case-insensitive lookup since
     # Frappe normalizes role-link writes to whatever case the role

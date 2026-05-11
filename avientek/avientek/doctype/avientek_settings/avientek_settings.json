@@ -11,8 +11,10 @@
   "reward_incentive_company_accounts",
   "quote_high_prob_section",
   "quote_approval_role",
+  "quote_approver_roles",
   "quote_high_prob_column_break",
   "quote_high_prob_creator_role",
+  "quote_creator_roles",
   "quote_high_prob_restricted_roles",
   "signature_images_section",
   "signature_images"
@@ -54,9 +56,16 @@
    "fieldname": "quote_approval_role",
    "fieldtype": "Link",
    "options": "Role",
-   "label": "Quote Approval Role",
+   "label": "Quote Approval Role (legacy)",
    "default": "CS",
-   "description": "Single role that approves Document Approval transitions on submitted high-probability quotes (Request for Update, Cancellation Check, Send for Approval). Mirrors the Sales Order 'Supply Chain Head' pattern. Cannot self-approve."
+   "description": "Legacy single approver — kept for back-compat. Use the Approval Roles table below to assign multiple roles."
+  },
+  {
+   "fieldname": "quote_approver_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quote Role",
+   "label": "Approval Roles",
+   "description": "Any user with ANY of these roles can approve Document Approval transitions on submitted high-probability quotes (Request for Update, Cancellation Check, Send for Approval). OR-logic. If empty, the legacy single role above is used."
   },
   {
    "fieldname": "quote_high_prob_column_break",
@@ -66,9 +75,16 @@
    "fieldname": "quote_high_prob_creator_role",
    "fieldtype": "Link",
    "options": "Role",
-   "label": "Quotation Team Role",
+   "label": "Quotation Team Role (legacy)",
    "default": "Sales support L2",
-   "description": "Role that owns Quotations and submits Document Approval requests. Members are also auto-whitelisted for the High-Probability lock."
+   "description": "Legacy single team role — kept for back-compat. Use the Team Roles table below to assign multiple roles."
+  },
+  {
+   "fieldname": "quote_creator_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quote Role",
+   "label": "Team Roles",
+   "description": "Any user with ANY of these roles can own Quotations and submit Document Approval requests. Members are also auto-whitelisted for the High-Probability lock. OR-logic. If empty, the legacy single role above is used."
   },
   {
    "fieldname": "quote_high_prob_restricted_roles",
@@ -94,7 +110,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-09 00:00:00.000000",
+ "modified": "2026-05-13 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Avientek Settings",

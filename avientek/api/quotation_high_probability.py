@@ -83,34 +83,61 @@ def _settings_roles():
     (frappe.clear_cache fires that). Falls back to module defaults if
     any setting is blank.
 
-    V3 (2026-05-08): single approver replaces L1/L2. The returned dict
-    keeps `l1_role` + `l2_role` keys (both pointing at the single
-    approver) for back-compat with anything that still reads them."""
+    V3 (2026-05-08): single approver replaced L1/L2.
+    V3.1 (Sammish 2026-05-13): multi-role tables `quote_approver_roles`
+    and `quote_creator_roles` are now the source of truth — the legacy
+    single Link fields (`quote_approval_role`,
+    `quote_high_prob_creator_role`) remain as fallbacks if the tables
+    are empty. The returned dict carries BOTH plural tuples
+    (`approver_roles`, `creator_roles`) AND scalar back-compat keys
+    (`approver_role`, `creator_role`, `l1_role`, `l2_role` — all
+    resolve to the first item of the respective list)."""
     cached = frappe.local.flags.get(_SETTINGS_CACHE_KEY)
     if cached is not None:
         return cached
     try:
         s = frappe.get_cached_doc("Avientek Settings")
-        approver = s.get("quote_approval_role") or DEFAULT_APPROVAL_ROLE
-        creator = s.get("quote_high_prob_creator_role") or DEFAULT_CREATOR_ROLE
+        approver_roles = tuple(
+            r.role for r in (s.get("quote_approver_roles") or []) if r.role
+        )
+        if not approver_roles and s.get("quote_approval_role"):
+            approver_roles = (s.get("quote_approval_role"),)
+        if not approver_roles:
+            approver_roles = (DEFAULT_APPROVAL_ROLE,)
+
+        creator_roles = tuple(
+            r.role for r in (s.get("quote_creator_roles") or []) if r.role
+        )
+        if not creator_roles and s.get("quote_high_prob_creator_role"):
+            creator_roles = (s.get("quote_high_prob_creator_role"),)
+        if not creator_roles:
+            creator_roles = (DEFAULT_CREATOR_ROLE,)
+
         restricted = tuple(
             r.role for r in (s.get("quote_high_prob_restricted_roles") or [])
             if r.role
         ) or DEFAULT_RESTRICTED_ROLES
     except Exception:
-        approver = DEFAULT_APPROVAL_ROLE
-        creator = DEFAULT_CREATOR_ROLE
+        approver_roles = (DEFAULT_APPROVAL_ROLE,)
+        creator_roles = (DEFAULT_CREATOR_ROLE,)
         restricted = DEFAULT_RESTRICTED_ROLES
 
-    # Whitelist = Approver + Creator + System Manager + Administrator.
-    whitelisted = tuple({approver, creator, "System Manager", "Administrator"})
+    # Whitelist = all approvers + all creators + System Manager + Administrator.
+    whitelisted = tuple(set(approver_roles) | set(creator_roles) | {"System Manager", "Administrator"})
+
+    # Primary (first) role for any back-compat reader that wants a scalar.
+    approver_primary = approver_roles[0]
+    creator_primary = creator_roles[0]
 
     cfg = {
-        "approver_role": approver,
-        # Back-compat aliases — both point at the single approver now.
-        "l1_role": approver,
-        "l2_role": approver,
-        "creator_role": creator,
+        # New plural form — preferred for new code.
+        "approver_roles": approver_roles,
+        "creator_roles": creator_roles,
+        # Back-compat scalar form — always points at the first role.
+        "approver_role": approver_primary,
+        "l1_role": approver_primary,
+        "l2_role": approver_primary,
+        "creator_role": creator_primary,
         "whitelisted": whitelisted,
         "restricted": restricted,
     }
@@ -375,7 +402,7 @@ def notify_probability_100(doc, method=None):
 def _resolve_prob_100_recipients(doc):
     """Build the recipient list for the prob=100 notification. Reads
     dynamically — recipients change as soon as Avientek Settings
-    `quote_approval_role` or doc.sales_team changes."""
+    approver roles or doc.sales_team change."""
     emails = []
     if doc.owner:
         emails.append(doc.owner)
@@ -388,18 +415,18 @@ def _resolve_prob_100_recipients(doc):
         user_email = frappe.db.get_value("Sales Person", sp_name, "email_address")
         if user_email:
             emails.append(user_email)
-    # Approver role users
+    # Approver role users — any of the configured approver roles.
     cfg = _settings_roles()
-    approver_role = cfg.get("approver_role")
-    if approver_role:
+    approver_roles = cfg.get("approver_roles") or ((cfg.get("approver_role"),) if cfg.get("approver_role") else ())
+    if approver_roles:
         users = frappe.db.sql(
             """SELECT DISTINCT u.name
                FROM `tabUser` u
                INNER JOIN `tabHas Role` hr
                  ON hr.parent = u.name AND hr.parenttype = 'User'
                WHERE u.enabled = 1 AND u.email IS NOT NULL
-                 AND hr.role = %s""",
-            (approver_role,),
+                 AND hr.role IN %(roles)s""",
+            {"roles": tuple(approver_roles)},
         )
         emails.extend([u[0] for u in users])
     # Filter out empty + Administrator (not a real inbox)

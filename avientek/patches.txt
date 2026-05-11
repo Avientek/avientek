@@ -26,6 +26,10 @@ avientek.patches.sync_payment_voucher_formats_v2026_04_27
 avientek.patches.remove_user_permission_manager
 avientek.patches.block_prf_workflow_self_approval
 avientek.patches.remove_quotation_action_request
+# migrate_quote_role_singles_to_tables seeds the new approver/creator
+# tables from the legacy single Link fields on first run after schema
+# sync — idempotent so safe to leave on patches.txt forever.
+avientek.patches.migrate_quote_role_singles_to_tables
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.

@@ -54,77 +54,100 @@ def _resolved_roles():
     return _settings_roles()
 
 
-def _build_transitions(creator, approver):
-    """Mirror the SO Sales Order Updated transition set, single-approver.
+def _build_transitions(creators, approvers):
+    """Mirror the SO Sales Order Updated transition set.
+
+    Sammish 2026-05-13: multi-role variant. `creators` and `approvers`
+    are TUPLES of role names. Every transition whose allowed role is
+    "creator" or "approver" is emitted ONCE PER ROLE in the respective
+    list (Frappe's `allowed` column is single-Link, so multi-role
+    semantics = multiple rows). Fixed-role transitions ("All") emit
+    once unchanged.
 
     Returns list of tuples:
       (state, action, next_state, allowed_role, allow_self_approval, condition)
     """
-    return [
+    # Normalise scalars to tuples (back-compat with the old call style).
+    if isinstance(creators, str):
+        creators = (creators,)
+    if isinstance(approvers, str):
+        approvers = (approvers,)
+
+    CANCEL_COND = "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"
+
+    # Each entry: (state, action, next_state, role_key_or_literal, self_approval, condition).
+    # role_key_or_literal is either:
+    #   - the literal string "creator" / "approver"  -> expanded per role list
+    #   - a literal role name like "All"             -> used as-is
+    template = [
         # Standard submit
-        ("Draft",                  "Submit",                "Submitted",              "All",     1, ""),
+        ("Draft",                  "Submit",                "Submitted",              "All",      1, ""),
 
         # Once submitted, fast-forward to Approved (no approval gate at this point —
         # the gate kicks in only when probability >= 75 and user requests change).
-        ("Submitted",              "Approve",               "Approved",               "All",     1, ""),
+        ("Submitted",              "Approve",               "Approved",               "All",      1, ""),
 
         # Document Approval: user ticks one of the checkboxes + saves
-        ("Approved",               "Request for Update",    "Requested for update",   creator,   1, "doc.custom_request_for_update"),
-        ("Approved",               "Request Cancellation",  "Cancellation Requested", creator,   1, "doc.custom_cancellation_check"),
+        ("Approved",               "Request for Update",    "Requested for update",   "creator",  1, "doc.custom_request_for_update"),
+        ("Approved",               "Request Cancellation",  "Cancellation Requested", "creator",  1, "doc.custom_cancellation_check"),
 
         # Rahul 2026-05-11/12: direct Cancel for low-prob / std-margin
         # quotes only. Quotes at >=75% MUST go through the 2-step
-        # Request Cancellation -> Approve Cancellation flow (audit
-        # requirement). The condition reads the Avientek `probabilities`
-        # Data field ("100%" string) because the standard `probability`
-        # numeric field isn't reliably synced on this site. We take the
-        # max of both so an unset Data value still falls back to the
-        # numeric field if that was the canonical source.
-        # Note: Frappe's workflow safe_eval (frappe/utils/safe_exec.py
-        # WHITELISTED_SAFE_EVAL_GLOBALS) only exposes int/float/round.
-        # No flt/cint/max/min, no string methods on attributes. So we
-        # check the numeric `probability` against 75 and the Data
+        # Request Cancellation -> Approve Cancellation flow.
+        # Frappe's workflow safe_eval (frappe/utils/safe_exec.py
+        # WHITELISTED_SAFE_EVAL_GLOBALS) only exposes int/float/round —
+        # no flt/cint/max/min, no string methods on attributes. So
+        # check numeric `probability` against 75 and the Data
         # `probabilities` against a literal tuple of the high-prob
-        # values that the Avientek picker emits. Cancel is allowed only
-        # when BOTH fields are low.
-        ("Approved",               "Cancel",                "Cancelled",              "All",     1, "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"),
-        ("Submitted",              "Cancel",                "Cancelled",              "All",     1, "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"),
+        # values. Cancel is allowed only when BOTH fields are low.
+        ("Approved",               "Cancel",                "Cancelled",              "All",      1, CANCEL_COND),
+        ("Submitted",              "Cancel",                "Cancelled",              "All",      1, CANCEL_COND),
 
         # Approver decides on the update request
-        ("Requested for update",   "Approve",               "Approved for Update",    approver,  0, ""),
-        ("Requested for update",   "Reject Update",         "Approved",               approver,  0, ""),
+        ("Requested for update",   "Approve",               "Approved for Update",    "approver", 0, ""),
+        ("Requested for update",   "Reject Update",         "Approved",               "approver", 0, ""),
         # User can withdraw the request by un-ticking the checkbox + saving
-        ("Requested for update",   "Cancel Request",        "Approved",               creator,   1, "not doc.custom_request_for_update"),
+        ("Requested for update",   "Cancel Request",        "Approved",               "creator",  1, "not doc.custom_request_for_update"),
 
-        # User edits in Approved for Update → sends back for approval
-        ("Approved for Update",    "Send for Approval",     "Pending For Approval",   creator,   1, ""),
+        # User edits in Approved for Update -> sends back for approval
+        ("Approved for Update",    "Send for Approval",     "Pending For Approval",   "creator",  1, ""),
 
         # Approver decides on the revised quote
-        ("Pending For Approval",   "Approve",               "Approved",               approver,  0, ""),
-        ("Pending For Approval",   "Reject",                "Sent for Revision",      approver,  0, ""),
+        ("Pending For Approval",   "Approve",               "Approved",               "approver", 0, ""),
+        ("Pending For Approval",   "Reject",                "Sent for Revision",      "approver", 0, ""),
 
-        # Sent for Revision — user can save freely (handled by validator state-allow)
+        # Sent for Revision -- user can save freely (handled by validator state-allow)
         # then re-submit for approval
-        ("Sent for Revision",      "Send for Approval",     "Pending For Approval",   creator,   1, ""),
+        ("Sent for Revision",      "Send for Approval",     "Pending For Approval",   "creator",  1, ""),
 
         # Cancellation flow
-        ("Cancellation Requested", "Approve Cancellation",  "Cancelled",              approver,  0, ""),
-        ("Cancellation Requested", "Reject Cancellation",   "Approved",               approver,  0, ""),
-        ("Cancellation Requested", "Cancel Request",        "Approved",               creator,   1, "not doc.custom_cancellation_check"),
+        ("Cancellation Requested", "Approve Cancellation",  "Cancelled",              "approver", 0, ""),
+        ("Cancellation Requested", "Reject Cancellation",   "Approved",               "approver", 0, ""),
+        ("Cancellation Requested", "Cancel Request",        "Approved",               "creator",  1, "not doc.custom_cancellation_check"),
 
         # Sridhar 2026-05-10: bridge transitions for legacy V2 states.
-        # Quotes that were mid-V2-flow at the V3 deploy carry these
-        # workflow_state values. Approver can flush them to V3
-        # 'Approved' (= equivalent of L2-approved in V2). Reject routes
-        # to 'Draft' (NOT Cancelled — Frappe forbids doc_status 0→2
-        # transitions; the legacy states are doc_status=0). Sales rep
-        # can then revise and re-submit. allow_self_approval=0 keeps
-        # the audit rule.
-        ("Pending Level 1 Approval", "Approve",              "Approved",               approver,  0, ""),
-        ("Pending Level 1 Approval", "Reject",               "Draft",                  approver,  0, ""),
-        ("Pending Level 2 Approval", "Approve",              "Approved",               approver,  0, ""),
-        ("Pending Level 2 Approval", "Reject",               "Draft",                  approver,  0, ""),
+        ("Pending Level 1 Approval", "Approve",             "Approved",               "approver", 0, ""),
+        ("Pending Level 1 Approval", "Reject",              "Draft",                  "approver", 0, ""),
+        ("Pending Level 2 Approval", "Approve",             "Approved",               "approver", 0, ""),
+        ("Pending Level 2 Approval", "Reject",              "Draft",                  "approver", 0, ""),
     ]
+
+    expanded = []
+    seen = set()  # dedupe within the resulting list — if both lists share a role
+    for state, action, next_state, role_key, self_app, cond in template:
+        if role_key == "creator":
+            roles = creators
+        elif role_key == "approver":
+            roles = approvers
+        else:
+            roles = (role_key,)
+        for role in roles:
+            key = (state, action, next_state, role)
+            if key in seen:
+                continue
+            seen.add(key)
+            expanded.append((state, action, next_state, role, self_app, cond))
+    return expanded
 
 
 def _deactivate_other_workflows():
@@ -149,15 +172,17 @@ def execute():
 
 def seed():
     cfg = _resolved_roles()
-    creator = cfg["creator_role"]
-    approver = cfg["approver_role"]
+    creators = cfg.get("creator_roles") or (cfg["creator_role"],)
+    approvers = cfg.get("approver_roles") or (cfg["approver_role"],)
 
-    # 0. Ensure both required roles exist before we wire transitions.
-    missing_roles = [r for r in (creator, approver) if not frappe.db.exists("Role", r)]
+    # 0. Ensure required roles exist before we wire transitions.
+    all_roles = set(creators) | set(approvers)
+    missing_roles = sorted(r for r in all_roles if not frappe.db.exists("Role", r))
     if missing_roles:
         print(f"[seed_quotation_approval_v3_workflow] WARN missing roles "
               f"on this site: {missing_roles}. Workflow will be created "
-              f"but transitions referencing them will be skipped.")
+              f"but transitions referencing them will fall back to "
+              f"System Manager or be skipped.")
 
     # 1. Workflow State records
     for state, _ds, color in STATES:
@@ -168,7 +193,7 @@ def seed():
             ws.insert(ignore_permissions=True)
 
     # 2. Workflow Action Master records (Frappe validates Link)
-    transitions = _build_transitions(creator, approver)
+    transitions = _build_transitions(creators, approvers)
     for _f, action, _n, _r, _s, _c in transitions:
         if not frappe.db.exists("Workflow Action Master", action):
             wa = frappe.new_doc("Workflow Action Master")
@@ -244,5 +269,5 @@ def seed():
         f"[seed_quotation_approval_v3_workflow] "
         f"workflow={WORKFLOW_NAME} states={len(STATES)} "
         f"transitions={len(wf.transitions)} skipped={skipped} active=1 "
-        f"approver={approver!r} creator={creator!r}"
+        f"approvers={list(approvers)!r} creators={list(creators)!r}"
     )
