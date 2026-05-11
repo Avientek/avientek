@@ -1545,95 +1545,108 @@ frappe.ui.form.on('Payment Request Form', {
         function render_preview($popup, data, ref_name, ref_doctype) {
             const $body = $popup.find(".inv-att-body");
             const doc_label = ref_doctype || "Document";
-            // Sridhar 2026-05-09: View popup is now a CLICKABLE LIST
-            // (no inline images / iframes). Each entry: icon + filename
-            // + size hint + Open button. Open button opens the file in
-            // a new tab (PDF / image / Excel / etc. — browser handles
-            // it). The first list entry is the source doc's print
-            // view; the rest are attached files + linked PO + costing
-            // sheet.
-            function _icon_for(name) {
-                const n = (name || "").toLowerCase();
-                if (n.endsWith(".pdf")) return "📕";
-                if (/\.(jpe?g|png|gif|webp)$/i.test(n)) return "🖼";
-                if (/\.(xlsx?|csv)$/i.test(n)) return "📊";
-                if (/\.(docx?)$/i.test(n)) return "📝";
-                if (/\.(zip|rar|7z)$/i.test(n)) return "🗜";
-                return "📄";
-            }
-            function _row(icon, title, subtitle, href, target) {
-                target = target || "_blank";
-                const ROW_CSS = "display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e2e6ea;border-radius:6px;margin-bottom:6px;background:#fff;";
-                const ICON_CSS = "font-size:22px;width:32px;text-align:center;";
-                const META_CSS = "flex:1;min-width:0;";
-                const TITLE_CSS = "font-weight:500;color:#1f2a38;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-                const SUB_CSS = "font-size:11px;color:#6c757d;";
-                return `<div style="${ROW_CSS}">
-                    <span style="${ICON_CSS}">${icon}</span>
-                    <div style="${META_CSS}">
-                        <div style="${TITLE_CSS}">${frappe.utils.escape_html(title)}</div>
-                        ${subtitle ? `<div style="${SUB_CSS}">${frappe.utils.escape_html(subtitle)}</div>` : ""}
-                    </div>
-                    <a href="${href}" target="${target}" class="btn btn-xs btn-default" style="white-space:nowrap;">Open</a>
-                </div>`;
-            }
-            const items = [];
-            // 1. Source doc print view + form view
-            const print_url = "/printview?doctype=" + encodeURIComponent(ref_doctype)
-                + "&name=" + encodeURIComponent(ref_name)
-                + "&trigger_print=0&no_letterhead=0";
-            const form_url = "/app/" + encodeURIComponent(frappe.router.slug(ref_doctype))
-                + "/" + encodeURIComponent(ref_name);
-            items.push(_row("🖨", `${doc_label} — Print Format`, ref_name, print_url));
-            items.push(_row("🔗", `${doc_label} — Open Form`, ref_name, form_url));
-
-            // 2. File attachments on the source doc
-            const file_list = data.file_list || [];
-            for (const f of file_list) {
-                items.push(_row(
-                    _icon_for(f.file_name),
-                    f.file_name || "(untitled)",
-                    "Attachment",
-                    f.file_url || "#"
-                ));
-            }
-
-            // 3. Linked Purchase Order
-            const po_name = data.po_name || "";
-            if (po_name) {
-                const po_print = "/printview?doctype=Purchase%20Order&name="
-                    + encodeURIComponent(po_name) + "&trigger_print=0&no_letterhead=0";
-                const po_form = "/app/purchase-order/" + encodeURIComponent(po_name);
-                items.push(_row("🛒", `Linked PO — Print`, po_name, po_print));
-                items.push(_row("🛒", `Linked PO — Open Form`, po_name, po_form));
-            }
-
-            // 4. Costing Sheet attached on PRF row
-            const costing_url = data.costing_url || "";
-            if (costing_url) {
-                const fname = costing_url.split("/").pop() || "Costing Sheet";
-                items.push(_row("📊", "Costing Sheet", fname, costing_url));
-            }
-
+            // Sridhar 2026-05-11: restored inline previews (PDFs as
+            // iframes, images inline, print format / PO / costing
+            // rendered as images). Sridhar 2026-04-27 #5 wanted text
+            // copyable — kept by adding a small "Open in new tab" link
+            // beside each section header so the rendered HTML/PDF can
+            // be opened standalone for selection.
             let html = "";
-            // Show a small banner if the row's stated doctype didn't
-            // match where the document actually lives — helps users
-            // (and us) spot legacy mis-stored rows.
+
+            // Banner — doctype mismatch (today's fix).
             if (data.stated_doctype && data.resolved_doctype && data.stated_doctype !== data.resolved_doctype) {
                 html += `<div style="padding:6px 10px;margin-bottom:8px;background:#fff3cd;border:1px solid #ffeeba;border-radius:4px;color:#856404;font-size:12px;">`
                     + `Row says <b>${frappe.utils.escape_html(data.stated_doctype)}</b> but `
                     + `<b>${frappe.utils.escape_html(ref_name)}</b> is a <b>${frappe.utils.escape_html(data.resolved_doctype)}</b>. `
-                    + `Links below point at the correct document.`
+                    + `Previews below are from the correct document.`
                     + `</div>`;
             } else if (data.resolved_exists === false) {
                 html += `<div style="padding:6px 10px;margin-bottom:8px;background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;color:#721c24;font-size:12px;">`
-                    + `Document <b>${frappe.utils.escape_html(ref_name)}</b> not found. Links may 404.`
+                    + `Document <b>${frappe.utils.escape_html(ref_name)}</b> not found.`
                     + `</div>`;
             }
-            html += `<div class="inv-att-section-title">Documents (${items.length})</div>`;
-            if (items.length) {
-                html += '<div class="inv-att-list">' + items.join("") + '</div>';
-            } else {
+
+            function _section_header(title, open_url) {
+                const open_link = open_url
+                    ? ` <a href="${open_url}" target="_blank" style="font-size:11px;font-weight:normal;margin-left:8px;">[open in new tab]</a>`
+                    : "";
+                return `<div class="inv-att-section-title" style="margin-top:14px;">${frappe.utils.escape_html(title)}${open_link}</div>`;
+            }
+
+            // 1. File attachments — PDFs as iframes, images inline, others as badge.
+            const att_images = data.attachment_images || [];
+            const file_list = data.file_list || [];
+            if (att_images.length) {
+                html += _section_header("Attached Documents", "");
+                for (const img of att_images) {
+                    html += `<img src="${img}" loading="lazy" style="max-width:100%;border:1px solid #eee;border-radius:4px;margin-bottom:8px;" />`;
+                }
+            } else if (file_list.length) {
+                html += _section_header("Attached Documents", "");
+                for (const f of file_list) {
+                    const name = (f.file_name || "").toLowerCase();
+                    const url = f.file_url || "";
+                    if (name.endsWith(".pdf")) {
+                        html += `<div style="margin-bottom:6px;font-size:11px;"><b>${frappe.utils.escape_html(f.file_name)}</b> <a href="${url}" target="_blank">[open in new tab]</a></div>`;
+                        html += `<iframe src="${url}#toolbar=0&navpanes=0" style="width:100%;height:760px;border:1px solid #eee;border-radius:4px;margin-bottom:10px;" loading="lazy"></iframe>`;
+                    } else if (/\.(jpe?g|png|gif|webp)$/i.test(name)) {
+                        html += `<div style="margin-bottom:6px;font-size:11px;"><b>${frappe.utils.escape_html(f.file_name)}</b></div>`;
+                        html += `<img src="${url}" loading="lazy" style="max-width:100%;border:1px solid #eee;border-radius:4px;margin-bottom:8px;" />`;
+                    } else {
+                        let icon = "📄";
+                        if (/\.(xlsx?|csv)$/i.test(name)) icon = "📊";
+                        else if (/\.(docx?)$/i.test(name)) icon = "📝";
+                        else if (/\.(zip|rar|7z)$/i.test(name)) icon = "🗜";
+                        html += `<div style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #d6dde5;border-radius:6px;margin-bottom:8px;background:#f8f9fb;">
+                            <span style="font-size:24px;">${icon}</span>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:500;color:#1f2a38;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${frappe.utils.escape_html(f.file_name)}</div>
+                                <div style="font-size:11px;color:#6c757d;">Click to open or download</div>
+                            </div>
+                            <a href="${url}" target="_blank" class="btn btn-xs btn-default">Open</a>
+                        </div>`;
+                    }
+                }
+            }
+
+            // 2. Print format preview (rendered images of source doc).
+            const print_images = data.print_images || [];
+            const print_url = "/printview?doctype=" + encodeURIComponent(ref_doctype)
+                + "&name=" + encodeURIComponent(ref_name)
+                + "&trigger_print=0&no_letterhead=0";
+            if (print_images.length) {
+                html += _section_header(`${doc_label} — Print Preview`, print_url);
+                for (const img of print_images) {
+                    html += `<img src="${img}" loading="lazy" style="max-width:100%;border:1px solid #eee;border-radius:4px;margin-bottom:8px;" />`;
+                }
+            }
+
+            // 3. Linked Purchase Order preview.
+            const po_images = data.po_images || [];
+            const po_name = data.po_name || "";
+            if (po_images.length && po_name) {
+                const po_print = "/printview?doctype=Purchase%20Order&name="
+                    + encodeURIComponent(po_name) + "&trigger_print=0&no_letterhead=0";
+                html += _section_header(`Linked Purchase Order: ${po_name}`, po_print);
+                for (const img of po_images) {
+                    html += `<img src="${img}" loading="lazy" style="max-width:100%;border:1px solid #eee;border-radius:4px;margin-bottom:8px;" />`;
+                }
+            }
+
+            // 4. Costing Sheet from PRF row.
+            const costing_images = data.costing_images || [];
+            const costing_url = data.costing_url || "";
+            if (costing_images.length) {
+                html += _section_header("Costing Sheet", costing_url);
+                for (const img of costing_images) {
+                    html += `<img src="${img}" loading="lazy" style="max-width:100%;border:1px solid #eee;border-radius:4px;margin-bottom:8px;" />`;
+                }
+            } else if (costing_url) {
+                html += _section_header("Costing Sheet", costing_url);
+                html += `<a href="${costing_url}" target="_blank" class="btn btn-sm btn-default">Open Costing Sheet</a>`;
+            }
+
+            if (!att_images.length && !file_list.length && !print_images.length && !po_images.length && !costing_images.length && !costing_url) {
                 html += `<div class="inv-att-no-files">No documents to show for ${frappe.utils.escape_html(doc_label)}</div>`;
             }
             $body.html(html);
