@@ -472,6 +472,11 @@ doc_events = {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
             "avientek.events.utils.normalize_gst_treatment_from_template",
+            # Sammish 2026-05-13: monkey-patch india_compliance's
+            # validate_items so mixed Non-GST + Taxable rows on a
+            # Quotation don't trip the clubbing error. Quotation is
+            # pre-sale; clubbing is enforced at Sales Invoice instead.
+            "avientek.overrides.india_gst_quotation.install_patch",
         ],
         "validate": "avientek.events.quotation.validate_item_tax_template",
         "before_save": [
