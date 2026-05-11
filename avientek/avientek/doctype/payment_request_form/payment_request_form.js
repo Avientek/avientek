@@ -823,11 +823,17 @@ frappe.ui.form.on('Payment Request Form', {
             frm.events.render_payment_history(frm);
         }
 
-        // Reset dirty state after initial load (async fetches may mark form dirty)
+        // Reset dirty state after initial load (async fetches may mark form dirty).
+        // Jithin 2026-05-12: previously also called frm.page.clear_indicator()
+        // which wiped the WORKFLOW STATE badge from the form header (Draft /
+        // Authorised / Approved Level 1 / etc. all disappeared on every open).
+        // clear_indicator() is the wrong tool here — it nukes the page
+        // indicator entirely. Just reset the unsaved flag and let Frappe's
+        // workflow rendering keep the state badge.
         if (!frm.doc.__islocal) {
             setTimeout(() => {
                 frm.doc.__unsaved = 0;
-                frm.page.clear_indicator();
+                if (typeof frm.refresh_header === "function") frm.refresh_header();
             }, 1500);
         }
 
