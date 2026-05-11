@@ -43,6 +43,10 @@ def execute():
 		{"name": "Approved Level 2", "style": "Primary"},
 		{"name": "Released", "style": "Success"},
 		{"name": "Rejected", "style": "Danger"},
+		# Jithin 2026-05-12: new Cancelled state (doc_status=2) so
+		# Finance Controller can cancel a Released / Approved L2 doc
+		# (Frappe forbids doc_status 1->0).
+		{"name": "Cancelled", "style": "Danger"},
 	]
 	for s in required_states:
 		if not frappe.db.exists("Workflow State", s["name"]):
@@ -55,7 +59,9 @@ def execute():
 	for role in ["Sales User", "Purchase User", "Stock User",
 				 "Accounts User", "Accounts Manager",
 				 "Finance Manager", "General Manager", "Director",
-				 "Finance Controller"]:
+				 "Finance Controller",
+				 # Jithin 2026-05-12: Dept Head joins the Authorisation step.
+				 "Dept Head"]:
 		if not frappe.db.exists("Role", role):
 			doc = frappe.new_doc("Role")
 			doc.role_name = role
@@ -64,7 +70,9 @@ def execute():
 	# Ensure required Workflow Action Master records exist via direct SQL
 	# (avoids autoname/validation issues with insert during patch context)
 	for action in ["Authorise", "Approve Level 1", "Approve Level 2",
-				   "Release Payment", "Reject", "Revise"]:
+				   "Release Payment", "Reject", "Revise",
+				   # Jithin 2026-05-12: Finance Controller can Cancel.
+				   "Cancel"]:
 		if not frappe.db.exists("Workflow Action Master", action):
 			frappe.db.sql(
 				"""INSERT INTO `tabWorkflow Action Master`
@@ -92,10 +100,15 @@ def execute():
 	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "Director"})
 	wf.append("states", {"state": "Released", "doc_status": "1", "allow_edit": "Finance Controller"})
 	wf.append("states", {"state": "Rejected", "doc_status": "0", "allow_edit": "Accounts Manager"})
+	# Jithin 2026-05-12: Finance Controller can edit on Approved L1/L2
+	# (constrained at field-level in JS — only issued_bank + payment_mode).
+	wf.append("states", {"state": "Approved Level 1", "doc_status": "0", "allow_edit": "Finance Controller"})
+	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "Finance Controller"})
+	wf.append("states", {"state": "Cancelled", "doc_status": "2", "allow_edit": "Finance Controller"})
 
 	# Transitions
-	# Authorise
-	for role in ["Accounts User", "Accounts Manager"]:
+	# Authorise — Accounts User, Accounts Manager, plus Dept Head (Jithin 2026-05-12)
+	for role in ["Accounts User", "Accounts Manager", "Dept Head"]:
 		wf.append("transitions", {
 			"state": "Draft", "action": "Authorise", "next_state": "Authorised",
 			"allowed": role, "allow_self_approval": 1,
@@ -116,10 +129,16 @@ def execute():
 		"state": "Approved Level 2", "action": "Release Payment", "next_state": "Released",
 		"allowed": "Finance Controller", "allow_self_approval": 1,
 	})
-	# Rejection transitions — only from unsubmitted states (Authorised, Approved Level 1)
-	# Approved Level 2 is already submitted (doc_status=1), so cannot be reverted to Rejected (doc_status=0)
+	# Rejection transitions — only from unsubmitted states (Authorised, Approved Level 1).
+	# Approved Level 2 is already submitted (doc_status=1), so cannot be reverted to Rejected (doc_status=0).
+	# Jithin 2026-05-12: Accounts Manager should NOT be able to Reject *after* Authorisation —
+	# they did the authorise step, the reject decision belongs to the upstream approvers.
+	# (Reject from "Approved Level 1" keeps Accounts Manager.)
 	for from_state in ["Authorised", "Approved Level 1"]:
-		for role in ["Accounts Manager", "Finance Manager", "General Manager", "Director"]:
+		reject_roles = ["Accounts Manager", "Finance Manager", "General Manager", "Director"]
+		if from_state == "Authorised":
+			reject_roles = [r for r in reject_roles if r != "Accounts Manager"]
+		for role in reject_roles:
 			wf.append("transitions", {
 				"state": from_state, "action": "Reject", "next_state": "Rejected",
 				"allowed": role, "allow_self_approval": 1,
@@ -129,6 +148,21 @@ def execute():
 		"state": "Rejected", "action": "Revise", "next_state": "Draft",
 		"allowed": "All", "allow_self_approval": 1,
 	})
+
+	# Cancel — Finance Controller can cancel from any active state.
+	# doc_status 0 -> 0 routes to Rejected. doc_status 1 -> 2 routes to
+	# new Cancelled state (Frappe forbids 1 -> 0 transitions, and 0 -> 2
+	# is also blocked, so each branch picks the legal target).
+	for from_state in ["Authorised", "Approved Level 1"]:  # doc_status=0
+		wf.append("transitions", {
+			"state": from_state, "action": "Cancel", "next_state": "Rejected",
+			"allowed": "Finance Controller", "allow_self_approval": 1,
+		})
+	for from_state in ["Approved Level 2", "Released"]:  # doc_status=1
+		wf.append("transitions", {
+			"state": from_state, "action": "Cancel", "next_state": "Cancelled",
+			"allowed": "Finance Controller", "allow_self_approval": 1,
+		})
 
 	wf.insert(ignore_permissions=True)
 	frappe.db.commit()

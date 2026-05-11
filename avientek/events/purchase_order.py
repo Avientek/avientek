@@ -407,12 +407,24 @@ def create_notification(ref_doctype,ref_name,item):
 @frappe.whitelist()
 def create_payment_request(source_name, target_doc=None, args=None):
     def set_single_reference(source, target):
-        # Attachment PDF used to be saved here via save_file with
-        # dt=target.doctype, dn=target.name — but `target.name` is blank
-        # during the mapping postprocess (new doc not saved yet), so
-        # Frappe raised "Attached To Name must be a string or an
-        # integer" and the Create action failed. The attachment_html it
-        # assembled was never used on the target either. Removed.
+        # Jithin 2026-05-12: PO -> PRF mapping wasn't setting party_type
+        # or party — get_mapped_doc only copies fields with matching
+        # names, and PO has `supplier` (not `party`). So the new PRF
+        # came up with blank Party Type / Party. Fill them explicitly.
+        target.party_type = "Supplier"
+        target.party = source.supplier
+        if hasattr(target, "party_name"):
+            target.party_name = source.supplier_name or source.supplier
+        # Pay against PO (not Advance Pay — Advance Pay has its own
+        # "Get Open Purchase Orders" picker in PRF).
+        if not target.payment_type:
+            target.payment_type = "Pay"
+        # Default currency / exchange_rate from PO if PRF doesn't already
+        # carry them via field-name match.
+        if not target.currency:
+            target.currency = source.currency
+        if not target.company:
+            target.company = source.company
 
         # Get related Sales Order from first item
         sales_order = source.items[0].sales_order if source.items else ""

@@ -592,6 +592,91 @@ frappe.ui.form.on('Payment Request Form', {
         }
     },
 
+    /**
+     * Jithin 2026-05-12: Finance Controller-only field unlock on
+     * Approved L1 / L2. Workflow allow_edit is widened (FC added on
+     * both states) so FC can Save the doc; this JS narrows the actual
+     * editable surface to just `issued_bank` and `payment_mode` so FC
+     * cannot stray into other fields. Higher-privilege users (FM/GM/
+     * Director/System Manager) are unaffected — their workflow rights
+     * give them full edit anyway.
+     */
+    apply_fc_field_unlock: function(frm) {
+        try {
+            const ws = frm.doc.workflow_state || "";
+            if (ws !== "Approved Level 1" && ws !== "Approved Level 2") return;
+
+            const roles = (frappe.user_roles || []);
+            const has_fc = roles.indexOf("Finance Controller") >= 0;
+            if (!has_fc) return;
+
+            // If the user ALSO has a workflow-state owner role for this
+            // state, give them full edit (don't lock them down).
+            const owner_roles = {
+                "Approved Level 1": ["Finance Manager"],
+                "Approved Level 2": ["General Manager", "Director"],
+            };
+            const has_other = (owner_roles[ws] || []).some(r => roles.indexOf(r) >= 0);
+            if (has_other) return;
+            // System Manager always gets full edit.
+            if (roles.indexOf("System Manager") >= 0) return;
+
+            const EDITABLE = ["issued_bank", "payment_mode"];
+
+            // Step 1: lock the whole form (parent-level fields). Walk
+            // df list and set read_only=1 on everything not in the
+            // editable allow-list.
+            const dfs = (frm.meta && frm.meta.fields) || [];
+            dfs.forEach(function (df) {
+                if (!df || !df.fieldname) return;
+                if (df.fieldtype === "Section Break" || df.fieldtype === "Column Break" || df.fieldtype === "Tab Break") return;
+                if (df.fieldtype === "Table" || df.fieldtype === "Table MultiSelect") {
+                    // Disable child grid editing — Frappe has no clean
+                    // read_only flip for a Table df; rely on grid.cannot_add_rows + edit lock via DocPerm.
+                    try {
+                        const grid = frm.fields_dict[df.fieldname] && frm.fields_dict[df.fieldname].grid;
+                        if (grid) {
+                            grid.cannot_add_rows = true;
+                            grid.cannot_delete_rows = true;
+                            if (typeof grid.refresh === "function") grid.refresh();
+                        }
+                    } catch (e) {}
+                    return;
+                }
+                if (EDITABLE.indexOf(df.fieldname) >= 0) {
+                    frm.set_df_property(df.fieldname, "read_only", 0);
+                } else {
+                    frm.set_df_property(df.fieldname, "read_only", 1);
+                }
+            });
+
+            // Step 2: explicit unlock for the 2 fields (in case some
+            // earlier handler locked them after meta load).
+            EDITABLE.forEach(function (fn) {
+                frm.set_df_property(fn, "read_only", 0);
+            });
+
+            // Step 3: small banner so FC knows what they may touch.
+            if (!frm._fc_edit_banner_el) {
+                let mount = null;
+                try { mount = frm.dashboard && frm.dashboard.wrapper; } catch (e) {}
+                if (!mount || !mount.length) {
+                    try { mount = frm.layout && frm.layout.wrapper; } catch (e) {}
+                }
+                if (mount && mount.length) {
+                    const el = document.createElement("div");
+                    el.className = "prf-fc-edit-banner";
+                    el.style.cssText = "margin:8px 0; padding:10px 14px; background:#fff3cd; border-left:4px solid #d39e00; border-radius:4px; font-size:12px;";
+                    el.innerHTML = __("As Finance Controller, you can update <b>Issued Bank</b> and <b>Payment Mode</b> on this approved PRF. All other fields are locked.");
+                    $(mount).prepend(el);
+                    frm._fc_edit_banner_el = el;
+                }
+            }
+        } catch (e) {
+            console.warn("apply_fc_field_unlock:", e);
+        }
+    },
+
 	onload: function(frm) {
         // Fetch supplier details only if party exists and details are missing
         // (fetch_supplier_details has internal checks to avoid overwriting existing data)
@@ -696,6 +781,12 @@ frappe.ui.form.on('Payment Request Form', {
         // from the creator. Show an explicit banner so the creator
         // doesn't think the workflow is broken.
         frm.events.update_self_approval_hint(frm);
+
+        // Jithin 2026-05-12: Finance Controller can edit `issued_bank`
+        // and `payment_mode` on Approved L1 / L2 — all other fields
+        // stay locked. Run after the workflow state-lock so we win the
+        // race with Frappe's default read-only-all.
+        frm.events.apply_fc_field_unlock(frm);
 
         // Setup invoice drill-down links and View buttons
         frm.events.setup_invoice_drilldown(frm);
