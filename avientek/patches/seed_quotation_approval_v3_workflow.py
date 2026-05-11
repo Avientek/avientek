@@ -80,8 +80,10 @@ def _build_transitions(creator, approver):
         # numeric field isn't reliably synced on this site. We take the
         # max of both so an unset Data value still falls back to the
         # numeric field if that was the canonical source.
-        ("Approved",               "Cancel",                "Cancelled",              "All",     1, "max(flt(doc.probability or 0), flt((doc.probabilities or '0').replace('%',''))) < 75"),
-        ("Submitted",              "Cancel",                "Cancelled",              "All",     1, "max(flt(doc.probability or 0), flt((doc.probabilities or '0').replace('%',''))) < 75"),
+        # Note: avoid `max()` here — Frappe's workflow safe_eval doesn't
+        # expose it (NameError). Equivalent: max(a,b)<75  ==  a<75 and b<75.
+        ("Approved",               "Cancel",                "Cancelled",              "All",     1, "flt(doc.probability or 0) < 75 and flt((doc.probabilities or '0').replace('%','')) < 75"),
+        ("Submitted",              "Cancel",                "Cancelled",              "All",     1, "flt(doc.probability or 0) < 75 and flt((doc.probabilities or '0').replace('%','')) < 75"),
 
         # Approver decides on the update request
         ("Requested for update",   "Approve",               "Approved for Update",    approver,  0, ""),
