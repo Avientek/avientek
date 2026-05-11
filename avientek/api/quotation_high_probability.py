@@ -161,7 +161,7 @@ def before_save(doc, method=None):
     if _user_has_whitelist_role() or frappe.flags.get(_CONTEXT_BYPASS_FLAG):
         return
 
-    db_prob = _flt(frappe.db.get_value("Quotation", doc.name, "probability"))
+    db_prob = _effective_probability(doc.name)
     if db_prob < HIGH_PROB_THRESHOLD:
         return  # below threshold — no lock
 
@@ -189,6 +189,21 @@ def before_save(doc, method=None):
     )
 
 
+def _effective_probability(doc_name):
+    """Return the higher of `probability` (numeric) and `probabilities`
+    (Data field '100%'). Rahul 2026-05-12: QN-LLC-26-00399 was 100%
+    visible but `probability=0` in DB — the original guard read only
+    the numeric field and let me.sales3 cancel an Approved + 100% quote
+    without any approval. Defense-in-depth: read both, take the max.
+    """
+    row = frappe.db.get_value(
+        "Quotation", doc_name, ["probability", "probabilities"], as_dict=True
+    ) or {}
+    num = _flt(row.get("probability"))
+    data = _flt(str(row.get("probabilities") or "0").rstrip("%").strip())
+    return max(num, data)
+
+
 def before_cancel(doc, method=None):
     """Block direct Cancel on a high-probability Quotation.
 
@@ -199,7 +214,7 @@ def before_cancel(doc, method=None):
     """
     if _user_has_whitelist_role() or frappe.flags.get(_CONTEXT_BYPASS_FLAG):
         return
-    db_prob = _flt(frappe.db.get_value("Quotation", doc.name, "probability"))
+    db_prob = _effective_probability(doc.name)
     if db_prob >= HIGH_PROB_THRESHOLD:
         frappe.throw(
             _("Cancel is blocked: this Quotation has probability "
@@ -234,7 +249,7 @@ def on_update_after_submit(doc, method=None):
     """
     if _user_has_whitelist_role() or frappe.flags.get(_CONTEXT_BYPASS_FLAG):
         return
-    db_prob = _flt(frappe.db.get_value("Quotation", doc.name, "probability"))
+    db_prob = _effective_probability(doc.name)
 
     if db_prob < HIGH_PROB_THRESHOLD:
         # Inline probability edit is the only allow_on_submit path.
