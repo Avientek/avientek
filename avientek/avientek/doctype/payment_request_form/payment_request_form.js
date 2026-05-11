@@ -1326,12 +1326,28 @@ frappe.ui.form.on('Payment Request Form', {
                     $ref_cell.on("click.drilldown", function(e) {
                         e.stopPropagation();
                         e.preventDefault();
-                        let actual_dt = frm.events._get_actual_doctype(row.doc.reference_doctype);
-                        if (actual_dt && link_target) {
-                            frappe.set_route("Form", actual_dt, link_target);
-                        } else {
-                            frappe.msgprint(__("Cannot navigate - reference doctype or name missing"));
+                        if (!link_target) {
+                            frappe.msgprint(__("Cannot navigate - reference name missing"));
+                            return;
                         }
+                        // Sridhar 2026-05-11: legacy rows can carry a
+                        // wrong reference_doctype (e.g. "Purchase Order"
+                        // alongside a Sales Order id). Resolve via
+                        // server before navigating so we never 404.
+                        frappe.xcall(
+                            "avientek.avientek.doctype.payment_request_form.payment_request_form.resolve_reference_doctype",
+                            { reference_doctype: row.doc.reference_doctype, reference_name: link_target }
+                        ).then(function(res) {
+                            const dt = (res && res.actual_doctype) || frm.events._get_actual_doctype(row.doc.reference_doctype);
+                            if (res && res.exists) {
+                                frappe.set_route("Form", dt, link_target);
+                            } else {
+                                frappe.msgprint(__("Document {0} not found in {1}.", [link_target, dt || row.doc.reference_doctype]));
+                            }
+                        }).catch(function() {
+                            const dt = frm.events._get_actual_doctype(row.doc.reference_doctype);
+                            if (dt) frappe.set_route("Form", dt, link_target);
+                        });
                     });
                 }
 
@@ -1502,7 +1518,21 @@ frappe.ui.form.on('Payment Request Form', {
             ).then((data) => {
                 if (!$popup) return;
                 cache[key] = data || {};
-                render_preview($popup, cache[key], ref_name, ref_doctype);
+                // Sridhar 2026-05-11: server returns resolved_doctype
+                // when the row's stated reference_doctype doesn't match
+                // where the document actually lives. Patch header URLs
+                // before rendering so Print View / Open Form don't 404.
+                const resolved_dt = (data && data.resolved_doctype) || ref_doctype;
+                if (resolved_dt && resolved_dt !== ref_doctype) {
+                    const new_print = "/printview?doctype=" + encodeURIComponent(resolved_dt)
+                        + "&name=" + encodeURIComponent(ref_name)
+                        + "&trigger_print=0&no_letterhead=0";
+                    const new_form = "/app/" + encodeURIComponent(frappe.router.slug(resolved_dt))
+                        + "/" + encodeURIComponent(ref_name);
+                    $popup.find(".inv-att-btns a.inv-att-btn").eq(0).attr("href", new_print);
+                    $popup.find(".inv-att-btns a.inv-att-btn").eq(1).attr("href", new_form);
+                }
+                render_preview($popup, cache[key], ref_name, resolved_dt);
             }).catch(() => {
                 if ($popup) {
                     $popup.find(".inv-att-body").html(
@@ -1585,7 +1615,22 @@ frappe.ui.form.on('Payment Request Form', {
                 items.push(_row("📊", "Costing Sheet", fname, costing_url));
             }
 
-            let html = `<div class="inv-att-section-title">Documents (${items.length})</div>`;
+            let html = "";
+            // Show a small banner if the row's stated doctype didn't
+            // match where the document actually lives — helps users
+            // (and us) spot legacy mis-stored rows.
+            if (data.stated_doctype && data.resolved_doctype && data.stated_doctype !== data.resolved_doctype) {
+                html += `<div style="padding:6px 10px;margin-bottom:8px;background:#fff3cd;border:1px solid #ffeeba;border-radius:4px;color:#856404;font-size:12px;">`
+                    + `Row says <b>${frappe.utils.escape_html(data.stated_doctype)}</b> but `
+                    + `<b>${frappe.utils.escape_html(ref_name)}</b> is a <b>${frappe.utils.escape_html(data.resolved_doctype)}</b>. `
+                    + `Links below point at the correct document.`
+                    + `</div>`;
+            } else if (data.resolved_exists === false) {
+                html += `<div style="padding:6px 10px;margin-bottom:8px;background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;color:#721c24;font-size:12px;">`
+                    + `Document <b>${frappe.utils.escape_html(ref_name)}</b> not found. Links may 404.`
+                    + `</div>`;
+            }
+            html += `<div class="inv-att-section-title">Documents (${items.length})</div>`;
             if (items.length) {
                 html += '<div class="inv-att-list">' + items.join("") + '</div>';
             } else {

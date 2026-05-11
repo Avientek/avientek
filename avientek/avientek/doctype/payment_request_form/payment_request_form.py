@@ -3086,6 +3086,63 @@ REFERENCE_DOCTYPE_MAP = {
     "Purchase Order": "Purchase Order",
 }
 
+# Sridhar 2026-05-11: legacy PRF rows can carry a reference_doctype that
+# doesn't match the doctype the document_reference name actually belongs
+# to (e.g. row says "Purchase Order" but document_reference is a Sales
+# Order ID). Without a fallback, View / Open Form / Print View build a
+# 404 URL. We probe these doctypes in order whenever the stated doctype
+# doesn't contain the name.
+_DOCTYPE_PROBE_ORDER = (
+    "Purchase Invoice",
+    "Sales Invoice",
+    "Purchase Order",
+    "Sales Order",
+    "Delivery Note",
+    "Journal Entry",
+    "Payment Entry",
+    "Employee Advance",
+    "Expense Claim",
+    "Quotation",
+)
+
+
+def _resolve_actual_doctype(reference_doctype, reference_name):
+    """Return the doctype where `reference_name` actually exists.
+
+    Tries the mapped doctype first; on miss, scans common transactional
+    doctypes. Returns the original mapped doctype if nothing matches so
+    callers degrade gracefully.
+    """
+    if not reference_name:
+        return REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
+    mapped = REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
+    if mapped and frappe.db.exists(mapped, reference_name):
+        return mapped
+    for dt in _DOCTYPE_PROBE_ORDER:
+        if dt == mapped:
+            continue
+        try:
+            if frappe.db.exists(dt, reference_name):
+                return dt
+        except Exception:
+            continue
+    return mapped
+
+
+@frappe.whitelist()
+def resolve_reference_doctype(reference_doctype, reference_name):
+    """Public resolver for JS callers (drilldown click / View button).
+
+    Returns {"actual_doctype": "...", "exists": bool, "stated_doctype": "..."}.
+    """
+    actual = _resolve_actual_doctype(reference_doctype, reference_name)
+    exists = bool(reference_name and actual and frappe.db.exists(actual, reference_name))
+    return {
+        "stated_doctype": reference_doctype or "",
+        "actual_doctype": actual or "",
+        "exists": exists,
+    }
+
 
 @frappe.whitelist()
 def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, parent_docname=None, row_idx=None):
@@ -3095,9 +3152,10 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
     when the parent PRF docname and row index are provided.
     """
     if not reference_doctype or not reference_name:
-        return {"attachment_images": [], "file_list": [], "print_images": [], "po_images": [], "po_name": "", "costing_images": [], "costing_url": ""}
+        return {"attachment_images": [], "file_list": [], "print_images": [], "po_images": [], "po_name": "", "costing_images": [], "costing_url": "", "resolved_doctype": "", "resolved_exists": False}
 
-    actual_doctype = REFERENCE_DOCTYPE_MAP.get(reference_doctype, reference_doctype)
+    actual_doctype = _resolve_actual_doctype(reference_doctype, reference_name)
+    resolved_exists = bool(actual_doctype and frappe.db.exists(actual_doctype, reference_name))
     max_pages = int(max_pages) if max_pages else 3
 
     # 1) Get all file attachments
@@ -3187,6 +3245,9 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         "po_name": po_name,
         "costing_images": costing_images,
         "costing_url": costing_url,
+        "resolved_doctype": actual_doctype or "",
+        "resolved_exists": resolved_exists,
+        "stated_doctype": reference_doctype or "",
     }
 
 
