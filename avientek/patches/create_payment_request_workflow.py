@@ -94,7 +94,13 @@ def execute():
 	wf.append("states", {"state": "Draft", "doc_status": "0", "allow_edit": "Sales User"})
 	wf.append("states", {"state": "Draft", "doc_status": "0", "allow_edit": "Purchase User"})
 	wf.append("states", {"state": "Draft", "doc_status": "0", "allow_edit": "Stock User"})
-	wf.append("states", {"state": "Authorised", "doc_status": "0", "allow_edit": "Accounts Manager"})
+	# Jithin 2026-05-13: After Authorise the doc must be FROZEN for the
+	# Accounts Manager (the actor who authorised). Only the next-step
+	# approver (Finance Manager) plus System Manager may edit fields on
+	# the Authorised state — closes the audit gap where the same user
+	# could keep saving changes after their own Authorise click.
+	wf.append("states", {"state": "Authorised", "doc_status": "0", "allow_edit": "Finance Manager"})
+	wf.append("states", {"state": "Authorised", "doc_status": "0", "allow_edit": "System Manager"})
 	wf.append("states", {"state": "Approved Level 1", "doc_status": "0", "allow_edit": "Finance Manager"})
 	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "General Manager"})
 	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "Director"})

@@ -841,16 +841,27 @@ frappe.ui.form.on('Payment Request Form', {
         // submitted payment type — Internal Transfer + Advance Pay
         // were missing the button. The backend already handles the
         // case of zero attachments (just renders the voucher PDF).
-        if (
-            !frm.doc.__islocal
-            && ["Pay", "Advance Pay", "Internal Transfer"].includes(frm.doc.payment_type)
-        ) {
+        //
+        // Jithin 2026-05-13: button was "appearing and vanishing" on
+        // some loads — happens when refresh fires multiple times in
+        // quick succession and the de-dup logic in add_custom_button
+        // briefly hides it. Wrap in a function we can call from
+        // refresh AND from payment_type change so it always re-renders
+        // as the PRIMARY action button (so it can't get lost in a
+        // dropdown).
+        const _ensure_combined_pdf_button = function () {
+            if (
+                frm.doc.__islocal
+                || !["Pay", "Advance Pay", "Internal Transfer"].includes(frm.doc.payment_type)
+            ) {
+                return;
+            }
             // Combined PDF can take well over the 60-90 sec gateway timeout
             // for vouchers with many references. Queue it on a background
             // worker; the worker attaches the file to this PRF and emits
             // "prf_combined_pdf_ready", which we listen for below to
             // surface a "Download Now" button.
-            frm.add_custom_button(__('Download Combined PDF'), function () {
+            const $btn = frm.add_custom_button(__('Download Combined PDF'), function () {
                 // Start persistent banner immediately so user gets live
                 // feedback even if they switch tabs / minimize / refresh.
                 prf_save_job(frm.doc.name);
@@ -875,6 +886,26 @@ frappe.ui.form.on('Payment Request Form', {
                     }
                 });
             });
+            // Stick a tooltip + visual emphasis on the button so users
+            // don't confuse it with Frappe's standard Print menu (which
+            // only renders the voucher HTML, no attachments).
+            if ($btn && $btn.length) {
+                $btn.attr("title", __("Generates a single PDF containing the voucher print format plus every attached file and linked Purchase Order / Journal Entry / Sales Invoice print."));
+                $btn.addClass("btn-primary");
+            }
+        };
+
+        if (
+            !frm.doc.__islocal
+            && ["Pay", "Advance Pay", "Internal Transfer"].includes(frm.doc.payment_type)
+        ) {
+            _ensure_combined_pdf_button();
+            // Re-assert the button after a short delay so any late
+            // setTimeout-driven refresh in a sibling handler can't
+            // leave the form without it. Cheap, idempotent (Frappe
+            // dedupes by button label).
+            setTimeout(_ensure_combined_pdf_button, 250);
+            setTimeout(_ensure_combined_pdf_button, 1200);
 
             // Listen once per form-load for the worker's progress + ready +
             // failed events. These fire on the realtime (socket.io) channel

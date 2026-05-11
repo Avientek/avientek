@@ -16,7 +16,11 @@ def after_migrate():
 	_enforce_export_permissions()
 	_sync_payment_voucher_formats()
 	_sync_sales_team_workspace()
-	_block_prf_workflow_self_approval()
+	# Jithin 2026-05-13: previously called _block_prf_workflow_self_approval()
+	# which forced allow_self_approval=0 on every PRF transition each migrate
+	# (Sridhar 2026-05-06 policy). Reversed — Jithin's team wants self-approval
+	# allowed so single-role flows work. The helper + patch file remain in
+	# the repo as historical reference but are no longer auto-invoked.
 	_seed_quotation_approval_v3_workflow()
 
 

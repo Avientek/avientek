@@ -24,8 +24,14 @@ avientek.patches.ignore_up_custom_sales_person
 avientek.patches.render_letter_head_content_as_jinja
 avientek.patches.sync_payment_voucher_formats_v2026_04_27
 avientek.patches.remove_user_permission_manager
-avientek.patches.block_prf_workflow_self_approval
+# Jithin 2026-05-13: block_prf_workflow_self_approval removed from
+# patches.txt. The patch file is kept under avientek/patches/ for
+# historical reference but is no longer auto-run. Self-approval is
+# now PERMITTED on PRF transitions to support single-role flows.
 avientek.patches.remove_quotation_action_request
+# Jithin 2026-05-13: surface linked PRFs under Connections on PO,
+# SO, SI, PI, JV, PE, DN. Idempotent.
+avientek.patches.add_prf_dashboard_links
 # migrate_quote_role_singles_to_tables seeds the new approver/creator
 # tables from the legacy single Link fields on first run after schema
 # sync — idempotent so safe to leave on patches.txt forever.
