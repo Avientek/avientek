@@ -72,6 +72,17 @@ def _build_transitions(creator, approver):
         ("Approved",               "Request for Update",    "Requested for update",   creator,   1, "doc.custom_request_for_update"),
         ("Approved",               "Request Cancellation",  "Cancellation Requested", creator,   1, "doc.custom_cancellation_check"),
 
+        # Rahul 2026-05-11: direct Cancel for low-prob / std-margin quotes.
+        # The 2-step "Request Cancellation -> Approve Cancellation" flow
+        # is overkill for prob<75 + non-special-pricing quotes — the
+        # creator should cancel in one click. The high-prob safety is
+        # already enforced server-side by before_cancel() in
+        # avientek.api.quotation_high_probability (throws when
+        # probability >= 75 unless user has the whitelist role), so this
+        # transition can stay open to All without a workflow condition.
+        ("Approved",               "Cancel",                "Cancelled",              "All",     1, ""),
+        ("Submitted",              "Cancel",                "Cancelled",              "All",     1, ""),
+
         # Approver decides on the update request
         ("Requested for update",   "Approve",               "Approved for Update",    approver,  0, ""),
         ("Requested for update",   "Reject Update",         "Approved",               approver,  0, ""),
