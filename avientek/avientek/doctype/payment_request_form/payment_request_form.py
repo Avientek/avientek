@@ -1395,48 +1395,139 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
 
     refs = list(doc.payment_references or [])
 
+    # Sammish 2026-05-14: a PRF reference row carries:
+    #   - reference_doctype (Purchase Invoice / Debit Note / Sales Invoice /
+    #     Credit Note / Journal Entry / Payment Entry / Purchase Order /
+    #     Sales Order / Delivery Note / Manual)
+    #   - document_reference  (system pointer to the actual doc — set by
+    #     the post-2026-05-09 picker)
+    #   - reference_name      (legacy supplier-invoice-number field; for
+    #     Purchase Invoice / Debit Note rows it's the bill_no that maps
+    #     back to a PI via {bill_no: ...} lookup)
+    #
+    # Previous _resolve_ref only handled the Purchase Invoice case AND
+    # used reference_name directly. For a Journal Entry row,
+    # reference_name is None → the {bill_no: None} lookup matched the
+    # FIRST Purchase Invoice with a blank bill_no on prod, and that
+    # unrelated invoice's PO + Quotation got merged into the combined
+    # PDF. Jithin saw an irrelevant PO appear in AVLLC-00936's combined
+    # PDF (Haibu Space rent invoice / JV).
+    #
+    # This rewrite:
+    #   1. Guards every lookup against null inputs.
+    #   2. Picks the right source-doc per `reference_doctype`.
+    #   3. Returns the set of file_urls attached to whichever doc the
+    #      row really points at (JV / SI / DN / PE / PO / SO included).
+    #   4. Keeps the PI-only PO + Quotation chain (so Get Outstanding
+    #      Invoice flows still bundle the originating PO/QN).
+    REFERENCE_TARGET_DOCTYPE = {
+        "Purchase Invoice": "Purchase Invoice",
+        "Debit Note":       "Purchase Invoice",
+        "Sales Invoice":    "Sales Invoice",
+        "Credit Note":      "Sales Invoice",
+        "Journal Entry":    "Journal Entry",
+        "Payment Entry":    "Payment Entry",
+        "Purchase Order":   "Purchase Order",
+        "Sales Order":      "Sales Order",
+        "Delivery Note":    "Delivery Note",
+    }
+
     def _resolve_ref(row):
         """Lightweight SQL-only resolve for one reference row.
-        Returns dict with pi, po, qn, and pi_attachment_bytes (or Nones).
+        Returns dict with target_doctype, target_name, file_urls list,
+        and the downstream PO + Quotation if the source is a Purchase
+        Invoice.
         """
-        out = {"pi": None, "po": None, "qn": None, "pi_att": None}
-        out["pi"] = frappe.db.get_value(
-            "Purchase Invoice", {"bill_no": row.reference_name}, "name"
-        )
-        if not out["pi"]:
+        out = {
+            "target_doctype": None,
+            "target_name": None,
+            "file_urls": [],
+            "po": None,
+            "qn": None,
+            # legacy keys kept for back-compat with any downstream caller
+            "pi": None,
+            "pi_att": None,
+        }
+        ref_doctype = (row.reference_doctype or "").strip()
+        if ref_doctype == "Manual" or not ref_doctype:
             return out
+
+        target_doctype = REFERENCE_TARGET_DOCTYPE.get(ref_doctype)
+        if not target_doctype:
+            return out
+
+        # Canonical name resolution:
+        #   - Purchase Invoice / Debit Note: prefer document_reference
+        #     (which is the PI doctype name set by the picker). Fall back
+        #     to looking up by bill_no = reference_name for legacy rows
+        #     where document_reference was empty.
+        #   - All others: use document_reference (the picker's system
+        #     pointer).
+        target_name = (row.document_reference or "").strip() or None
+
+        if not target_name and target_doctype == "Purchase Invoice":
+            # Legacy path — bill_no lookup. Only attempt when
+            # reference_name is non-empty (the NULL match caused
+            # cross-contamination from unrelated PIs).
+            bill = (row.reference_name or "").strip()
+            if bill:
+                target_name = frappe.db.get_value(
+                    "Purchase Invoice", {"bill_no": bill}, "name"
+                )
+
+        if not target_name:
+            return out
+
+        # Verify the doc actually exists (defensive — a stale
+        # document_reference shouldn't crash the merger).
+        if not frappe.db.exists(target_doctype, target_name):
+            frappe.log_error(
+                f"PRF combined PDF — stale reference: {target_doctype} {target_name!r} "
+                f"on row {row.idx} of {row.parent} not found",
+                "PRF Combined PDF",
+            )
+            return out
+
+        out["target_doctype"] = target_doctype
+        out["target_name"] = target_name
+
+        # Read all attached files on that doc, oldest first.
         try:
-            att = frappe.get_all(
+            atts = frappe.get_all(
                 "File",
                 filters={
-                    "attached_to_doctype": "Purchase Invoice",
-                    "attached_to_name": out["pi"],
+                    "attached_to_doctype": target_doctype,
+                    "attached_to_name": target_name,
                 },
                 fields=["file_url"],
                 order_by="creation asc",
-                limit=1,
             )
-            if att:
-                out["pi_att"] = _read_local_pdf(att[0]["file_url"])
+            out["file_urls"] = [a["file_url"] for a in atts if a.get("file_url")]
         except Exception as e:
             frappe.log_error(
-                f"PRF combined PDF — PI attachment {out['pi']}: {e}\n{traceback.format_exc()}",
+                f"PRF combined PDF — attachment lookup {target_doctype} {target_name}: {e}\n{traceback.format_exc()}",
                 "PRF Combined PDF",
             )
-        out["po"] = frappe.get_value(
-            "Purchase Invoice Item",
-            {"parent": out["pi"]},
-            fieldname="purchase_order",
-            order_by="idx asc",
-        )
-        if out["po"]:
-            so = frappe.db.get_value(
-                "Purchase Order Item", {"parent": out["po"]}, "sales_order"
+
+        # PI-only: derive the originating PO and Quotation so we can
+        # bundle them after the PI attachment (existing behaviour).
+        if target_doctype == "Purchase Invoice":
+            out["pi"] = target_name  # back-compat
+            out["pi_att"] = _read_local_pdf(out["file_urls"][0]) if out["file_urls"] else None
+            out["po"] = frappe.get_value(
+                "Purchase Invoice Item",
+                {"parent": target_name},
+                fieldname="purchase_order",
+                order_by="idx asc",
             )
-            if so:
-                out["qn"] = frappe.db.get_value(
-                    "Sales Order Item", {"parent": so}, "prevdoc_docname"
+            if out["po"]:
+                so = frappe.db.get_value(
+                    "Purchase Order Item", {"parent": out["po"]}, "sales_order"
                 )
+                if so:
+                    out["qn"] = frappe.db.get_value(
+                        "Sales Order Item", {"parent": so}, "prevdoc_docname"
+                    )
         return out
 
     t_resolve = _time.time()
@@ -1489,19 +1580,31 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             )
 
     # Assemble in original reference order, reusing cached bytes.
+    # Sammish 2026-05-14: PI rows still get their full 3-stage chain
+    # (PI attachment → PO PDF → Quotation PDF). All other reference
+    # types (JV, PE, SI, SO, DN, PO-direct) get their attached files
+    # merged in; the second + third progress steps are emitted as
+    # "(n/a)" so the bar still ticks predictably.
     for _ref_idx, (row, r) in enumerate(zip(refs, resolved), start=1):
-        if not r["pi"]:
-            _step(_("Reference {0}/{1} — Purchase Invoice attachment (skipped)").format(_ref_idx, ref_count))
-            _step(_("Reference {0}/{1} — Purchase Order (skipped)").format(_ref_idx, ref_count))
-            _step(_("Reference {0}/{1} — Quotation (skipped)").format(_ref_idx, ref_count))
+        ref_type_lbl = (row.reference_doctype or "Manual").strip() or "Manual"
+        if not r["target_doctype"]:
+            _step(_("Reference {0}/{1} — {2} attachment (skipped)").format(_ref_idx, ref_count, ref_type_lbl))
+            _step(_("Reference {0}/{1} — Purchase Order (n/a)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Quotation (n/a)").format(_ref_idx, ref_count))
             continue
 
-        if r["pi_att"]:
-            merger.append(io.BytesIO(r["pi_att"]))
-            appended += 1
-        _step(_("Reference {0}/{1} — Purchase Invoice attachment").format(_ref_idx, ref_count))
+        # Step (a) — attached files on the source doc (whichever type).
+        for fu in r["file_urls"]:
+            pdf_bytes = _read_local_pdf(fu)
+            if pdf_bytes:
+                merger.append(io.BytesIO(pdf_bytes))
+                appended += 1
+        _step(_("Reference {0}/{1} — {2} attachment").format(_ref_idx, ref_count, ref_type_lbl))
 
-        if r["po"]:
+        # Steps (b)+(c) — only for Purchase Invoice rows, chain into
+        # the originating PO + Quotation. Other reference types stop
+        # at attachments.
+        if r["target_doctype"] == "Purchase Invoice" and r["po"]:
             po_pdf = po_pdf_cache.get(r["po"])
             if po_pdf:
                 merger.append(io.BytesIO(po_pdf))
@@ -1517,8 +1620,8 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             else:
                 _step(_("Reference {0}/{1} — Quotation (none)").format(_ref_idx, ref_count))
         else:
-            _step(_("Reference {0}/{1} — Purchase Order (none)").format(_ref_idx, ref_count))
-            _step(_("Reference {0}/{1} — Quotation (none)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Purchase Order (n/a)").format(_ref_idx, ref_count))
+            _step(_("Reference {0}/{1} — Quotation (n/a)").format(_ref_idx, ref_count))
 
     print(
         f"[PRF PDF {docname}] reference summary — refs={len(refs)} "
