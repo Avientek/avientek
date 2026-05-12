@@ -12,6 +12,7 @@
   "quote_high_prob_section",
   "quote_approval_role",
   "quote_approver_roles",
+  "quote_l2_approver_roles",
   "quote_high_prob_column_break",
   "quote_high_prob_creator_role",
   "quote_creator_roles",
@@ -64,8 +65,15 @@
    "fieldname": "quote_approver_roles",
    "fieldtype": "Table",
    "options": "Avientek Quote Role",
-   "label": "Approval Roles",
-   "description": "Any user with ANY of these roles can approve Document Approval transitions on submitted high-probability quotes (Request for Update, Cancellation Check, Send for Approval). OR-logic. If empty, the legacy single role above is used."
+   "label": "Level 1 Approval Roles",
+   "description": "Any user with ANY of these roles can perform LEVEL 1 approvals on submitted high-probability quotes — first stage of the L1→L2 approval chain (Approve Level 1 / Reject / Approve Cancellation Level 1). OR-logic. If empty, the legacy single role above is used."
+  },
+  {
+   "fieldname": "quote_l2_approver_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quote Role",
+   "label": "Level 2 Approval Roles",
+   "description": "Any user with ANY of these roles can perform LEVEL 2 approvals — second stage of the L1→L2 chain (Approve Level 2 / Approve Cancellation Level 2). OR-logic. If empty, the L1 approver pool is reused for L2 (single-stage fallback)."
   },
   {
    "fieldname": "quote_high_prob_column_break",
@@ -110,7 +118,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-13 00:00:00.000000",
+ "modified": "2026-05-14 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Avientek Settings",

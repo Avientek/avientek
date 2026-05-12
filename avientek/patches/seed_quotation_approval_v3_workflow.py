@@ -35,9 +35,15 @@ STATES = [
     ("Requested for update",   "1", "Warning"),
     ("Approved for Update",    "1", "Warning"),
     ("Pending For Approval",   "1", "Warning"),
+    # Rahul 2026-05-14 BRD: high-prob revisions go through L1 -> L2
+    # chain. After L1 approves "Pending For Approval" the doc moves
+    # here for the L2 approver to make the final call. Same pattern
+    # for Cancellation -> "Cancellation L2 Pending".
+    ("Pending L2 Approval",    "1", "Warning"),
     ("Approved",               "1", "Success"),
     ("Sent for Revision",      "1", "Warning"),
     ("Cancellation Requested", "1", "Danger"),
+    ("Cancellation L2 Pending","1", "Danger"),
     ("Cancelled",              "2", "Danger"),
     # Sridhar 2026-05-10: bridge legacy V2 states so quotes that were
     # mid-V2-flow at deploy time (e.g. Pending Level 2 Approval) become
@@ -54,15 +60,19 @@ def _resolved_roles():
     return _settings_roles()
 
 
-def _build_transitions(creators, approvers):
+def _build_transitions(creators, approvers, l2_approvers=None):
     """Mirror the SO Sales Order Updated transition set.
 
-    Sammish 2026-05-13: multi-role variant. `creators` and `approvers`
-    are TUPLES of role names. Every transition whose allowed role is
-    "creator" or "approver" is emitted ONCE PER ROLE in the respective
-    list (Frappe's `allowed` column is single-Link, so multi-role
-    semantics = multiple rows). Fixed-role transitions ("All") emit
-    once unchanged.
+    Sammish 2026-05-13: multi-role variant. `creators`, `approvers`,
+    `l2_approvers` are TUPLES of role names. Every transition whose
+    allowed role is "creator", "l1_approver", or "l2_approver" is
+    emitted ONCE PER ROLE in the respective list (Frappe's `allowed`
+    column is single-Link, so multi-role semantics = multiple rows).
+    Fixed-role transitions ("All") emit once unchanged.
+
+    Rahul/Sammish 2026-05-14: restored Level 1 -> Level 2 approval
+    chain per the BRD. `l2_approvers` is the L2 pool; if omitted/empty
+    it falls back to `approvers` (single-stage equivalent).
 
     Returns list of tuples:
       (state, action, next_state, allowed_role, allow_self_approval, condition)
@@ -72,73 +82,92 @@ def _build_transitions(creators, approvers):
         creators = (creators,)
     if isinstance(approvers, str):
         approvers = (approvers,)
+    if isinstance(l2_approvers, str):
+        l2_approvers = (l2_approvers,)
+    if not l2_approvers:
+        l2_approvers = approvers  # single-stage fallback
 
     CANCEL_COND = "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"
 
     # Each entry: (state, action, next_state, role_key_or_literal, self_approval, condition).
     # role_key_or_literal is either:
-    #   - the literal string "creator" / "approver"  -> expanded per role list
-    #   - a literal role name like "All"             -> used as-is
+    #   - "creator"      -> expanded per `creators` list
+    #   - "l1_approver"  -> expanded per `approvers` list (Level 1 pool)
+    #   - "l2_approver"  -> expanded per `l2_approvers` list (Level 2 pool)
+    #   - any literal role name like "All" -> used as-is
     template = [
         # Standard submit
-        ("Draft",                  "Submit",                "Submitted",              "All",      1, ""),
+        ("Draft",                  "Submit",                "Submitted",              "All",         1, ""),
 
         # Once submitted, fast-forward to Approved (no approval gate at this point —
         # the gate kicks in only when probability >= 75 and user requests change).
-        ("Submitted",              "Approve",               "Approved",               "All",      1, ""),
+        ("Submitted",              "Approve",               "Approved",               "All",         1, ""),
 
         # Document Approval: user ticks one of the checkboxes + saves
-        ("Approved",               "Request for Update",    "Requested for update",   "creator",  1, "doc.custom_request_for_update"),
-        ("Approved",               "Request Cancellation",  "Cancellation Requested", "creator",  1, "doc.custom_cancellation_check"),
+        ("Approved",               "Request for Update",    "Requested for update",   "creator",     1, "doc.custom_request_for_update"),
+        ("Approved",               "Request Cancellation",  "Cancellation Requested", "creator",     1, "doc.custom_cancellation_check"),
 
-        # Rahul 2026-05-11/12: direct Cancel for low-prob / std-margin
-        # quotes only. Quotes at >=75% MUST go through the 2-step
-        # Request Cancellation -> Approve Cancellation flow.
+        # Direct Cancel for low-prob / std-margin quotes only. Quotes
+        # at >=75% MUST go through the 2-step Request Cancellation ->
+        # L1 -> L2 chain (audit requirement).
         # Frappe's workflow safe_eval (frappe/utils/safe_exec.py
         # WHITELISTED_SAFE_EVAL_GLOBALS) only exposes int/float/round —
-        # no flt/cint/max/min, no string methods on attributes. So
-        # check numeric `probability` against 75 and the Data
-        # `probabilities` against a literal tuple of the high-prob
-        # values. Cancel is allowed only when BOTH fields are low.
-        ("Approved",               "Cancel",                "Cancelled",              "All",      1, CANCEL_COND),
-        ("Submitted",              "Cancel",                "Cancelled",              "All",      1, CANCEL_COND),
+        # no flt/cint/max/min, no string methods on attributes.
+        ("Approved",               "Cancel",                "Cancelled",              "All",         1, CANCEL_COND),
+        ("Submitted",              "Cancel",                "Cancelled",              "All",         1, CANCEL_COND),
 
-        # Approver decides on the update request
-        ("Requested for update",   "Approve",               "Approved for Update",    "approver", 0, ""),
-        ("Requested for update",   "Reject Update",         "Approved",               "approver", 0, ""),
+        # L1 approver decides on the user's REQUEST FOR UPDATE — this
+        # is just permission to edit, single-stage approval is enough
+        # (no L2 chain at this gate, the BRD's L1->L2 is for the
+        # actual amend submission below).
+        ("Requested for update",   "Approve",               "Approved for Update",    "l1_approver", 0, ""),
+        ("Requested for update",   "Reject Update",         "Approved",               "l1_approver", 0, ""),
         # User can withdraw the request by un-ticking the checkbox + saving
-        ("Requested for update",   "Cancel Request",        "Approved",               "creator",  1, "not doc.custom_request_for_update"),
+        ("Requested for update",   "Cancel Request",        "Approved",               "creator",     1, "not doc.custom_request_for_update"),
 
         # User edits in Approved for Update -> sends back for approval
-        ("Approved for Update",    "Send for Approval",     "Pending For Approval",   "creator",  1, ""),
+        ("Approved for Update",    "Send for Approval",     "Pending For Approval",   "creator",     1, ""),
 
-        # Approver decides on the revised quote
-        ("Pending For Approval",   "Approve",               "Approved",               "approver", 0, ""),
-        ("Pending For Approval",   "Reject",                "Sent for Revision",      "approver", 0, ""),
+        # BRD 2026-05-14: Pending For Approval is the L1 stage of the
+        # amend chain. L1 approves -> Pending L2 Approval. L2 approves
+        # -> Approved. Either stage can Reject -> Sent for Revision.
+        ("Pending For Approval",   "Approve Level 1",       "Pending L2 Approval",    "l1_approver", 0, ""),
+        ("Pending For Approval",   "Reject",                "Sent for Revision",      "l1_approver", 0, ""),
+        ("Pending L2 Approval",    "Approve Level 2",       "Approved",               "l2_approver", 0, ""),
+        ("Pending L2 Approval",    "Reject",                "Sent for Revision",      "l2_approver", 0, ""),
 
         # Sent for Revision -- user can save freely (handled by validator state-allow)
-        # then re-submit for approval
-        ("Sent for Revision",      "Send for Approval",     "Pending For Approval",   "creator",  1, ""),
+        # then re-submit for approval (re-enters the L1 stage).
+        ("Sent for Revision",      "Send for Approval",     "Pending For Approval",   "creator",     1, ""),
 
-        # Cancellation flow
-        ("Cancellation Requested", "Approve Cancellation",  "Cancelled",              "approver", 0, ""),
-        ("Cancellation Requested", "Reject Cancellation",   "Approved",               "approver", 0, ""),
-        ("Cancellation Requested", "Cancel Request",        "Approved",               "creator",  1, "not doc.custom_cancellation_check"),
+        # BRD 2026-05-14: Cancellation also goes through L1 -> L2.
+        # Cancellation Requested -> L1 -> Cancellation L2 Pending -> L2 -> Cancelled.
+        ("Cancellation Requested", "Approve Cancellation Level 1", "Cancellation L2 Pending", "l1_approver", 0, ""),
+        ("Cancellation Requested", "Reject Cancellation",          "Approved",                 "l1_approver", 0, ""),
+        ("Cancellation L2 Pending","Approve Cancellation Level 2", "Cancelled",                "l2_approver", 0, ""),
+        ("Cancellation L2 Pending","Reject Cancellation",          "Approved",                 "l2_approver", 0, ""),
+        # User can withdraw the cancellation request from Cancellation Requested only.
+        ("Cancellation Requested", "Cancel Request",        "Approved",               "creator",     1, "not doc.custom_cancellation_check"),
 
-        # Sridhar 2026-05-10: bridge transitions for legacy V2 states.
-        ("Pending Level 1 Approval", "Approve",             "Approved",               "approver", 0, ""),
-        ("Pending Level 1 Approval", "Reject",              "Draft",                  "approver", 0, ""),
-        ("Pending Level 2 Approval", "Approve",             "Approved",               "approver", 0, ""),
-        ("Pending Level 2 Approval", "Reject",              "Draft",                  "approver", 0, ""),
+        # Bridge transitions for legacy V2 orphan quotes (Sridhar
+        # 2026-05-10). These keep the V2-era stuck quotes actionable —
+        # L1 approver can flush them straight to "Approved" (skipping
+        # L2 because they pre-date the new chain).
+        ("Pending Level 1 Approval", "Approve",             "Approved",               "l1_approver", 0, ""),
+        ("Pending Level 1 Approval", "Reject",              "Draft",                  "l1_approver", 0, ""),
+        ("Pending Level 2 Approval", "Approve",             "Approved",               "l1_approver", 0, ""),
+        ("Pending Level 2 Approval", "Reject",              "Draft",                  "l1_approver", 0, ""),
     ]
 
     expanded = []
-    seen = set()  # dedupe within the resulting list — if both lists share a role
+    seen = set()  # dedupe within the resulting list — if pools share a role
     for state, action, next_state, role_key, self_app, cond in template:
         if role_key == "creator":
             roles = creators
-        elif role_key == "approver":
+        elif role_key == "l1_approver":
             roles = approvers
+        elif role_key == "l2_approver":
+            roles = l2_approvers
         else:
             roles = (role_key,)
         for role in roles:
@@ -174,9 +203,10 @@ def seed():
     cfg = _resolved_roles()
     creators = cfg.get("creator_roles") or (cfg["creator_role"],)
     approvers = cfg.get("approver_roles") or (cfg["approver_role"],)
+    l2_approvers = cfg.get("l2_approver_roles") or approvers
 
     # 0. Ensure required roles exist before we wire transitions.
-    all_roles = set(creators) | set(approvers)
+    all_roles = set(creators) | set(approvers) | set(l2_approvers)
     missing_roles = sorted(r for r in all_roles if not frappe.db.exists("Role", r))
     if missing_roles:
         print(f"[seed_quotation_approval_v3_workflow] WARN missing roles "
@@ -193,7 +223,7 @@ def seed():
             ws.insert(ignore_permissions=True)
 
     # 2. Workflow Action Master records (Frappe validates Link)
-    transitions = _build_transitions(creators, approvers)
+    transitions = _build_transitions(creators, approvers, l2_approvers)
     for _f, action, _n, _r, _s, _c in transitions:
         if not frappe.db.exists("Workflow Action Master", action):
             wa = frappe.new_doc("Workflow Action Master")
@@ -269,5 +299,6 @@ def seed():
         f"[seed_quotation_approval_v3_workflow] "
         f"workflow={WORKFLOW_NAME} states={len(STATES)} "
         f"transitions={len(wf.transitions)} skipped={skipped} active=1 "
-        f"approvers={list(approvers)!r} creators={list(creators)!r}"
+        f"L1={list(approvers)!r} L2={list(l2_approvers)!r} "
+        f"creators={list(creators)!r}"
     )

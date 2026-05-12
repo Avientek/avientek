@@ -88,10 +88,18 @@ def _settings_roles():
     and `quote_creator_roles` are now the source of truth — the legacy
     single Link fields (`quote_approval_role`,
     `quote_high_prob_creator_role`) remain as fallbacks if the tables
-    are empty. The returned dict carries BOTH plural tuples
-    (`approver_roles`, `creator_roles`) AND scalar back-compat keys
-    (`approver_role`, `creator_role`, `l1_role`, `l2_role` — all
-    resolve to the first item of the respective list)."""
+    are empty.
+    V3.2 (Rahul/Sammish 2026-05-14): restored TRUE Level 1 → Level 2
+    approval chain per the BRD. New `quote_l2_approver_roles` table
+    on Avientek Settings holds the L2 approver pool. The returned
+    dict now exposes:
+      - approver_roles    → L1 approver pool (first stage)
+      - l2_approver_roles → L2 approver pool (second stage)
+      - approver_role     → first L1 role (back-compat scalar)
+      - l1_role / l2_role → first L1 / L2 role (back-compat scalars)
+      - creator_roles, restricted, whitelisted (unchanged)
+    If `quote_l2_approver_roles` is empty, L2 falls back to the L1
+    pool (so old single-stage configs keep working)."""
     cached = frappe.local.flags.get(_SETTINGS_CACHE_KEY)
     if cached is not None:
         return cached
@@ -104,6 +112,15 @@ def _settings_roles():
             approver_roles = (s.get("quote_approval_role"),)
         if not approver_roles:
             approver_roles = (DEFAULT_APPROVAL_ROLE,)
+
+        l2_approver_roles = tuple(
+            r.role for r in (s.get("quote_l2_approver_roles") or []) if r.role
+        )
+        # L2 pool falls back to L1 pool when not explicitly configured —
+        # this keeps the workflow operable on sites that haven't yet
+        # configured the L2 table (single-stage behaviour preserved).
+        if not l2_approver_roles:
+            l2_approver_roles = approver_roles
 
         creator_roles = tuple(
             r.role for r in (s.get("quote_creator_roles") or []) if r.role
@@ -119,24 +136,30 @@ def _settings_roles():
         ) or DEFAULT_RESTRICTED_ROLES
     except Exception:
         approver_roles = (DEFAULT_APPROVAL_ROLE,)
+        l2_approver_roles = approver_roles
         creator_roles = (DEFAULT_CREATOR_ROLE,)
         restricted = DEFAULT_RESTRICTED_ROLES
 
-    # Whitelist = all approvers + all creators + System Manager + Administrator.
-    whitelisted = tuple(set(approver_roles) | set(creator_roles) | {"System Manager", "Administrator"})
+    # Whitelist = L1 + L2 approvers + creators + System Manager + Administrator.
+    whitelisted = tuple(
+        set(approver_roles) | set(l2_approver_roles) | set(creator_roles)
+        | {"System Manager", "Administrator"}
+    )
 
     # Primary (first) role for any back-compat reader that wants a scalar.
     approver_primary = approver_roles[0]
+    l2_primary = l2_approver_roles[0]
     creator_primary = creator_roles[0]
 
     cfg = {
         # New plural form — preferred for new code.
-        "approver_roles": approver_roles,
+        "approver_roles": approver_roles,         # L1 pool
+        "l2_approver_roles": l2_approver_roles,   # L2 pool (falls back to L1)
         "creator_roles": creator_roles,
-        # Back-compat scalar form — always points at the first role.
+        # Back-compat scalar form — point at first role of each pool.
         "approver_role": approver_primary,
         "l1_role": approver_primary,
-        "l2_role": approver_primary,
+        "l2_role": l2_primary,
         "creator_role": creator_primary,
         "whitelisted": whitelisted,
         "restricted": restricted,
