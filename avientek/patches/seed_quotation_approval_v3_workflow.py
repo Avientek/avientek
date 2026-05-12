@@ -103,9 +103,18 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         # the gate kicks in only when probability >= 75 and user requests change).
         ("Submitted",              "Approve",               "Approved",               "All",         1, ""),
 
-        # Document Approval: user ticks one of the checkboxes + saves
+        # Document Approval: user ticks one of the checkboxes + saves.
+        # Rahul 2026-05-15 — same transitions must fire from `Submitted`
+        # state too. High-prob quotes in Submitted (not yet auto-approved
+        # to Approved) were stuck: the user ticked Cancellation Check
+        # / Request for Update + saved, but the only action button on
+        # the Submitted state was "Approve" — there was no way to route
+        # the request to L1 without first manually approving. Mirror
+        # transitions added below.
         ("Approved",               "Request for Update",    "Requested for update",   "creator",     1, "doc.custom_request_for_update"),
         ("Approved",               "Request Cancellation",  "Cancellation Requested", "creator",     1, "doc.custom_cancellation_check"),
+        ("Submitted",              "Request for Update",    "Requested for update",   "creator",     1, "doc.custom_request_for_update"),
+        ("Submitted",              "Request Cancellation",  "Cancellation Requested", "creator",     1, "doc.custom_cancellation_check"),
 
         # Direct Cancel for low-prob / std-margin quotes only. Quotes
         # at >=75% MUST go through the 2-step Request Cancellation ->
