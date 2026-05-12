@@ -1842,15 +1842,17 @@ frappe.ui.form.on('Payment Request Form', {
         // Build HTML table for currency totals
         frm.events.render_currency_totals(frm, currency_totals, total_base_amount, total_base_outstanding);
 
-        // Only set value if it actually changed (to avoid "Not Saved" on refresh)
+        // Only set value if it actually changed (to avoid "Not Saved" on refresh).
+        // Jithin 2026-05-14: even with the change-guard, frm.set_value
+        // ALWAYS dirties the form in Frappe v15 — and recalculate_totals
+        // is fired from refresh(), not from a user edit. Write directly
+        // to frm.doc + refresh_field so the value updates without
+        // marking the form as having unsaved changes.
         if (flt(frm.doc.total_outstanding_amount, 2) !== flt(total_base_amount, 2)) {
-            frappe.run_serially([
-                () => frm.set_value("total_outstanding_amount", total_base_amount),
-                () => { is_updating_fields = false; }
-            ]);
-        } else {
-            is_updating_fields = false;
+            frm.doc.total_outstanding_amount = total_base_amount;
+            try { frm.refresh_field("total_outstanding_amount"); } catch (e) {}
         }
+        is_updating_fields = false;
     },
 
     render_currency_totals: function(frm, currency_totals, total_base_amount, total_base_outstanding) {
@@ -2246,10 +2248,19 @@ frappe.ui.form.on('Payment Request Form', {
     }
 });
 
-// Helper to only set value if it actually changed (avoids "Not Saved" on refresh)
+// Helper to only set value if it actually changed.
+// Jithin 2026-05-14: even with the value-changed guard, frm.set_value
+// ALWAYS marks the form __unsaved (Frappe v15 behaviour) — and async
+// fetches that resolve a few seconds after load were re-dirtying the
+// form past the setTimeout reset in refresh(). Since every caller of
+// set_if_changed is an AUTO-REFRESH from a server lookup (not a user
+// edit), bypass the dirty mechanism entirely: write directly to
+// frm.doc and refresh the field. The change still becomes visible,
+// the form just doesn't claim "Not Saved" when nothing was saved.
 function set_if_changed(frm, fieldname, value) {
     if (frm.doc[fieldname] !== value) {
-        frm.set_value(fieldname, value);
+        frm.doc[fieldname] = value;
+        try { frm.refresh_field(fieldname); } catch (e) {}
     }
 }
 
