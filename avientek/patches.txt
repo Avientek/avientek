@@ -43,6 +43,13 @@ avientek.patches.migrate_quote_role_singles_to_tables
 # causing PO/PR on AVIENTEK TRADING LLC to fall back to UAE templates
 # and compute 0% VAT. Idempotent (only adds missing rows).
 avientek.patches.populate_item_defaults_for_added_companies
+# Sammish 2026-05-15: back-fill Customer.tax_category from the
+# `company` custom field on Customer using the SAME company→tax_category
+# mapping that COMPANY_DEFAULTS defines for Items. 738 of 3073 customers
+# had blank tax_category, causing ERPNext to silently fall back to the
+# Item's first tax row at SI/PO time → wrong VAT. Idempotent (only fills
+# blanks, never overwrites).
+avientek.patches.populate_customer_tax_category
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.
