@@ -76,6 +76,13 @@ avientek.patches.add_prf_dashboard_links_v2
 # payment_type != "Internal Transfer" and adds a new "Release Payment"
 # transition from Approved Level 1 → Released for IT only. Idempotent.
 avientek.patches.prf_internal_transfer_skip_l2
+# Sammish 2026-05-16 (Jithin spotted): the in_list_view setter I added
+# for workflow_state created a duplicate "Status" + "Workflow State"
+# column in the PRF list view. Frappe v15 already auto-injects the
+# "Status" column from workflow_state when a workflow is attached, so
+# the explicit second column was redundant. This patch deletes the
+# stray Property Setter; the in_standard_filter one stays.
+avientek.patches.remove_prf_workflow_state_in_list_view
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.
