@@ -22,8 +22,19 @@ import frappe
 PRF_DOCTYPE = "Payment Request Form"
 CHILD_DOCTYPE = "Payment Request Reference"
 CHILD_TABLE_FIELDNAME = "payment_references"
-LINK_FIELDNAME = "reference_name"
 GROUP_LABEL = "Payments"
+
+# Sammish 2026-05-16 (Jithin #8): walk BOTH link fields on the child
+# table — `reference_name` AND `document_reference`. Why both:
+#   - reference_name stores the legacy pointer for SO / SI / PO / JV /
+#     PE / DN (= Frappe doc name) but for Purchase Invoice / Debit Note
+#     it stores the supplier's free-text bill_no (e.g. "#032079"), so a
+#     lookup keyed on the PI's Frappe doc name finds nothing.
+#   - document_reference is the canonical Frappe doc pointer set by
+#     the picker post 2026-05-09 for every type.
+# Adding both Link rows lets Frappe's Connections panel find PRFs
+# regardless of which field has the matching value.
+LINK_FIELDNAMES = ["reference_name", "document_reference"]
 
 # Source doctypes that should show linked PRFs under their Connections.
 SOURCE_DOCTYPES = [
@@ -52,39 +63,44 @@ def execute():
 			continue
 		dt = frappe.get_doc("DocType", source)
 
-		# De-dup check: a row pointing at PRF via reference_name already there?
-		existing = False
+		# Track which link_fieldnames already exist so we only append
+		# the missing ones (idempotent across both old and new schema).
+		existing_fields = set()
 		for row in dt.get("links") or []:
 			if (
 				row.link_doctype == PRF_DOCTYPE
-				and row.link_fieldname == LINK_FIELDNAME
 				and (row.get("parent_doctype") or "") == PRF_DOCTYPE
 				and (row.get("table_fieldname") or "") == CHILD_TABLE_FIELDNAME
+				and row.link_fieldname in LINK_FIELDNAMES
 			):
-				existing = True
-				break
-		if existing:
+				existing_fields.add(row.link_fieldname)
+
+		missing = [fn for fn in LINK_FIELDNAMES if fn not in existing_fields]
+		if not missing:
 			already += 1
-			print(f"[add_prf_dashboard_links] {source}: link to PRF already present")
+			print(f"[add_prf_dashboard_links] {source}: both PRF links already present")
 			continue
 
-		dt.append("links", {
-			# "table_fieldname" + "parent_doctype" tell Frappe to walk the
-			# child table on the parent doctype (PRF) and surface every
-			# parent (PRF) whose child's `reference_name` matches the
-			# current source doc's name.
-			"link_doctype": PRF_DOCTYPE,
-			"link_fieldname": LINK_FIELDNAME,
-			"parent_doctype": PRF_DOCTYPE,
-			"table_fieldname": CHILD_TABLE_FIELDNAME,
-			"group": GROUP_LABEL,
-		})
+		for fn in missing:
+			dt.append("links", {
+				# "table_fieldname" + "parent_doctype" tell Frappe to walk
+				# the child table on the parent doctype (PRF) and surface
+				# every parent (PRF) whose child's `<fn>` matches the
+				# current source doc's name.
+				"link_doctype": PRF_DOCTYPE,
+				"link_fieldname": fn,
+				"parent_doctype": PRF_DOCTYPE,
+				"table_fieldname": CHILD_TABLE_FIELDNAME,
+				"group": GROUP_LABEL,
+			})
 		try:
 			dt.flags.ignore_validate = True
 			dt.flags.ignore_permissions = True
 			dt.save()
 			added += 1
-			print(f"[add_prf_dashboard_links] {source}: added PRF dashboard link")
+			print(
+				f"[add_prf_dashboard_links] {source}: added PRF links via {missing}"
+			)
 		except Exception:
 			frappe.log_error(
 				title=f"add_prf_dashboard_links: save failed for {source}",

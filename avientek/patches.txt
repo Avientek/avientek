@@ -66,6 +66,16 @@ avientek.patches.populate_supplier_tax_category
 # just the 27 stuck V2 quotes), causing GM-CS users to think the
 # cards weren't working. Idempotent.
 avientek.patches.repoint_quotation_approval_cards_to_v3
+# Sammish 2026-05-16 (Jithin #8): re-run add_prf_dashboard_links so the
+# new document_reference link rows get added. Original ran via
+# reference_name only, which fails for PI/Debit Note rows (those store
+# the supplier's bill_no in reference_name, not the PI's Frappe name).
+avientek.patches.add_prf_dashboard_links_v2
+# Sammish 2026-05-16 (Jithin #1): Internal Transfer vouchers skip
+# Approved Level 2. Guards existing "Approve Level 2" transition with
+# payment_type != "Internal Transfer" and adds a new "Release Payment"
+# transition from Approved Level 1 → Released for IT only. Idempotent.
+avientek.patches.prf_internal_transfer_skip_l2
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.

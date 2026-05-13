@@ -559,5 +559,44 @@
   "property_type": "Check",
   "row_name": null,
   "value": "1"
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Payment Request Form",
+  "field_name": "workflow_state",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Payment Request Form-workflow_state-in_standard_filter",
+  "property": "in_standard_filter",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Payment Request Form",
+  "field_name": "workflow_state",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Payment Request Form-workflow_state-in_list_view",
+  "property": "in_list_view",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ },
+ {
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "doc_type": "Payment Request Form",
+  "field_name": "total_outstanding_amount",
+  "is_system_generated": 0,
+  "module": null,
+  "name": "Payment Request Form-total_outstanding_amount-in_list_view",
+  "property": "in_list_view",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
  }
 ]

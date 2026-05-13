@@ -177,7 +177,14 @@ if (!document.getElementById('payment-ref-styles')) {
 // State lives in localStorage under `avientek:prf:<docname>:combined_pdf_job`.
 // Stale jobs (>30 min) are auto-cleared on load.
 const PRF_JOB_LS_KEY = (docname) => `avientek:prf:${docname}:combined_pdf_job`;
-const PRF_JOB_STALE_MS = 30 * 60 * 1000;
+// Sammish 2026-05-16 (Jithin #9): reduced from 30min → 15min.
+// Defence-in-depth — the new server-side completion check in
+// prf_start_banner clears completed jobs immediately; this stale
+// fence only catches workers that died without firing
+// prf_combined_pdf_ready OR prf_combined_pdf_failed. 15min is the
+// 900s timeout used by the worker queue, so anything older than that
+// can only be a leftover entry from a crashed worker.
+const PRF_JOB_STALE_MS = 15 * 60 * 1000;
 
 function prf_save_job(docname) {
     try {
@@ -330,16 +337,88 @@ function prf_start_banner(frm) {
         prf_stop_banner(frm);
         return;
     }
-    prf_render_banner(frm, job, frm._prf_last_progress);
-    if (frm._prf_banner_timer) clearInterval(frm._prf_banner_timer);
-    frm._prf_banner_timer = setInterval(() => {
-        const j = prf_load_job(frm.doc.name);
-        if (!j) {
-            prf_stop_banner(frm);
-            return;
+
+    // Sammish 2026-05-16 (Jithin #9): rehydrating the banner from
+    // localStorage isn't enough — if the user closed the tab, was
+    // backgrounded, or had any network blip during the build, the
+    // realtime "prf_combined_pdf_ready" event was missed and the
+    // banner would otherwise show "running" for 30 minutes until the
+    // localStorage entry goes stale. Server-side verify: if a
+    // <docname>_combined.pdf File record exists with creation >=
+    // started_at, the build already finished — clear and stop.
+    frappe.call({
+        method: "frappe.client.get_list",
+        args: {
+            doctype: "File",
+            filters: {
+                attached_to_doctype: "Payment Request Form",
+                attached_to_name: frm.doc.name,
+                file_name: `${frm.doc.name}_combined.pdf`,
+            },
+            fields: ["name", "file_url", "creation"],
+            order_by: "creation desc",
+            limit_page_length: 1,
+        },
+        callback: function (r) {
+            const files = (r && r.message) || [];
+            if (files.length) {
+                const file_creation_ms = Date.parse(files[0].creation);
+                if (!isNaN(file_creation_ms) && file_creation_ms >= job.started_at) {
+                    // Build finished while we weren't listening — clean up.
+                    prf_clear_job(frm.doc.name);
+                    prf_stop_banner(frm);
+                    return;
+                }
+            }
+            // Still in flight: render + tick the timer.
+            prf_render_banner(frm, job, frm._prf_last_progress);
+            if (frm._prf_banner_timer) clearInterval(frm._prf_banner_timer);
+            let _tick = 0;
+            frm._prf_banner_timer = setInterval(() => {
+                const j = prf_load_job(frm.doc.name);
+                if (!j) {
+                    prf_stop_banner(frm);
+                    return;
+                }
+                prf_render_banner(frm, j, frm._prf_last_progress);
+                // Every 30 ticks (~30s) re-check the server for a
+                // completed file. Belt-and-braces in case the realtime
+                // event firehose stays disconnected throughout the build.
+                _tick += 1;
+                if (_tick % 30 === 0) {
+                    frappe.call({
+                        method: "frappe.client.get_list",
+                        args: {
+                            doctype: "File",
+                            filters: {
+                                attached_to_doctype: "Payment Request Form",
+                                attached_to_name: frm.doc.name,
+                                file_name: `${frm.doc.name}_combined.pdf`,
+                            },
+                            fields: ["creation", "file_url"],
+                            order_by: "creation desc",
+                            limit_page_length: 1,
+                        },
+                        callback: function (rr) {
+                            const ff = (rr && rr.message) || [];
+                            if (ff.length) {
+                                const ms = Date.parse(ff[0].creation);
+                                if (!isNaN(ms) && ms >= j.started_at) {
+                                    prf_clear_job(frm.doc.name);
+                                    prf_stop_banner(frm);
+                                    frappe.show_alert({
+                                        message: __('Combined PDF ready'),
+                                        indicator: 'green'
+                                    }, 8);
+                                    frm.reload_doc();
+                                }
+                            }
+                        }
+                    });
+                }
+            }, 1000);
         }
-        prf_render_banner(frm, j, frm._prf_last_progress);
-    }, 1000);
+    });
 }
 
 // Invoice drill-down link + View button styles
@@ -745,12 +824,20 @@ frappe.ui.form.on('Payment Request Form', {
 
     payment_type: function(frm) {
         // Sridhar 2026-05-06 #4: switching payment_type from Pay to
-        // Internal Transfer (or vice-versa) used to leave the prior
-        // party / supplier-address fields populated, so the saved
-        // Internal Transfer ended up with the supplier's address.
-        // Clear all party-side fields whenever payment_type changes
-        // and the doc is still in draft.
+        // Internal Transfer used to leave the prior party / supplier
+        // address fields populated, so the saved Internal Transfer
+        // ended up with the supplier's address. Clear party-side
+        // fields then.
+        //
+        // Sammish 2026-05-16 (Jithin #6): the old "always clear" was
+        // too aggressive — toggling Pay ↔ Advance Pay (same supplier,
+        // just an advance) silently wiped party / contact / references
+        // and the user had to re-pick everything. Now clear ONLY when
+        // the user is switching INTO Internal Transfer (where party
+        // truly has no meaning). Pay ↔ Advance Pay keeps everything.
         if (frm.doc.docstatus !== 0) return;
+        if ((frm.doc.payment_type || "") !== "Internal Transfer") return;
+
         const party_fields = [
             "party_type", "party", "party_name",
             "supplier_bank_account", "party_bank_account",
@@ -764,7 +851,7 @@ frappe.ui.form.on('Payment Request Form', {
             }
         });
         // Also clear the references table — they were chosen for
-        // the old party.
+        // the old party, and IT has no payment references concept.
         if (Array.isArray(frm.doc.payment_references)
             && frm.doc.payment_references.length) {
             frm.clear_table("payment_references");
@@ -2090,6 +2177,26 @@ frappe.ui.form.on('Payment Request Form', {
                     }
                 }
             });
+
+            // Sammish 2026-05-16 (Jithin #10): bank letter is now sourced
+            // from the Bank Account doctype's new `bank_letter` Custom
+            // Field. When the user picks issued_bank, auto-fetch the
+            // bank letter and copy it onto PRF.bank_letter. The user can
+            // still override per-PRF by uploading a different file —
+            // we only overwrite if bank_letter is currently blank OR
+            // matches the previously fetched Bank Account letter.
+            frappe.db.get_value('Bank Account', frm.doc.issued_bank, 'bank_letter').then(rr => {
+                const ba_letter = (rr && rr.message && rr.message.bank_letter) || '';
+                if (!ba_letter) return;
+                const current = frm.doc.bank_letter || '';
+                // Don't clobber a user-supplied override.
+                if (current && current !== ba_letter && current !== frm.__last_bank_letter_fetch) return;
+                if (current !== ba_letter) {
+                    frm.doc.bank_letter = ba_letter;
+                    try { frm.refresh_field("bank_letter"); } catch (e) {}
+                }
+                frm.__last_bank_letter_fetch = ba_letter;
+            });
         }
     },
     receiving_bank : function(frm) {
@@ -2345,8 +2452,13 @@ function fetch_supplier_details(frm, force_update) {
         });
     }
 
-    // Fetch bank letter from Supplier master
-    if (frm.doc.party_type === "Supplier") {
+    // Bank letter: PRIMARY source is the Bank Account.bank_letter
+    // Custom Field (handled in the issued_bank change handler above).
+    // The Supplier-master fallback below only fires when the
+    // PRF.bank_letter is still blank AND the supplier has a legacy
+    // avientek_bank_letter uploaded — keeps existing flows working.
+    // Sammish 2026-05-16 (Jithin #10).
+    if (frm.doc.party_type === "Supplier" && !frm.doc.bank_letter) {
         frappe.db.get_value('Supplier', frm.doc.party, 'avientek_bank_letter').then(r => {
             if (r.message && r.message.avientek_bank_letter) {
                 set_if_changed(frm, "bank_letter", r.message.avientek_bank_letter);

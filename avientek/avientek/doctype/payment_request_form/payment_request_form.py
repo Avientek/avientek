@@ -53,6 +53,74 @@ _PRF_BANK_EDIT_ROLES = {"Finance Manager", "Finance Controller", "System Manager
 class PaymentRequestForm(Document):
 	def validate(self):
 		self._guard_bank_edits_after_submit()
+		self._set_internal_transfer_title()
+		self._dedupe_attachments()
+
+	def _dedupe_attachments(self):
+		"""Sammish 2026-05-16 (Jithin #3): bank letters / supplier docs
+		were ending up as multiple identical File records attached to
+		the PRF (same file_url, same parent). Root cause varies — user
+		uploading via both the Attach field AND the sidebar widget,
+		legacy auto-fetch flows from Supplier master, or PRFs amended
+		from older versions.
+
+		On save, remove redundant File rows: for each unique
+		(attached_to_name, file_url) pair keep the OLDEST row (the
+		original upload) and delete the rest. Safe — File records
+		share file_url across rows; the underlying disk file is only
+		removed when its LAST reference is deleted.
+
+		Idempotent and silent: no-op when there are no duplicates.
+		"""
+		if self.is_new() or not self.name:
+			return
+		try:
+			rows = frappe.get_all(
+				"File",
+				filters={
+					"attached_to_doctype": "Payment Request Form",
+					"attached_to_name": self.name,
+				},
+				fields=["name", "file_url", "creation"],
+				order_by="creation asc",
+			)
+		except Exception:
+			return
+		seen = set()
+		for r in rows:
+			key = (r.file_url or "").strip()
+			if not key:
+				continue
+			if key in seen:
+				# Duplicate — delete this redundant pointer row.
+				try:
+					frappe.delete_doc("File", r.name, ignore_permissions=True, force=True)
+				except Exception:
+					# Never let a deletion failure break PRF save.
+					pass
+			else:
+				seen.add(key)
+
+	def _set_internal_transfer_title(self):
+		"""Sammish 2026-05-16 (Jithin #7): Internal Transfer vouchers
+		have no party / party_name, so the list view title column and
+		the form breadcrumb both render blank. Auto-fill party_name with
+		a descriptive label "Internal Transfer: <issued_bank> → <receiving_bank>"
+		so list view + title behave for IT type too.
+
+		Pay / Advance Pay rows are left untouched (party_name fetched
+		from the actual Supplier/Customer/Employee).
+		"""
+		if (self.payment_type or "") != "Internal Transfer":
+			return
+		# Never overwrite a non-IT label that the user has set manually
+		# (e.g. they typed a remark into party_name).
+		current = (self.party_name or "").strip()
+		if current and not current.startswith("Internal Transfer"):
+			return
+		issued = (self.issued_bank or "").strip() or "—"
+		receiving = (self.receiving_bank or "").strip() or "—"
+		self.party_name = f"Internal Transfer: {issued} → {receiving}"
 
 	def _guard_bank_edits_after_submit(self):
 		if self.is_new() or self.docstatus != 1:
@@ -1343,10 +1411,26 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         order_by="creation asc",
     ) or []
     _combined_self_name = f"{docname}_combined.pdf"
+    # Sammish 2026-05-16: also exclude doc.bank_letter from the sidebar
+    # loop. Without this, Jithin saw the bank letter appear TWICE in the
+    # combined PDF — once via step 3 (the explicit doc.bank_letter
+    # append) and once via step 5 (the sidebar pass picking up the same
+    # File record because users upload bank_letter via the Attachments
+    # widget which also creates a File row attached to the PRF).
+    # Additional documents are similarly de-duped: skip any sidebar
+    # file whose file_url matches an Additional Documents row.
+    _bank_letter_url = (doc.bank_letter or "").strip()
+    _addl_doc_urls = {
+        (a.attachment or "").strip()
+        for a in (doc.additional_documents or [])
+        if a.attachment
+    }
     sidebar_pdfs = [
         f for f in _sidebar_files_all
         if (f.file_name or "").strip() != _combined_self_name
         and (f.file_url or "").lower().endswith(".pdf")
+        and (f.file_url or "").strip() != _bank_letter_url
+        and (f.file_url or "").strip() not in _addl_doc_urls
     ]
     sidebar_count = len(sidebar_pdfs)
 
@@ -2849,14 +2933,22 @@ def get_payment_voucher_context(docname):
     # label and amount match (per Sridhar 2026-04-27 #6: "currency
     # showing company currency but amount is in Document currency").
     #
+    # Sammish 2026-05-16 (Jithin #2): the TR Amount line on the printed
+    # Payment Voucher must always read the DOCUMENT currency. When
+    # doc.currency was somehow left blank on legacy / migrated PRFs the
+    # old `doc.currency or company_currency` fallback printed the
+    # company default (AED) even though the real TR loan was in another
+    # currency. Fallback chain widened: doc.currency → issued_currency
+    # (TR is paid out of the issued bank) → company_currency.
+    #
     # Rule:
-    #   tr_currency = doc.currency if set, else company_currency
+    #   tr_currency = doc.currency / issued_currency / company_currency
     #   For each row:
     #       - if row.currency == tr_currency: use outstanding_amount/grand_total as-is
     #       - else: use base_outstanding_amount/base_grand_total (in company currency)
     #         and divide by tr_currency-to-company exchange rate to express in tr_currency.
     #   This gives a single coherent total in tr_currency.
-    tr_currency_for_total = doc.currency or company_currency
+    tr_currency_for_total = doc.currency or doc.issued_currency or company_currency
     tr_total = 0.0
     for row in (doc.payment_references or []):
         row_curr = row.currency or company_currency
@@ -2965,9 +3057,24 @@ def get_payment_voucher_context(docname):
             order_by="creation asc",
         ) or []
         combined_self_name = f"{docname}_combined.pdf"
+        # Sammish 2026-05-16: same de-dup as combined PDF builder — the
+        # bank letter and Additional Documents rows are rendered as
+        # their own sections in the print, so picking them up again here
+        # would print them twice.
+        _print_bank_letter_url = (doc.bank_letter or "").strip()
+        _print_addl_urls = {
+            (a.attachment or "").strip()
+            for a in (doc.additional_documents or [])
+            if a.attachment
+        }
         for f in sidebar_files:
             fname = (f.file_name or "").strip()
+            furl = (f.file_url or "").strip()
             if fname == combined_self_name:
+                continue
+            if furl and furl == _print_bank_letter_url:
+                continue
+            if furl and furl in _print_addl_urls:
                 continue
             ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
             if ext == "pdf":
