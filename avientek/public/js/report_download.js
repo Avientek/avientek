@@ -115,9 +115,19 @@ function _rd_build_column_spec(rv) {
 		if (!id) return;
 		if (id === "_checkbox" || id === "_liked_by" || id === "name:no_display") return;
 
-		var label = (c.df && c.df.label) || c.name || id;
-		var ftype = (c.df && c.df.fieldtype) || "Data";
-		var fopts = (c.df && c.df.options) || "";
+		var label = (c.df && c.df.label) || (c.docfield && c.docfield.label) || c.name || id;
+		// Sammish 2026-05-16 (Jithin caught it on Quotation Item export):
+		// For child-table columns Frappe's datatable puts the canonical
+		// fieldtype on c.docfield (e.g. "Float" for qty), and c.df is
+		// either missing or carries the datatable-internal "Data". Read
+		// both so Currency / Float / Int / Percent on Quotation Item /
+		// Sales Order Item etc. land as numeric cells in Excel.
+		var ftype = (c.docfield && c.docfield.fieldtype)
+			|| (c.df && c.df.fieldtype)
+			|| "Data";
+		var fopts = (c.docfield && c.docfield.options)
+			|| (c.df && c.df.options)
+			|| "";
 		var child_dt = (c.docfield && c.docfield.parent) || null;
 		var is_child = child_dt && child_dt !== dt;
 
