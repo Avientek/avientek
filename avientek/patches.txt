@@ -50,6 +50,14 @@ avientek.patches.populate_item_defaults_for_added_companies
 # Item's first tax row at SI/PO time → wrong VAT. Idempotent (only fills
 # blanks, never overwrites).
 avientek.patches.populate_customer_tax_category
+# Sammish 2026-05-15: conservative back-fill of Supplier.tax_category.
+# Unlike Customer, Supplier.company means "which Avientek entity buys
+# from them" — a foreign vendor we import from via FZCO still has
+# company=Avientek FZCO but should be Overseas (zero-rated), not FREE
+# ZONE. So we ONLY fill India suppliers (Avientek Electronics Trading
+# PVT. LTD → Registered Regular) where domestic-vs-overseas is
+# unambiguous. All other companies stay blank for manual review.
+avientek.patches.populate_supplier_tax_category
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.
