@@ -36,6 +36,13 @@ avientek.patches.add_prf_dashboard_links
 # tables from the legacy single Link fields on first run after schema
 # sync — idempotent so safe to leave on patches.txt forever.
 avientek.patches.migrate_quote_role_singles_to_tables
+# Sammish 2026-05-15: back-fill Item Defaults + Item Tax Templates for
+# AVIENTEK TRADING LLC / Singapore (AETPLS) / Avientek Group (AG) on
+# existing items. The original populate_item_defaults_and_taxes patch
+# (line 5) only seeded 6 companies; the 3 listed above were missing,
+# causing PO/PR on AVIENTEK TRADING LLC to fall back to UAE templates
+# and compute 0% VAT. Idempotent (only adds missing rows).
+avientek.patches.populate_item_defaults_for_added_companies
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.

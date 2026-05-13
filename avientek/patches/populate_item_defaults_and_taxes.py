@@ -1,38 +1,9 @@
 import frappe
 
-
-COMPANY_DEFAULTS = [
-	{
-		"company": "Avientek FZCO",
-		"income_account": "3-01-01-02 - SALES (VAT) - A",
-		"tax_template": "UAE VAT 5% - A",
-	},
-	{
-		"company": "Avientek Electronics Trading L.L.C",
-		"income_account": "3-01-01-02 - SALES (VAT) - AETL",
-		"tax_template": "UAE VAT 5% - AETL",
-	},
-	{
-		"company": "Avientek Trading W.L.L",
-		"income_account": "3-01-01-01 - SALES EXEMPT - ATW",
-		"tax_template": None,
-	},
-	{
-		"company": "AVIENTEK ELECTRONICS TRADING LIMITED",
-		"income_account": "3-01-01-02 - SALES (VAT) - AK",
-		"tax_template": "Kenya Tax - AK",
-	},
-	{
-		"company": "Establishment al-Wasa'it For communications and information Technology",
-		"income_account": "3-01-01-02 - SALES (VAT) - EWCIT",
-		"tax_template": "KSA VAT 15% - EWCIT",
-	},
-	{
-		"company": "Avientek Electronics Trading PVT. LTD",
-		"income_account": None,
-		"tax_template": "GST 18% - AETPL",
-	},
-]
+# Sammish 2026-05-15: source of truth moved to avientek.events.item.COMPANY_DEFAULTS
+# so the after-save hook and the bulk patch never drift apart. This patch keeps
+# its own import-time alias so callers can still reference COMPANY_DEFAULTS here.
+from avientek.events.item import COMPANY_DEFAULTS  # noqa: E402,F401
 
 
 def execute():
