@@ -73,6 +73,27 @@ def autofill_item_tax_template(doc, required_company=None):
     if doc.get("company"):
         abbr = frappe.db.get_value("Company", doc.company, "abbr") or ""
 
+    # Sammish 2026-05-15: cross-company carry-over fix.
+    # When a doc is created via mapping from another company's source
+    # (e.g. PO-AT-26-00126 in Avientek Trading WLL → GRN-KSA-26-00082
+    # in Avientek KSA), the source item rows arrive with their original
+    # item_tax_template pointing at the SOURCE company's tax template
+    # ("UAE VAT 5% - AETL" on a KSA Purchase Receipt). The receipt's
+    # parent tax template ("KSA VAT 15% - KSA") then computes rate=0
+    # because the per-item template doesn't define a rate for the KSA
+    # VAT account → tax silently drops to zero.
+    # Detect items whose existing template belongs to a DIFFERENT
+    # company than doc.company and clear them so the re-pick loop
+    # below assigns the right one.
+    if doc.get("company"):
+        for it in doc.items:
+            tpl = getattr(it, "item_tax_template", None)
+            if not tpl:
+                continue
+            tpl_company = frappe.db.get_value("Item Tax Template", tpl, "company")
+            if tpl_company and tpl_company != doc.company:
+                it.item_tax_template = None
+
     rows_to_fill = [it for it in doc.items if not getattr(it, "item_tax_template", None)]
     if not rows_to_fill:
         return
