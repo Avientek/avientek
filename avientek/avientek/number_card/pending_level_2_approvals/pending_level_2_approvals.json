@@ -2,7 +2,7 @@
  "color": "#FFA00A",
  "doctype": "Number Card",
  "document_type": "Quotation",
- "filters_json": "[[\"Quotation\",\"workflow_state\",\"=\",\"Pending Level 2 Approval\"]]",
+ "filters_json": "[[\"Quotation\",\"workflow_state\",\"in\",[\"Pending L2 Approval\",\"Pending Level 2 Approval\"]]]",
  "function": "Count",
  "is_public": 1,
  "is_standard": 1,

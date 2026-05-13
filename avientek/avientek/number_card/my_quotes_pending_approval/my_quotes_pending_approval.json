@@ -3,7 +3,7 @@
  "doctype": "Number Card",
  "document_type": "Quotation",
  "dynamic_filters_json": "[[\"Quotation\",\"owner\",\"=\",\"frappe.session.user\"]]",
- "filters_json": "[[\"Quotation\",\"workflow_state\",\"in\",[\"Pending Level 1 Approval\",\"Pending Level 2 Approval\"]]]",
+ "filters_json": "[[\"Quotation\",\"workflow_state\",\"in\",[\"Pending For Approval\",\"Pending L2 Approval\",\"Pending Level 1 Approval\",\"Pending Level 2 Approval\"]]]",
  "function": "Count",
  "is_public": 1,
  "is_standard": 1,

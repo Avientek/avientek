@@ -58,6 +58,14 @@ avientek.patches.populate_customer_tax_category
 # PVT. LTD → Registered Regular) where domestic-vs-overseas is
 # unambiguous. All other companies stay blank for manual review.
 avientek.patches.populate_supplier_tax_category
+# Sammish 2026-05-15: re-point the 3 Quotation approval Number Cards
+# (Pending Level 1 Approvals / Pending Level 2 Approvals / My Quotes
+# Pending Approval) to V3 state names. V2 used "Pending Level 1
+# Approval" / "Pending Level 2 Approval"; V3 renamed to "Pending For
+# Approval" / "Pending L2 Approval", so the cards counted 0 (or
+# just the 27 stuck V2 quotes), causing GM-CS users to think the
+# cards weren't working. Idempotent.
+avientek.patches.repoint_quotation_approval_cards_to_v3
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.
