@@ -1327,7 +1327,30 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     ref_count = len(doc.payment_references or [])
     addl_count = sum(1 for a in (doc.additional_documents or []) if a.attachment)
     bank_letter_count = 1 if doc.bank_letter else 0
-    total_stages = 1 + (3 * ref_count) + bank_letter_count + addl_count
+
+    # Sammish 2026-05-15: PRF sidebar attachments (Files uploaded
+    # directly on the form, e.g. supplier bank letter) get bundled at
+    # the very end of the combined PDF. The auto-generated
+    # <docname>_combined.pdf is filtered out to avoid recursing
+    # yesterday's bundle into today's.
+    _sidebar_files_all = frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": "Payment Request Form",
+            "attached_to_name": docname,
+        },
+        fields=["file_name", "file_url"],
+        order_by="creation asc",
+    ) or []
+    _combined_self_name = f"{docname}_combined.pdf"
+    sidebar_pdfs = [
+        f for f in _sidebar_files_all
+        if (f.file_name or "").strip() != _combined_self_name
+        and (f.file_url or "").lower().endswith(".pdf")
+    ]
+    sidebar_count = len(sidebar_pdfs)
+
+    total_stages = 1 + (3 * ref_count) + bank_letter_count + addl_count + sidebar_count
     _stage_counter = {"n": 0}
 
     def _step(msg):
@@ -1636,7 +1659,7 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             appended += 1
         _step(_("Bank letter"))
 
-    # 4. Additional documents (always last)
+    # 4. Additional documents (Additional Documents child table)
     for addl in (doc.additional_documents or []):
         if not addl.attachment:
             continue
@@ -1645,6 +1668,18 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             merger.append(io.BytesIO(pdf_bytes))
             appended += 1
         _step(_("Additional document"))
+
+    # 5. PRF sidebar attachments (uploaded via the Attachments widget,
+    # e.g. "Yealink Bank Details letter.pdf"). Sammish 2026-05-15:
+    # Jithin reported these were missing from Download Combined PDF.
+    # Filtering of the auto-generated <docname>_combined.pdf is done
+    # above in the sidebar_pdfs precompute so we don't recurse.
+    for f in sidebar_pdfs:
+        pdf_bytes = _read_local_pdf(f.file_url)
+        if pdf_bytes:
+            merger.append(io.BytesIO(pdf_bytes))
+            appended += 1
+        _step(_("PRF attachment — {0}").format(f.file_name or f.file_url))
 
     if appended == 0:
         raise RuntimeError(
@@ -2851,17 +2886,57 @@ def get_payment_voucher_context(docname):
         "Expense Claim": "Expense Claim", "Payment Entry": "Payment Entry",
         "Journal Entry": "Journal Entry", "Purchase Order": "Purchase Order"
     }
+    # Sammish 2026-05-15: Resolve the canonical Frappe doc per row
+    # BEFORE handing off to the attachment fetchers. Passing the
+    # supplier's free-text proforma number (e.g. "#032079") to
+    # frappe.get_print raises DoesNotExistError and silently buries the
+    # bank-letter attachment that is actually attached to the REAL PO
+    # (e.g. PO-FZCO-26-00556). Mirrors _build_combined_pdf_bytes._resolve_ref.
+    _ref_target_doctype = {
+        "Purchase Invoice": "Purchase Invoice",
+        "Debit Note":       "Purchase Invoice",
+        "Sales Invoice":    "Sales Invoice",
+        "Credit Note":      "Sales Invoice",
+        "Journal Entry":    "Journal Entry",
+        "Payment Entry":    "Payment Entry",
+        "Purchase Order":   "Purchase Order",
+        "Sales Order":      "Sales Order",
+        "Delivery Note":    "Delivery Note",
+    }
+
+    def _resolve_canonical(row):
+        rdt = (row.reference_doctype or "").strip()
+        if not rdt or rdt == "Manual":
+            return None, None
+        tgt = _ref_target_doctype.get(rdt)
+        if not tgt:
+            return None, None
+        name = (row.document_reference or "").strip()
+        if not name and tgt == "Purchase Invoice":
+            bill = (row.reference_name or "").strip()
+            if bill:
+                name = frappe.db.get_value("Purchase Invoice", {"bill_no": bill}, "name")
+        if not name or not frappe.db.exists(tgt, name):
+            return None, None
+        return tgt, name
+
     row_attachments = []
     for row in (doc.payment_references or []):
         row_data = {"ref_images": [], "po_images": [], "costing_images": [], "ref_label": "", "ref_name": "", "linked_po": ""}
-        if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
+        tgt_dt, tgt_name = _resolve_canonical(row)
+        if tgt_dt and tgt_name:
             row_data["ref_label"] = ref_label_map.get(row.reference_doctype, row.reference_doctype)
-            row_data["ref_name"] = row.reference_name
-            row_data["ref_images"] = get_reference_attachment_images(row.reference_doctype, row.reference_name, max_pages=3) or []
+            # User-facing ref label shows the canonical doc name (e.g.
+            # "PO-FZCO-26-00556"), not the supplier proforma. The
+            # supplier proforma is still shown in the Supplier Invoice
+            # No column above.
+            row_data["ref_name"] = tgt_name
+            row_data["ref_images"] = get_reference_attachment_images(tgt_dt, tgt_name, max_pages=3) or []
 
-            # Linked PO (supplier only)
+            # Linked PO (supplier only). For PI rows, derive the PO from
+            # the resolved canonical PI name (not from the freetext bill_no).
             if doc.party_type == "Supplier" and row.reference_doctype in ("Purchase Invoice", "Debit Note"):
-                linked_po = get_linked_po_for_invoice(row.reference_name)
+                linked_po = get_linked_po_for_invoice(tgt_name)
                 if linked_po:
                     row_data["linked_po"] = linked_po
                     row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
@@ -2871,6 +2946,48 @@ def get_payment_voucher_context(docname):
                     row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
 
         row_attachments.append(row_data)
+
+    # Sammish 2026-05-15: PRF sidebar attachments — files uploaded via
+    # the Attachments widget directly on the PRF (e.g. supplier bank
+    # letter "Yealink Bank Details letter.pdf"). Previously these were
+    # NOT included in either print or Combined PDF. Filter out the
+    # auto-attached <docname>_combined.pdf so we don't recurse a
+    # previous bundle into the new one.
+    prf_attachments = []
+    try:
+        sidebar_files = frappe.get_all(
+            "File",
+            filters={
+                "attached_to_doctype": "Payment Request Form",
+                "attached_to_name": docname,
+            },
+            fields=["file_name", "file_url"],
+            order_by="creation asc",
+        ) or []
+        combined_self_name = f"{docname}_combined.pdf"
+        for f in sidebar_files:
+            fname = (f.file_name or "").strip()
+            if fname == combined_self_name:
+                continue
+            ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+            if ext == "pdf":
+                # Render PDF pages as images so they embed in the print
+                # format like other attachment sections.
+                images = []
+                pdf_data = get_pdf_as_images("Payment Request Form", docname, max_pages=5) or []
+                for pd in pdf_data:
+                    if pd.get("file_name") == fname:
+                        images = pd.get("images") or []
+                        break
+                if images:
+                    prf_attachments.append({"file_name": fname, "images": images})
+            elif ext in ("jpg", "jpeg", "png", "gif", "webp"):
+                imgs = get_attachment_as_images(f.file_url, max_pages=1) or []
+                if imgs:
+                    prf_attachments.append({"file_name": fname, "images": imgs})
+    except Exception:
+        # Never let attachment fetch failures break the voucher print.
+        prf_attachments = []
 
     # Signers for the signature block in print (#10)
     signers = _get_workflow_signers(doc)
@@ -2947,6 +3064,10 @@ def get_payment_voucher_context(docname):
         "issued_amount_fmt": fmt_money(flt(doc.issued_amount or 0), currency=doc.issued_currency or company_currency),
         "receiving_amount_fmt": fmt_money(flt(doc.receiving_amount or 0), currency=doc.receiving_currency or company_currency),
         "row_attachments": row_attachments,
+        # Sammish 2026-05-15: sidebar attachments uploaded directly to
+        # the PRF (not to a linked reference). Rendered at the end of
+        # the print format after row_attachments.
+        "prf_attachments": prf_attachments,
     }
 
 
@@ -3456,6 +3577,16 @@ def get_print_format_as_images(doctype, docname, print_format=None, max_pages=2)
         List of base64 image strings
     """
     if not doctype or not docname:
+        return []
+
+    # Sammish 2026-05-15: skip silently when the doc doesn't exist.
+    # Without this guard, frappe.get_print() raises DoesNotExistError
+    # which msgprints "<doctype> <docname> not found" into the response
+    # message_log BEFORE our try/except swallows the exception. The
+    # message then surfaces as a popup on the print page (Jithin's bug
+    # report on AVFZC-02138: row had reference_name="#032079", which is
+    # the supplier's free-text proforma number, not a Frappe doc name).
+    if not frappe.db.exists(doctype, docname):
         return []
 
     max_pages = int(max_pages) if max_pages else 2
