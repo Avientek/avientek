@@ -118,13 +118,28 @@ def autofill_item_tax_template(doc, required_company=None):
             continue
         picked = None
         if abbr:
+            # Only accept templates whose suffix matches doc.company's abbr.
             for t in candidates:
                 if not t:
                     continue
                 if t.endswith(f" - {abbr}") or t.endswith(f"-{abbr}"):
                     picked = t
                     break
-        if not picked:
+            # Sammish 2026-05-15: when no matching-abbr template exists
+            # in the Item's tax table, LEAVE BLANK. The previous
+            # candidates[0] fallback was unsafe — it re-assigned a
+            # cross-company template (e.g. picked "UAE VAT 5% - A" on
+            # a KSA receipt when the Item Master only had UAE/AETPL/
+            # AETL/AK/EWCIT templates configured). ERPNext's tax calc
+            # then computed 0% per item because the cross-company
+            # template had no row for the parent doc's tax account.
+            # Leaving item_tax_template blank lets ERPNext fall back
+            # to the parent document's tax row rate (e.g. KSA VAT 15%
+            # - KSA's 15%), which is the correct behaviour.
+        elif candidates:
+            # No company on the doc — accept the first candidate as
+            # a best-effort default (preserves pre-2026-05-15 behaviour
+            # for doctypes without a company link).
             picked = candidates[0]
         if picked:
             it.item_tax_template = picked
