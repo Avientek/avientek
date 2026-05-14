@@ -2139,33 +2139,40 @@ frappe.ui.form.on('Payment Request Form', {
     set_tr_document_checkboxes: function(frm) {
         let tr_type = frm.doc.tr_type;
 
-        // Reset all checkboxes first
-        frm.set_value("has_proforma_invoice", 0);
-        frm.set_value("has_purchase_order", 0);
-        frm.set_value("has_commercial_invoice", 0);
-        frm.set_value("has_bl_awb", 0);
-        frm.set_value("has_delivery_note", 0);
-        frm.set_value("has_bill_of_entry", 0);
-
+        // Sammish 2026-05-16 (Jithin "Not Saved" regression): compute
+        // the target state for all 6 checkboxes, then write each field
+        // ONLY when the new value differs from the current value.
+        // The previous code did 6 unconditional `frm.set_value(..., 0)`
+        // followed by conditional `set_value(..., 1)` on every refresh
+        // — and in Frappe v15 set_value always dirties the form even
+        // when the value didn't change. So opening any TR/LC voucher
+        // would immediately show "Not Saved". Direct writes via
+        // frm.doc[fn]=val + refresh_field skip the dirty mechanism.
+        const target = {
+            has_proforma_invoice: 0,
+            has_purchase_order: 0,
+            has_commercial_invoice: 0,
+            has_bl_awb: 0,
+            has_delivery_note: 0,
+            has_bill_of_entry: 0,
+        };
         if (tr_type === "ADV") {
-            // ADV: Enable Proforma Invoice and Purchase Order
-            frm.set_value("has_proforma_invoice", 1);
-            frm.set_value("has_purchase_order", 1);
+            target.has_proforma_invoice = 1;
+            target.has_purchase_order = 1;
         } else if (tr_type === "Direct") {
-            // Direct: Enable Commercial Invoice, BL/AWB, Delivery Note, Bill of Entry
-            frm.set_value("has_commercial_invoice", 1);
-            frm.set_value("has_bl_awb", 1);
-            frm.set_value("has_delivery_note", 1);
-            frm.set_value("has_bill_of_entry", 1);
+            target.has_commercial_invoice = 1;
+            target.has_bl_awb = 1;
+            target.has_delivery_note = 1;
+            target.has_bill_of_entry = 1;
         }
-
-        // Make all document checkboxes read-only (user never change)
-        frm.set_df_property("has_proforma_invoice", "read_only", 1);
-        frm.set_df_property("has_purchase_order", "read_only", 1);
-        frm.set_df_property("has_commercial_invoice", "read_only", 1);
-        frm.set_df_property("has_bl_awb", "read_only", 1);
-        frm.set_df_property("has_delivery_note", "read_only", 1);
-        frm.set_df_property("has_bill_of_entry", "read_only", 1);
+        Object.keys(target).forEach(function (fn) {
+            const cur = frm.doc[fn] ? 1 : 0;
+            if (cur !== target[fn]) {
+                frm.doc[fn] = target[fn];
+                try { frm.refresh_field(fn); } catch (e) {}
+            }
+            frm.set_df_property(fn, "read_only", 1);
+        });
     },
 
     issued_bank : function(frm) {
