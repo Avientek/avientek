@@ -132,6 +132,12 @@ avientek.patches.add_pe_prf_link_and_processed_states
 # pre-model-sync patch, crashing the Frappe Cloud migrate on first
 # run because the column didn't yet exist. Idempotent.
 avientek.patches.backfill_prf_is_internal_party
+# Jithin 2026-05-15 (URGENT): clean up Quotations that bypassed the
+# V3 margin approval gate between 2026-05-09 and 2026-05-15. Auto-
+# fixes Submitted-state leaks (routes them back to Pending For
+# Approval); logs Approved-state leaks for manual review (likely
+# have downstream SOs). Idempotent.
+avientek.patches.fix_post_v3_quotation_margin_leaks
 # Jithin 2026-05-17 (URGENT — financial impact): the V3 Quotation
 # workflow seeder (`seed_quotation_approval_v3_workflow`, runs from
 # after_migrate) was updated in-place to restore the margin approval
