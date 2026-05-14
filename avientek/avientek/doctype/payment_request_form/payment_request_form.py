@@ -3045,22 +3045,33 @@ def get_payment_voucher_context(docname):
     # label and amount match (per Sridhar 2026-04-27 #6: "currency
     # showing company currency but amount is in Document currency").
     #
-    # Sammish 2026-05-16 (Jithin #2): the TR Amount line on the printed
-    # Payment Voucher must always read the DOCUMENT currency. When
-    # doc.currency was somehow left blank on legacy / migrated PRFs the
-    # old `doc.currency or company_currency` fallback printed the
-    # company default (AED) even though the real TR loan was in another
-    # currency. Fallback chain widened: doc.currency → issued_currency
-    # (TR is paid out of the issued bank) → company_currency.
+    # Sammish 2026-05-16 v2 (Jithin on PO-FZCO-26-00561 EUR voucher):
+    # the prior `doc.currency or doc.issued_currency or company_currency`
+    # chain ALWAYS resolved to AED on FZCO because doc.currency is
+    # fetched from company.default_currency (= AED) on PRF creation.
+    # The TR Amount then printed in AED even though the underlying PO
+    # was in EUR. Real "document currency" for a TR is the currency the
+    # supplier is billed in — i.e. the payment_references row currency.
     #
-    # Rule:
-    #   tr_currency = doc.currency / issued_currency / company_currency
-    #   For each row:
-    #       - if row.currency == tr_currency: use outstanding_amount/grand_total as-is
-    #       - else: use base_outstanding_amount/base_grand_total (in company currency)
-    #         and divide by tr_currency-to-company exchange rate to express in tr_currency.
-    #   This gives a single coherent total in tr_currency.
-    tr_currency_for_total = doc.currency or doc.issued_currency or company_currency
+    # New resolution order (dynamic):
+    #   1. If all payment_references share ONE currency → use that.
+    #   2. Else if doc.currency is one of the row currencies → use it.
+    #   3. Else if doc.currency is set → use it.
+    #   4. Else issued_currency, then company_currency.
+    #
+    # The existing conversion loop below still handles cross-currency
+    # rows correctly via base_amount + spot rate.
+    ref_currencies = {
+        (row.currency or "").strip()
+        for row in (doc.payment_references or [])
+        if (row.currency or "").strip()
+    }
+    if len(ref_currencies) == 1:
+        tr_currency_for_total = next(iter(ref_currencies))
+    elif ref_currencies and (doc.currency or "") in ref_currencies:
+        tr_currency_for_total = doc.currency
+    else:
+        tr_currency_for_total = doc.currency or doc.issued_currency or company_currency
     tr_total = 0.0
     for row in (doc.payment_references or []):
         row_curr = row.currency or company_currency
