@@ -9,7 +9,7 @@
    "label": "Sales Order Analysis"
   }
  ],
- "content": "[{\"id\":\"uaU3HFG-Wx\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Sales Team</span>\",\"col\":12}},{\"id\":\"shortcut_1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Open Dashboard\",\"col\":4}},{\"id\":\"2i4XC_iBXU\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"nc_todos\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Open ToDos\",\"col\":3}},{\"id\":\"nc_quotations\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open Quotations\",\"col\":3}},{\"id\":\"nc_sales_orders\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open Sales Orders\",\"col\":3}},{\"id\":\"nc_invoices\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Unpaid Sales Invoices\",\"col\":3}},{\"id\":\"nc_pending_l2\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Pending Level 2 Approvals\",\"col\":3}},{\"id\":\"nc_pending_l1\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Pending Level 1 Approvals\",\"col\":3}},{\"id\":\"nc_approved\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Approved Quotes\",\"col\":3}},{\"id\":\"nc_my_pending\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Quotes Pending Approval\",\"col\":3}},{\"id\":\"nc_my_drafts\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Draft Quotations\",\"col\":3}},{\"id\":\"nc_my_rejected\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Rejected Quotations\",\"col\":3}},{\"id\":\"spacer_1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"chart_trends\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sales Order Trends\",\"col\":12}},{\"id\":\"chart_analysis\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sales Order Analysis\",\"col\":12}},{\"id\":\"spacer_2\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
+ "content": "[{\"id\":\"uaU3HFG-Wx\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Sales Team</span>\",\"col\":12}},{\"id\":\"shortcut_1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Open Dashboard\",\"col\":4}},{\"id\":\"shortcut_prf_summary\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payment Request Summary\",\"col\":4}},{\"id\":\"2i4XC_iBXU\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"nc_todos\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Open ToDos\",\"col\":3}},{\"id\":\"nc_quotations\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open Quotations\",\"col\":3}},{\"id\":\"nc_sales_orders\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open Sales Orders\",\"col\":3}},{\"id\":\"nc_invoices\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Unpaid Sales Invoices\",\"col\":3}},{\"id\":\"nc_pending_l2\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Pending Level 2 Approvals\",\"col\":3}},{\"id\":\"nc_pending_l1\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Pending Level 1 Approvals\",\"col\":3}},{\"id\":\"nc_approved\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Approved Quotes\",\"col\":3}},{\"id\":\"nc_my_pending\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Quotes Pending Approval\",\"col\":3}},{\"id\":\"nc_my_drafts\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Draft Quotations\",\"col\":3}},{\"id\":\"nc_my_rejected\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Rejected Quotations\",\"col\":3}},{\"id\":\"spacer_1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"chart_trends\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sales Order Trends\",\"col\":12}},{\"id\":\"chart_analysis\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sales Order Analysis\",\"col\":12}},{\"id\":\"spacer_2\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
  "creation": "2026-02-26 13:16:04.242735",
  "custom_blocks": [],
  "docstatus": 0,
@@ -80,6 +80,12 @@
    "label": "Open Dashboard",
    "link_to": "sales-team-dashboard",
    "type": "Page"
+  },
+  {
+   "color": "Blue",
+   "label": "Payment Request Summary",
+   "link_to": "Payment Request Form Summary",
+   "type": "Report"
   }
  ],
  "title": "Sales Team"

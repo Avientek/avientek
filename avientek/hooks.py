@@ -435,6 +435,13 @@ doc_events = {
         "validate": "avientek.events.customer.validate_alias",
         "before_save": "avientek.events.customer.sync_credit_limit_totals",
     },
+    "Bank Account": {
+        "validate": "avientek.events.bank_account.auto_link_internal_company_account",
+    },
+    "Payment Entry": {
+        "on_submit": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
+        "on_cancel": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
+    },
     "Purchase Order": {
         "before_validate": "avientek.events.utils.fill_missing_item_defaults",
         "before_update_after_submit": "avientek.events.purchase_order.po_validate",
@@ -478,7 +485,14 @@ doc_events = {
             # pre-sale; clubbing is enforced at Sales Invoice instead.
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
-        "validate": "avientek.events.quotation.validate_item_tax_template",
+        "validate": [
+            "avientek.events.quotation.validate_item_tax_template",
+            # Jithin 2026-05-17 — block direct Submit when margin
+            # requires L1/L2 approval. Belt-and-braces alongside the
+            # V3 workflow condition restored in
+            # restore_quotation_margin_gate_on_v3_workflow.
+            "avientek.events.quotation.validate_margin_approval_required",
+        ],
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
             "avientek.events.quotation.validate_total_discount",

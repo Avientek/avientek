@@ -169,257 +169,6 @@ if (!document.getElementById('payment-ref-styles')) {
     $(row_styles).attr('id', 'payment-ref-styles').appendTo('head');
 }
 
-// ──────────────────────────────────────────────────────────────
-// Combined PDF persistent progress banner
-// ──────────────────────────────────────────────────────────────
-// Survives tab switching / minimizing / page refresh so a long PDF
-// build (for a PRF with many references) is always observable.
-// State lives in localStorage under `avientek:prf:<docname>:combined_pdf_job`.
-// Stale jobs (>30 min) are auto-cleared on load.
-const PRF_JOB_LS_KEY = (docname) => `avientek:prf:${docname}:combined_pdf_job`;
-// Sammish 2026-05-16 (Jithin #9): reduced from 30min → 15min.
-// Defence-in-depth — the new server-side completion check in
-// prf_start_banner clears completed jobs immediately; this stale
-// fence only catches workers that died without firing
-// prf_combined_pdf_ready OR prf_combined_pdf_failed. 15min is the
-// 900s timeout used by the worker queue, so anything older than that
-// can only be a leftover entry from a crashed worker.
-const PRF_JOB_STALE_MS = 15 * 60 * 1000;
-
-function prf_save_job(docname) {
-    try {
-        localStorage.setItem(PRF_JOB_LS_KEY(docname), JSON.stringify({
-            docname: docname,
-            started_at: Date.now(),
-        }));
-    } catch (e) {}
-}
-
-function prf_load_job(docname) {
-    try {
-        const raw = localStorage.getItem(PRF_JOB_LS_KEY(docname));
-        if (!raw) return null;
-        const job = JSON.parse(raw);
-        if (!job || !job.started_at || (Date.now() - job.started_at > PRF_JOB_STALE_MS)) {
-            localStorage.removeItem(PRF_JOB_LS_KEY(docname));
-            return null;
-        }
-        return job;
-    } catch (e) {
-        try { localStorage.removeItem(PRF_JOB_LS_KEY(docname)); } catch (_) {}
-        return null;
-    }
-}
-
-function prf_clear_job(docname) {
-    try { localStorage.removeItem(PRF_JOB_LS_KEY(docname)); } catch (e) {}
-}
-
-function prf_format_elapsed(ms) {
-    const s = Math.max(0, Math.floor(ms / 1000));
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-}
-
-// Use a single dedicated DOM element per form — frm.set_intro on this
-// Frappe version appends rather than replaces, so calling it on every
-// tick stacked dozens of duplicate banners.
-function prf_get_or_create_banner_el(frm) {
-    let el = frm._prf_banner_el;
-    if (el && document.body.contains(el)) return el;
-
-    // Prefer frm.dashboard.wrapper (sits above the form body). Fall back to
-    // the layout wrapper if dashboard isn't rendered yet.
-    let mount = null;
-    try { mount = frm.dashboard && frm.dashboard.wrapper; } catch (e) {}
-    if (!mount || !mount.length) {
-        try { mount = frm.layout && frm.layout.wrapper; } catch (e) {}
-    }
-    if (!mount || !mount.length) return null;
-
-    el = document.createElement('div');
-    el.className = 'prf-combined-pdf-banner';
-    el.style.cssText = 'margin:8px 0; padding:12px 16px; background:#eaf4ff; border-left:4px solid #1f7e4f; border-radius:4px;';
-    $(mount).prepend(el);
-    frm._prf_banner_el = el;
-    return el;
-}
-
-function prf_cancel_job(frm) {
-    const docname = frm.doc.name;
-    frappe.confirm(
-        __('Stop the Combined PDF build for {0}? Any partial work will be discarded.', [docname]),
-        function() {
-            frappe.call({
-                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.cancel_combined_pdf",
-                args: { docname: docname },
-                callback: function(r) {
-                    prf_clear_job(docname);
-                    prf_stop_banner(frm);
-                    frm._prf_last_progress = null;
-                    const cancelled = r && r.message && r.message.cancelled;
-                    frappe.show_alert({
-                        message: cancelled
-                            ? __('Combined PDF build stopped.')
-                            : __('Cancel sent — worker will stop on next checkpoint.'),
-                        indicator: cancelled ? 'orange' : 'blue'
-                    }, 6);
-                }
-            });
-        }
-    );
-}
-
-function prf_render_banner(frm, job, progress) {
-    const el = prf_get_or_create_banner_el(frm);
-    if (!el) return;
-    const elapsed = prf_format_elapsed(Date.now() - job.started_at);
-    let pct = 0;
-    let stage = __('Preparing Combined PDF…');
-    let counter = '';
-    if (progress && progress.total > 0) {
-        pct = Math.min(100, Math.round((progress.current / progress.total) * 100));
-        stage = progress.stage || stage;
-        counter = ` (${progress.current}/${progress.total})`;
-    }
-    el.innerHTML = `
-        <div style="display:flex; align-items:center; gap:12px;">
-            <div style="flex:0 0 auto; color:#1f7e4f;">
-                <i class="fa fa-spinner fa-spin" style="font-size:18px;"></i>
-            </div>
-            <div style="flex:1 1 auto; min-width:0;">
-                <div style="font-weight:600; margin-bottom:4px; color:#1f3a5f;">
-                    ${__('Combined PDF building')} — ${__('elapsed')} ${elapsed}
-                </div>
-                <div style="font-size:12px; color:#6c7680; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                    ${frappe.utils.escape_html(stage)}${counter}
-                </div>
-                <div style="height:6px; background:#ebeef0; border-radius:3px; overflow:hidden;">
-                    <div style="height:100%; width:${pct}%; background:#1f7e4f; transition:width .3s;"></div>
-                </div>
-                <div style="font-size:11px; color:#8d99a6; margin-top:4px;">
-                    ${__('Safe to switch tabs or refresh — this keeps running on the server.')}
-                </div>
-            </div>
-            <div style="flex:0 0 auto;">
-                <button type="button" class="btn btn-xs btn-danger prf-cancel-pdf-btn"
-                    style="white-space:nowrap;">
-                    ${__('Cancel')}
-                </button>
-            </div>
-        </div>
-    `;
-    // Wire the cancel button fresh each render (innerHTML replaces nodes).
-    const btn = el.querySelector('.prf-cancel-pdf-btn');
-    if (btn) {
-        btn.addEventListener('click', function(ev) {
-            ev.preventDefault();
-            prf_cancel_job(frm);
-        });
-    }
-}
-
-function prf_stop_banner(frm) {
-    if (frm._prf_banner_timer) {
-        clearInterval(frm._prf_banner_timer);
-        frm._prf_banner_timer = null;
-    }
-    if (frm._prf_banner_el) {
-        try { frm._prf_banner_el.remove(); } catch (e) {}
-        frm._prf_banner_el = null;
-    }
-}
-
-function prf_start_banner(frm) {
-    const job = prf_load_job(frm.doc.name);
-    if (!job) {
-        prf_stop_banner(frm);
-        return;
-    }
-
-    // Sammish 2026-05-16 (Jithin #9): rehydrating the banner from
-    // localStorage isn't enough — if the user closed the tab, was
-    // backgrounded, or had any network blip during the build, the
-    // realtime "prf_combined_pdf_ready" event was missed and the
-    // banner would otherwise show "running" for 30 minutes until the
-    // localStorage entry goes stale. Server-side verify: if a
-    // <docname>_combined.pdf File record exists with creation >=
-    // started_at, the build already finished — clear and stop.
-    frappe.call({
-        method: "frappe.client.get_list",
-        args: {
-            doctype: "File",
-            filters: {
-                attached_to_doctype: "Payment Request Form",
-                attached_to_name: frm.doc.name,
-                file_name: `${frm.doc.name}_combined.pdf`,
-            },
-            fields: ["name", "file_url", "creation"],
-            order_by: "creation desc",
-            limit_page_length: 1,
-        },
-        callback: function (r) {
-            const files = (r && r.message) || [];
-            if (files.length) {
-                const file_creation_ms = Date.parse(files[0].creation);
-                if (!isNaN(file_creation_ms) && file_creation_ms >= job.started_at) {
-                    // Build finished while we weren't listening — clean up.
-                    prf_clear_job(frm.doc.name);
-                    prf_stop_banner(frm);
-                    return;
-                }
-            }
-            // Still in flight: render + tick the timer.
-            prf_render_banner(frm, job, frm._prf_last_progress);
-            if (frm._prf_banner_timer) clearInterval(frm._prf_banner_timer);
-            let _tick = 0;
-            frm._prf_banner_timer = setInterval(() => {
-                const j = prf_load_job(frm.doc.name);
-                if (!j) {
-                    prf_stop_banner(frm);
-                    return;
-                }
-                prf_render_banner(frm, j, frm._prf_last_progress);
-                // Every 30 ticks (~30s) re-check the server for a
-                // completed file. Belt-and-braces in case the realtime
-                // event firehose stays disconnected throughout the build.
-                _tick += 1;
-                if (_tick % 30 === 0) {
-                    frappe.call({
-                        method: "frappe.client.get_list",
-                        args: {
-                            doctype: "File",
-                            filters: {
-                                attached_to_doctype: "Payment Request Form",
-                                attached_to_name: frm.doc.name,
-                                file_name: `${frm.doc.name}_combined.pdf`,
-                            },
-                            fields: ["creation", "file_url"],
-                            order_by: "creation desc",
-                            limit_page_length: 1,
-                        },
-                        callback: function (rr) {
-                            const ff = (rr && rr.message) || [];
-                            if (ff.length) {
-                                const ms = Date.parse(ff[0].creation);
-                                if (!isNaN(ms) && ms >= j.started_at) {
-                                    prf_clear_job(frm.doc.name);
-                                    prf_stop_banner(frm);
-                                    frappe.show_alert({
-                                        message: __('Combined PDF ready'),
-                                        indicator: 'green'
-                                    }, 8);
-                                    frm.reload_doc();
-                                }
-                            }
-                        }
-                    });
-                }
-            }, 1000);
-        }
-    });
-}
 
 // Invoice drill-down link + View button styles
 if (!document.getElementById('inv-drilldown-styles')) {
@@ -756,6 +505,37 @@ frappe.ui.form.on('Payment Request Form', {
         }
     },
 
+    apply_released_lock: function(frm) {
+        // Jithin 2026-05-17: once the PRF reaches a terminal state
+        // (Released = paid, Cancelled, Rejected) nothing on the doc
+        // should be editable — including the Party Bank Account picker
+        // which is otherwise kept open by allow_on_submit=1 on the
+        // doctype field. Frappe's standard read-only-on-submit handles
+        // every OTHER field; this clamp covers the 3 allow_on_submit
+        // exceptions and the payment_references child grid.
+        try {
+            const ws = frm.doc.workflow_state || "";
+            const TERMINAL = ["Released", "Partially Processed", "Processed", "Cancelled", "Rejected"];
+            if (TERMINAL.indexOf(ws) < 0) return;
+
+            const TO_LOCK = ["supplier_bank_account", "additional_documents", "supplier_balance"];
+            TO_LOCK.forEach(function (fn) {
+                if (frm.fields_dict[fn]) {
+                    frm.set_df_property(fn, "read_only", 1);
+                }
+            });
+
+            const grid = frm.fields_dict.payment_references && frm.fields_dict.payment_references.grid;
+            if (grid) {
+                grid.cannot_add_rows = true;
+                grid.cannot_delete_rows = true;
+                if (typeof grid.refresh === "function") grid.refresh();
+            }
+        } catch (e) {
+            console.warn("apply_released_lock:", e);
+        }
+    },
+
 	onload: function(frm) {
         // Fetch supplier details only if party exists and details are missing
         // (fetch_supplier_details has internal checks to avoid overwriting existing data)
@@ -764,18 +544,25 @@ frappe.ui.form.on('Payment Request Form', {
         }
         // Auto-pick naming series for new docs
         _apply_naming_series_by_company(frm);
+		// Jithin 2026-05-17: switch from a static `is_company_account=1
+		// AND company=PRF.company` filter to a server-side query that
+		// ALSO returns Bank Accounts linked to Internal Customers /
+		// Internal Suppliers (whose `company` is the OTHER group
+		// entity). Mirrors the party_query_with_internal pattern. The
+		// matching auto-tick on Bank Account.validate keeps the
+		// `is_company_account` flag in sync server-side.
 		frm.set_query("issued_bank", function() {
             return {
+                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.bank_account_query_with_internal",
                 filters: {
-                    is_company_account: 1,
                     company: frm.doc.company
                 }
             };
         });
         frm.set_query("receiving_bank", function() {
             return {
+                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.bank_account_query_with_internal",
                 filters: {
-                    is_company_account: 1,
                     company: frm.doc.company
                 }
             };
@@ -884,6 +671,23 @@ frappe.ui.form.on('Payment Request Form', {
         // race with Frappe's default read-only-all.
         frm.events.apply_fc_field_unlock(frm);
 
+        // Jithin 2026-05-17: clamp allow_on_submit fields once the PRF
+        // is Released / Cancelled / Rejected. Must run AFTER the FC
+        // unlock so FC's edit window in Approved L1/L2 isn't affected.
+        frm.events.apply_released_lock(frm);
+
+        // Jithin 2026-05-17: Account No / IBAN / Bank / SWIFT are
+        // sourced from the chosen Party Bank Account (master record),
+        // so direct editing of the PRF copies would silently drift.
+        // Make them read-only — user changes the source by picking a
+        // different Bank Account, and the supplier_bank_account handler
+        // re-fills them.
+        ["account_number", "iban", "bank", "swift_code"].forEach(function (fn) {
+            if (frm.fields_dict[fn]) {
+                frm.set_df_property(fn, "read_only", 1);
+            }
+        });
+
         // Setup invoice drill-down links and View buttons
         frm.events.setup_invoice_drilldown(frm);
 
@@ -919,18 +723,70 @@ frappe.ui.form.on('Payment Request Form', {
             frm.events.render_payment_history(frm);
         }
 
-        // Reset dirty state after initial load (async fetches may mark form dirty).
-        // Jithin 2026-05-12: original code called frm.page.clear_indicator()
-        // which wiped the workflow-state pill — already removed.
-        // Jithin 2026-05-13: I replaced that with frm.refresh_header() but
-        // Frappe v15's refresh_header() calls clear_custom_buttons()
-        // (form.js:724) — so EVERY custom button (Download Combined PDF,
-        // Get Items, Create menu, …) was being wiped 1.5 s after load.
-        // Drop the header-redraw too. Just reset the unsaved flag.
-        if (!frm.doc.__islocal) {
-            setTimeout(() => {
-                frm.doc.__unsaved = 0;
-            }, 1500);
+        // Sammish 2026-05-17 (Jithin "Not Saved" still showing on
+        // AVFZC-02148 Advance Pay): the prior 500ms poller was racing
+        // against multiple async writes (bank_letter fetch, account
+        // currency lookups, supplier_address fill, …). Each write
+        // dirties the form BEFORE the next 500ms tick clears it, so
+        // the pill still flashes "Not Saved".
+        //
+        // Root-cause fix: neutralise the two chokepoints that flip the
+        // pill on a saved doc — `frm.dirty()` (every set_value path
+        // funnels through it) AND `frm.toolbar.set_indicator_for_dirty()`
+        // (writes the pill text directly, bypassing __unsaved). They're
+        // stubbed for a 5s load window OR until the user actually
+        // touches the form — whichever comes first. After restore, any
+        // real edit dirties normally.
+        if (!frm.doc.__islocal && !frm._prf_load_window_armed) {
+            frm._prf_load_window_armed = true;
+
+            const orig_dirty = frm.dirty.bind(frm);
+            const orig_set_indicator_dirty = (
+                frm.toolbar && typeof frm.toolbar.set_indicator_for_dirty === "function"
+                    ? frm.toolbar.set_indicator_for_dirty.bind(frm.toolbar)
+                    : null
+            );
+            let restored = false;
+
+            const restore = function () {
+                if (restored) return;
+                restored = true;
+                frm.dirty = orig_dirty;
+                if (orig_set_indicator_dirty && frm.toolbar) {
+                    frm.toolbar.set_indicator_for_dirty = orig_set_indicator_dirty;
+                }
+                $(frm.wrapper).off(".prf-load-window");
+                // Final sweep — any stray __unsaved that slipped through
+                // (e.g., via locals[cdt][cdn] grid writes that bypass
+                // both stubs) gets cleared once.
+                if (frm.doc.__unsaved) {
+                    frm.doc.__unsaved = 0;
+                    try {
+                        if (frm.toolbar && typeof frm.toolbar.show_indicator === "function") {
+                            frm.toolbar.show_indicator();
+                        }
+                    } catch (e) {}
+                }
+            };
+
+            // Stubs swallow every dirty signal during the load window.
+            frm.dirty = function () { /* suppressed during initial load */ };
+            if (orig_set_indicator_dirty && frm.toolbar) {
+                frm.toolbar.set_indicator_for_dirty = function () { /* suppressed during initial load */ };
+            }
+
+            // Restore on the FIRST real user interaction. keydown +
+            // mousedown fire BEFORE Frappe's change/input handlers, so
+            // the restore happens in time for the genuine edit to
+            // dirty the form normally.
+            $(frm.wrapper).on(
+                "keydown.prf-load-window mousedown.prf-load-window",
+                function () { restore(); }
+            );
+
+            // Hard timeout — anything still firing after 5s is
+            // late-arriving async work; treat as system-driven.
+            setTimeout(restore, 5000);
         }
 
         // Sridhar 2026-05-06: show "Download Combined PDF" for every
@@ -958,12 +814,6 @@ frappe.ui.form.on('Payment Request Form', {
             // "prf_combined_pdf_ready", which we listen for below to
             // surface a "Download Now" button.
             const $btn = frm.add_custom_button(__('Download Combined PDF'), function () {
-                // Start persistent banner immediately so user gets live
-                // feedback even if they switch tabs / minimize / refresh.
-                prf_save_job(frm.doc.name);
-                frm._prf_last_progress = null;
-                prf_start_banner(frm);
-
                 frappe.call({
                     method: "avientek.avientek.doctype.payment_request_form.payment_request_form.download_payment_pdf",
                     args: { docname: frm.doc.name, mode: "enqueue" },
@@ -974,11 +824,6 @@ frappe.ui.form.on('Payment Request Form', {
                                 indicator: 'green'
                             }, 5);
                         }
-                    },
-                    error: function() {
-                        // Gateway rejected — don't leave the banner spinning forever.
-                        prf_clear_job(frm.doc.name);
-                        prf_stop_banner(frm);
                     }
                 });
             });
@@ -1003,49 +848,17 @@ frappe.ui.form.on('Payment Request Form', {
             setTimeout(_ensure_combined_pdf_button, 250);
             setTimeout(_ensure_combined_pdf_button, 1200);
 
-            // Listen once per form-load for the worker's progress + ready +
-            // failed events. These fire on the realtime (socket.io) channel
-            // which reconnects automatically when the tab comes back, so
-            // missed events on a backgrounded tab are delivered on resume.
+            // Listen once per form-load for the worker's ready event so the
+            // generated PDF appears in Attachments without a manual refresh.
+            // The full progress banner was removed per Jithin 2026-05-17.
             if (!frm._prf_combined_pdf_listener) {
                 frm._prf_combined_pdf_listener = true;
 
-                frappe.realtime.on("prf_combined_pdf_progress", function(data) {
-                    if (!data || data.docname !== frm.doc.name) return;
-                    frm._prf_last_progress = data;
-                    const job = prf_load_job(frm.doc.name);
-                    if (job) prf_render_banner(frm, job, data);
-                });
-
                 frappe.realtime.on("prf_combined_pdf_ready", function(data) {
                     if (!data || data.docname !== frm.doc.name) return;
-                    prf_clear_job(frm.doc.name);
-                    prf_stop_banner(frm);
-                    frm._prf_last_progress = null;
-                    frappe.show_alert({
-                        message: __('Combined PDF ready'),
-                        indicator: 'green'
-                    }, 10);
-                    window.open(data.file_url, "_blank");
                     frm.reload_doc();
                 });
-
-                frappe.realtime.on("prf_combined_pdf_failed", function(data) {
-                    if (!data || data.docname !== frm.doc.name) return;
-                    prf_clear_job(frm.doc.name);
-                    prf_stop_banner(frm);
-                    frm._prf_last_progress = null;
-                    frappe.msgprint({
-                        title: __('Combined PDF failed'),
-                        message: data.error || __('Unknown error'),
-                        indicator: 'red'
-                    });
-                });
             }
-
-            // Rehydrate banner if a build is still in flight from a prior
-            // page load (user refreshed the tab or came back after a while).
-            prf_start_banner(frm);
         }
 
         // "Get Open Purchase Orders" button — pulls a Supplier's open POs
@@ -2106,8 +1919,70 @@ frappe.ui.form.on('Payment Request Form', {
 		});
 	},
 
+    // Jithin 2026-05-17: when the user picks a Party Bank Account from
+    // the dropdown, auto-fetch Account No / IBAN / Bank / SWIFT from
+    // THAT Bank Account record. Mirrors the supplier-master fetch
+    // chain in fetch_supplier_details but keyed on the explicit Bank
+    // Account pick, so switching accounts (e.g., supplier with two
+    // banks) re-fills the dependent fields. Direct-assign + refresh_field
+    // bypasses Frappe's dirty mechanism so a saved doc doesn't flip to
+    // "Not Saved" on reload.
+    supplier_bank_account: function(frm) {
+        const apply = function (fn, val) {
+            const next = val == null ? "" : val;
+            if ((frm.doc[fn] || "") !== next) {
+                frm.doc[fn] = next;
+                try { frm.refresh_field(fn); } catch (e) {}
+            }
+        };
+
+        if (!frm.doc.supplier_bank_account) {
+            // Cleared — wipe the four dependent fields so stale values
+            // from the previous Bank Account don't linger.
+            ["account_number", "iban", "bank", "swift_code"].forEach(function (fn) {
+                apply(fn, "");
+            });
+            return;
+        }
+
+        frappe.db.get_value(
+            "Bank Account",
+            frm.doc.supplier_bank_account,
+            ["bank_account_no", "iban", "bank", "branch_code"]
+        ).then(function (r) {
+            const ba = (r && r.message) || {};
+            apply("account_number", ba.bank_account_no || "");
+            apply("iban", ba.iban || "");
+            apply("bank", ba.bank || "");
+
+            // SWIFT lives on the Bank master (Bank.swift_number).
+            // Falls back to the Bank Account's branch_code, matching
+            // the server-side get_supplier_bank_details convention.
+            if (ba.bank) {
+                frappe.db.get_value("Bank", ba.bank, "swift_number").then(function (rr) {
+                    const swift = (rr && rr.message && rr.message.swift_number) || ba.branch_code || "";
+                    apply("swift_code", swift);
+                });
+            } else {
+                apply("swift_code", ba.branch_code || "");
+            }
+        });
+    },
+
     // Check if selected Mode of Payment is TR or LC and show/hide TR/LC section
     payment_mode: function(frm) {
+        // Sammish 2026-05-16 (Jithin "Not Saved" regression):
+        // direct-assign so reopening a saved TR/LC voucher doesn't
+        // re-dirty the form when the async callback writes back the
+        // already-stored value.
+        const apply = function (newVal) {
+            const target = newVal ? 1 : 0;
+            const cur = frm.doc.is_tr_lc_payment ? 1 : 0;
+            if (cur !== target) {
+                frm.doc.is_tr_lc_payment = target;
+                try { frm.refresh_field("is_tr_lc_payment"); } catch (e) {}
+            }
+        };
         if (frm.doc.payment_mode) {
             frappe.call({
                 method: "frappe.client.get_value",
@@ -2118,15 +1993,14 @@ frappe.ui.form.on('Payment Request Form', {
                 },
                 callback: function(r) {
                     if (r.message) {
-                        let is_tr_lc = r.message.custom_is_tr || r.message.custom_is_lc;
-                        frm.set_value("is_tr_lc_payment", is_tr_lc ? 1 : 0);
+                        apply(r.message.custom_is_tr || r.message.custom_is_lc);
                     } else {
-                        frm.set_value("is_tr_lc_payment", 0);
+                        apply(0);
                     }
                 }
             });
         } else {
-            frm.set_value("is_tr_lc_payment", 0);
+            apply(0);
         }
     },
 
@@ -2187,9 +2061,17 @@ frappe.ui.form.on('Payment Request Form', {
                     fieldname: ["account_currency"]
                 },
                 callback: function(r) {
+                    // Sammish 2026-05-16 (Jithin "Not Saved" regression):
+                    // direct-assignment when value differs. set_value in
+                    // v15 always dirties — and this callback fires async
+                    // after form load when account fetch_from re-triggers
+                    // the issued_bank chain, marking saved docs dirty.
                     if (r.message) {
-                        console.log("r.message.account_currency", r.message.account_currency);
-                        frm.set_value("issued_currency", r.message.account_currency);
+                        const newVal = r.message.account_currency || "";
+                        if ((frm.doc.issued_currency || "") !== newVal) {
+                            frm.doc.issued_currency = newVal;
+                            try { frm.refresh_field("issued_currency"); } catch (e) {}
+                        }
                     }
                 }
             });
@@ -2227,9 +2109,14 @@ frappe.ui.form.on('Payment Request Form', {
                     fieldname: ["account_currency"]
                 },
                 callback: function(r) {
+                    // Same "Not Saved" mitigation as the issued_bank
+                    // handler above — direct-assign only on change.
                     if (r.message) {
-                        console.log("r.message.account_currency", r.message.account_currency);
-                        frm.set_value("receiving_currency", r.message.account_currency);
+                        const newVal = r.message.account_currency || "";
+                        if ((frm.doc.receiving_currency || "") !== newVal) {
+                            frm.doc.receiving_currency = newVal;
+                            try { frm.refresh_field("receiving_currency"); } catch (e) {}
+                        }
                     }
                 }
             });

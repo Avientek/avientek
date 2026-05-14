@@ -18,7 +18,7 @@ from frappe import ValidationError, _, qb, scrub, throw
 from frappe.query_builder.functions import Sum
 from frappe.query_builder.utils import DocType
 from pypika import Order
-from frappe.utils import getdate, nowdate
+from frappe.utils import flt, getdate, nowdate
 from frappe.contacts.doctype.address.address import get_address_display
 from pypika.terms import ExistsCriterion
 from frappe.query_builder import AliasedQuery, Criterion, Table
@@ -257,6 +257,118 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 	if table == "Customer":
 		return [(r[0], r[2] or "") for r in rows]
 	return [(r[0],) for r in rows]
+
+
+@frappe.whitelist()
+@frappe.read_only()
+def bank_account_query_with_internal(doctype, txt, searchfield, start, page_len, filters):
+	"""Frappe set_query backend for the PRF issued_bank / receiving_bank pickers.
+
+	Returns Bank Accounts matching EITHER:
+	    - is_company_account = 1 AND company = PRF.company (own company bank)
+	    OR
+	    - linked party is an Internal Customer (Customer.is_internal_customer=1)
+	    OR
+	    - linked party is an Internal Supplier (Supplier.is_internal_supplier=1)
+
+	Mirrors the party_query_with_internal pattern: the legacy
+	`company = PRF.company` filter alone hides internal-party banks
+	because they're tagged with the OTHER group entity's `company`.
+	Jithin 2026-05-17.
+	"""
+	company = (filters or {}).get("company") or ""
+	txt_like = f"%{(txt or '').strip()}%"
+	start = int(start or 0)
+	page_len = int(page_len or 20)
+
+	rows = frappe.db.sql(
+		"""
+		SELECT ba.name, ba.account_name
+		FROM `tabBank Account` ba
+		LEFT JOIN `tabCustomer` c
+			ON ba.party_type = 'Customer' AND ba.party = c.name
+		LEFT JOIN `tabSupplier` s
+			ON ba.party_type = 'Supplier' AND ba.party = s.name
+		WHERE IFNULL(ba.disabled, 0) = 0
+		  AND (
+		      (IFNULL(ba.is_company_account, 0) = 1 AND ba.company = %(company)s)
+		      OR IFNULL(c.is_internal_customer, 0) = 1
+		      OR IFNULL(s.is_internal_supplier, 0) = 1
+		  )
+		  AND (ba.name LIKE %(txt)s OR ba.account_name LIKE %(txt)s)
+		ORDER BY ba.name ASC
+		LIMIT %(start)s, %(page_len)s
+		""",
+		{
+			"txt": txt_like,
+			"company": company,
+			"start": start,
+			"page_len": page_len,
+		},
+		as_list=True,
+	)
+	return [(r[0], r[1] or "") for r in rows]
+
+
+@frappe.whitelist()
+@frappe.read_only()
+def get_outstanding_payment_request_forms(party_type=None, party=None, company=None):
+	"""Return Released / Partially Processed PRFs eligible to be paid.
+
+	Used by the 'Get Payment Request Form' picker on Payment Entry.
+	Filters: docstatus=1, workflow_state in {Released, Partially Processed},
+	optional party_type / party / company narrowing.
+
+	Each row carries `paid_so_far` (sum of submitted PE base_paid_amount
+	keyed to this PRF) and `outstanding_balance` so the dialog can show
+	exactly what's left to pay.
+	"""
+	conditions = ["prf.docstatus = 1", "prf.workflow_state IN ('Released', 'Partially Processed')"]
+	params = {}
+	if party_type:
+		conditions.append("prf.party_type = %(party_type)s")
+		params["party_type"] = party_type
+	if party:
+		conditions.append("prf.party = %(party)s")
+		params["party"] = party
+	if company:
+		conditions.append("prf.company = %(company)s")
+		params["company"] = company
+
+	where = " AND ".join(conditions)
+	rows = frappe.db.sql(
+		f"""
+		SELECT
+			prf.name,
+			prf.posting_date,
+			prf.party_type,
+			prf.party,
+			prf.party_name,
+			prf.payment_type,
+			prf.currency,
+			prf.company,
+			prf.issued_bank,
+			prf.supplier_bank_account,
+			prf.payment_mode,
+			prf.workflow_state,
+			IFNULL(prf.total_outstanding_amount, 0) AS total_outstanding_amount,
+			IFNULL((
+				SELECT SUM(pe.base_paid_amount)
+				FROM `tabPayment Entry` pe
+				WHERE pe.payment_request_form = prf.name AND pe.docstatus = 1
+			), 0) AS paid_so_far
+		FROM `tabPayment Request Form` prf
+		WHERE {where}
+		ORDER BY prf.posting_date DESC, prf.name DESC
+		LIMIT 100
+		""",
+		params,
+		as_dict=True,
+	)
+
+	for r in rows:
+		r["outstanding_balance"] = flt(r["total_outstanding_amount"]) - flt(r["paid_so_far"])
+	return rows
 
 
 def _get_workflow_signers(doc):
