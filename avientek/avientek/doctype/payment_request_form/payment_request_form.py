@@ -180,6 +180,85 @@ class PaymentRequestForm(Document):
 			)
 
 
+@frappe.whitelist()
+@frappe.read_only()
+def party_query_with_internal(doctype, txt, searchfield, start, page_len, filters):
+	"""Frappe set_query backend for the PRF Party picker.
+
+	Sammish 2026-05-16 (Jithin): the legacy filter `{company: PRF.company}`
+	silently hid Internal Customers / Internal Suppliers because their
+	master records are linked to a DIFFERENT company (the represented
+	group entity), not the buying/selling company on the PRF. This
+	custom query returns parties matching EITHER:
+	    - company = PRF.company (regular external parties)
+	    OR
+	    - is_internal_supplier = 1 / is_internal_customer = 1 regardless
+	      of company (inter-company entities)
+
+	For Employee party type there is no internal flag, so the company
+	filter applies straight.
+
+	`doctype` is set by Frappe to the resolved target doctype based on
+	the Dynamic Link's party_type option. We re-derive party_type from
+	`filters` and decide which internal flag (if any) to OR with.
+	"""
+	from frappe.desk.reportview import get_match_cond
+
+	company = (filters or {}).get("company") or ""
+	party_type = (filters or {}).get("party_type") or doctype
+
+	txt_like = f"%{(txt or '').strip()}%"
+	page_len = int(page_len or 20)
+	start = int(start or 0)
+	searchfield = searchfield or "name"
+
+	# Build the OR clause based on which internal flag applies.
+	if party_type == "Supplier":
+		internal_clause = "OR `tabSupplier`.is_internal_supplier = 1"
+		table = "Supplier"
+	elif party_type == "Customer":
+		internal_clause = "OR `tabCustomer`.is_internal_customer = 1"
+		table = "Customer"
+	else:
+		# Employee or anything else — no internal flag, plain company match.
+		internal_clause = ""
+		table = party_type or doctype or "Supplier"
+
+	match_cond = get_match_cond(table)
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT name, supplier_name, customer_name
+		FROM (
+			SELECT
+				`tab{table}`.name AS name,
+				{'`tabSupplier`.supplier_name AS supplier_name' if table == 'Supplier' else "'' AS supplier_name"},
+				{'`tabCustomer`.customer_name AS customer_name' if table == 'Customer' else "'' AS customer_name"}
+			FROM `tab{table}`
+			WHERE `tab{table}`.disabled = 0
+			  AND (`tab{table}`.{searchfield} LIKE %(txt)s
+			       OR `tab{table}`.name LIKE %(txt)s)
+			  AND (
+			       `tab{table}`.company = %(company)s
+			       {internal_clause}
+			  )
+			  {match_cond}
+		) parties
+		ORDER BY name ASC
+		LIMIT %(start)s, %(page_len)s
+		""",
+		{"txt": txt_like, "company": company, "start": start, "page_len": page_len},
+		as_list=True,
+	)
+	# Frappe set_query expects a list of tuples; first column is the
+	# value, additional columns become the search-help description.
+	if table == "Supplier":
+		return [(r[0], r[1] or "") for r in rows]
+	if table == "Customer":
+		return [(r[0], r[2] or "") for r in rows]
+	return [(r[0],) for r in rows]
+
+
 def _get_workflow_signers(doc):
 	"""For #10 — build a dict of workflow_state → {full_name, user, date}
 	by walking the Version history. Only the FIRST time each state was

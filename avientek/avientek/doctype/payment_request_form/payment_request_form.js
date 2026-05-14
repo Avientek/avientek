@@ -780,10 +780,19 @@ frappe.ui.form.on('Payment Request Form', {
                 }
             };
         });
+        // Sammish 2026-05-16 (Jithin): the previous company-only filter
+        // hid Internal Suppliers / Internal Customers because those
+        // master records are normally linked to a DIFFERENT company
+        // (the represented group entity), not the buying/selling
+        // company on the PRF. Switched to a server-side query that
+        // returns parties matching company = PRF.company OR with the
+        // is_internal_supplier / is_internal_customer flag set.
         frm.set_query("party", function() {
             return {
+                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.party_query_with_internal",
                 filters: {
-                    company: frm.doc.company
+                    company: frm.doc.company,
+                    party_type: frm.doc.party_type,
                 }
             };
         });
