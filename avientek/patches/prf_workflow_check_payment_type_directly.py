@@ -87,6 +87,19 @@ def execute():
 
 	# Part 2 — SQL backfill of is_internal_party on existing PRFs.
 	# Only flip 0 → 1 so re-runs are no-ops.
+	#
+	# Sammish 2026-05-15 (Frappe Cloud migrate fail): patches.txt runs
+	# BEFORE schema sync, so on a first migrate after the Custom Field
+	# was added the column doesn't exist yet. The next run (after the
+	# field syncs in via fixtures) picks up the backfill. Guard with
+	# has_column so we don't crash the migrate.
+	if not frappe.db.has_column("Payment Request Form", "is_internal_party"):
+		print(
+			"[prf_workflow_check_payment_type_directly] is_internal_party column "
+			"not yet synced — skipping SQL backfill (will run on next migrate)"
+		)
+		return
+
 	it_rows = frappe.db.sql(
 		"""UPDATE `tabPayment Request Form`
 		   SET is_internal_party = 1

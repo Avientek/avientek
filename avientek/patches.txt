@@ -1,3 +1,4 @@
+[pre_model_sync]
 avientek.patches.fix_quotation_item_layout
 avientek.patches.fix_quotation_item_layout_v2
 avientek.patches.remove_quotation_item_column_breaks
@@ -110,6 +111,40 @@ avientek.patches.prf_internal_transfer_keep_l2
 # is_internal_party on every existing PRF whose party is internal or
 # payment_type is Internal Transfer. Idempotent.
 avientek.patches.prf_workflow_check_payment_type_directly
+# Jithin 2026-05-17: back-fill is_company_account=1 on Bank Accounts
+# whose linked party is an Internal Customer / Internal Supplier so
+# the existing-data state matches the new validate hook
+# (avientek.events.bank_account.auto_link_internal_company_account).
+# Idempotent.
+avientek.patches.backfill_is_company_account_internal_party
+# Jithin 2026-05-17: PRF Released → Processed tracking. Adds
+# `payment_request_form` Custom Field on Payment Entry (set by the
+# new picker on PE + by create_payment_entry from PRF) and registers
+# two new PRF workflow states (Partially Processed, Processed). State
+# is set programmatically by avientek.events.payment_entry on PE
+# submit/cancel — no Workflow transitions are added.
+avientek.patches.add_pe_prf_link_and_processed_states
+
+[post_model_sync]
+# Sammish 2026-05-15: backfill is_internal_party on existing PRFs
+# AFTER schema sync brings the Custom Field in. Was previously
+# inlined inside prf_workflow_check_payment_type_directly which is a
+# pre-model-sync patch, crashing the Frappe Cloud migrate on first
+# run because the column didn't yet exist. Idempotent.
+avientek.patches.backfill_prf_is_internal_party
+# Jithin 2026-05-17 (URGENT — financial impact): the V3 Quotation
+# workflow seeder (`seed_quotation_approval_v3_workflow`, runs from
+# after_migrate) was updated in-place to restore the margin approval
+# gate on Draft → Submit + Submitted → Approve, plus a new
+# Draft → Send for Approval → Pending For Approval transition for
+# low-margin quotes. QN-LTD-26-02011 (-1.52% margin vs 6% std)
+# bypassed approval because the V3 seed dropped V2's
+# `doc.custom_auto_approve_ok == 1` condition. Server-side belt-and-
+# braces enforcement lives in
+# avientek.events.quotation.validate_margin_approval_required. The
+# one-off restore_quotation_margin_gate_on_v3_workflow patch file is
+# left in the repo for historical reference but not registered here —
+# the seeder rewrite supersedes it.
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.

@@ -95,13 +95,33 @@ def _build_transitions(creators, approvers, l2_approvers=None):
     #   - "l1_approver"  -> expanded per `approvers` list (Level 1 pool)
     #   - "l2_approver"  -> expanded per `l2_approvers` list (Level 2 pool)
     #   - any literal role name like "All" -> used as-is
-    template = [
-        # Standard submit
-        ("Draft",                  "Submit",                "Submitted",              "All",         1, ""),
+    # Jithin 2026-05-17 — margin gate. set_margin_flags
+    # (events/quotation.py:1258) sets `custom_auto_approve_ok = 0` when
+    # any brand's margin is below the per-brand threshold. The V2
+    # workflow gated Submit on `doc.custom_auto_approve_ok == 1` and
+    # the V3 initial seed dropped it, allowing QN-LTD-26-02011 (-1.52%
+    # margin) to bypass approval on 2026-05-13. Restored here:
+    #   - Draft → Submit fires only when margin is auto-approve OK
+    #   - New "Send for Approval" routes low-margin quotes through L1
+    #   - Submitted → Approve also enforces the same flag so a quote
+    #     auto-submitted (margin OK) can fast-forward, but if the
+    #     flag is later flipped to 0 the Approve button hides.
+    # safe_eval here only needs `==` + attribute access — no flt/cint
+    # so it works under WHITELISTED_SAFE_EVAL_GLOBALS.
+    AUTO_OK = "doc.custom_auto_approve_ok == 1"
+    NEEDS_APPROVAL = "doc.custom_auto_approve_ok == 0"
 
-        # Once submitted, fast-forward to Approved (no approval gate at this point —
-        # the gate kicks in only when probability >= 75 and user requests change).
-        ("Submitted",              "Approve",               "Approved",               "All",         1, ""),
+    template = [
+        # Auto-approved (margin OK) — Draft fast-forwards to Submitted.
+        ("Draft",                  "Submit",                "Submitted",              "All",         1, AUTO_OK),
+
+        # Low-margin route — Draft must enter the L1 approval chain.
+        ("Draft",                  "Send for Approval",     "Pending For Approval",   "All",         1, NEEDS_APPROVAL),
+
+        # Once submitted (margin OK), fast-forward to Approved. If the
+        # margin flag has since flipped to 0 (e.g., post-save recalc),
+        # the Approve button hides and the user must request L1/L2.
+        ("Submitted",              "Approve",               "Approved",               "All",         1, AUTO_OK),
 
         # Document Approval: user ticks one of the checkboxes + saves.
         # Rahul 2026-05-15 — same transitions must fire from `Submitted`

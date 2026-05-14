@@ -1184,6 +1184,60 @@ def calculate_additional_discount_percentage(doc, method=None):
     # Set percentage so core uses it
     doc.additional_discount_percentage = round(percentage, 2)
 
+def validate_margin_approval_required(doc, method=None):
+    """Block direct Submit when margin requires L1/L2 approval.
+
+    Background: set_margin_flags (run_calculation_pipeline → 1267)
+    sets `custom_auto_approve_ok=0` and `custom_level_1_approve_ok=0`
+    when any brand's margin is below the per-brand threshold.
+
+    The legacy "Quotation Final" workflow gated the Submit transition
+    on `doc.custom_auto_approve_ok == 1`. The V3 seeder
+    (seed_quotation_approval_v3_workflow) dropped that condition —
+    QN-LTD-26-02011 (party C-AETPL-00392, -1.52% margin vs 6% std) was
+    submitted on 2026-05-13 even though both approve_ok flags were 0.
+
+    Belt-and-braces with the workflow fix
+    (patches/restore_quotation_margin_gate_on_v3_workflow): the workflow
+    condition hides the Submit action in the UI, but server-side
+    enforcement catches API / direct-save bypass too.
+    """
+    if doc.docstatus != 1:
+        return  # Only fires on Submit transition (Draft → Submitted)
+
+    if cint(doc.get("custom_auto_approve_ok")):
+        return  # Margin auto-approve OK — Submit is allowed
+
+    # Approval path is intact (or already approved) — let it through
+    APPROVAL_PATH_STATES = {
+        "Pending For Approval",
+        "Pending L2 Approval",
+        "Pending Level 1 Approval",
+        "Pending Level 2 Approval",
+        "Approved",
+        "Approved for Update",
+        "Requested for update",
+        "Cancellation Requested",
+        "Cancellation L2 Pending",
+        "Sent for Revision",
+        "Cancelled",
+    }
+    ws = (doc.workflow_state or "").strip()
+    if ws in APPROVAL_PATH_STATES:
+        return
+
+    # Direct Submit attempt on a low-margin quote
+    need_l2 = not cint(doc.get("custom_level_1_approve_ok"))
+    level = "Level 2" if need_l2 else "Level 1"
+    frappe.throw(
+        _(
+            "This Quotation cannot be submitted directly — margin requires "
+            "{0} approval. Please use 'Send for Approval' instead of 'Submit'."
+        ).format(level),
+        title=_("Approval Required"),
+    )
+
+
 def validate_total_discount(doc, method):
     """Ensure sum of child discounts matches parent discount amount.
     Only validate when a discount is actually set (> 0).
