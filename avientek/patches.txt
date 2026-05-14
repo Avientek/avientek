@@ -96,6 +96,14 @@ avientek.patches.prf_internal_transfer_skip_l1_and_l2
 # external parties, and creates a new "Approve Level 2" transition
 # direct from Authorised for internal-party PRFs. Idempotent.
 avientek.patches.prf_internal_party_skip_l1
+# Sammish 2026-05-16 (Jithin final): align Internal Transfer with
+# Internal Customer / Internal Supplier — all three skip L1 only,
+# keep L2. Removes the IT direct-Release transitions (Authorised →
+# Released, Approved L1 → Released) and simplifies the L1 guard
+# to just is_internal_party==0. PaymentRequestForm.validate now
+# also sets is_internal_party=1 when payment_type=="Internal
+# Transfer", so the existing internal-party transitions cover IT.
+avientek.patches.prf_internal_transfer_keep_l2
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.

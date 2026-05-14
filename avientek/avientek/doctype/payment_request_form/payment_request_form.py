@@ -60,17 +60,27 @@ class PaymentRequestForm(Document):
 	def _set_is_internal_party(self):
 		"""Sammish 2026-05-16 (Jithin): pre-compute the `is_internal_party`
 		Check field by reading `is_internal_customer` / `is_internal_supplier`
-		from the linked Customer / Supplier. The PRF workflow uses this
-		flag to skip Level 1 approval for inter-company PRFs — workflow
-		conditions can't call frappe.db.get_value so we materialise the
-		boolean on the doc itself.
+		from the linked Customer / Supplier — OR by the payment_type
+		being "Internal Transfer". The PRF workflow uses this flag to
+		skip Level 1 approval for inter-company PRFs (workflow conditions
+		can't call frappe.db.get_value, so we materialise the boolean
+		on the doc itself).
+
+		All three inter-company scenarios collapse to the same path:
+		Authorised → Approve Level 2 → Approved L2 → Released. The L1
+		Finance Manager review is skipped, but GM/Director L2 sign-off
+		is still required because money is moving between entities.
 
 		Idempotent: writes 0 when no party / non-internal party so
 		toggling the flag on the master propagates on next save."""
 		flag = 0
 		party_type = (self.party_type or "").strip()
 		party = (self.party or "").strip()
-		if party and party_type == "Customer":
+		# Internal Transfer is inherently an inter-company payment (between
+		# bank accounts the company group owns); treat it as internal-party.
+		if (self.payment_type or "") == "Internal Transfer":
+			flag = 1
+		elif party and party_type == "Customer":
 			flag = int(bool(frappe.db.get_value("Customer", party, "is_internal_customer")))
 		elif party and party_type == "Supplier":
 			flag = int(bool(frappe.db.get_value("Supplier", party, "is_internal_supplier")))
