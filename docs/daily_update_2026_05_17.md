@@ -2,9 +2,9 @@
 
 ## Headline
 
-**PRF Released → Processed tracking + Internal-party bank account support + half-dozen polish fixes.**
+**PRF Released → Processed tracking + Internal-party bank account support + Quotation margin gate restored (URGENT) + half-dozen polish fixes.**
 
-Seven workstreams shipped across the PRF, Payment Entry, Bank Account, and Sales Team workspace surfaces. One new Script Report. One Custom Field. Two new workflow states. One back-fill patch. All smoke-tested on `avientekv21.local`.
+Eight workstreams shipped across PRF, Payment Entry, Bank Account, Quotation, and Sales Team workspace surfaces. One new Script Report. One Custom Field. Two new workflow states on PRF + two restored conditions on Quotation V3. Five new patches. All smoke-tested on `avientekv21.local`.
 
 ---
 
@@ -65,6 +65,53 @@ End-to-end status flow for PRFs after Release:
 
 **Files:** `patches/add_pe_prf_link_and_processed_states.py`, `events/payment_entry.py`, `hooks.py`, `payment_request_form.py` (whitelisted `get_outstanding_payment_request_forms`), `public/js/payment_entry.js`, `payment_request_form.js` (terminal-state list extended), `patches.txt`
 
+### 8. Quotation V3 — restored margin approval gate + leak cleanup (URGENT)
+
+**Flagged by Jithin on WhatsApp (2026-05-15 5:17 PM):** `QN-LTD-26-02011` (party C-AETPL-00392, India, -1.52% margin vs brand standard 6%) was submitted without going through Level 1 / Level 2 approval. Sridhar initially attributed it to "submitted before workflow update was configured" but Jithin pushed back: "quote conditions were in place from the time".
+
+**Root cause confirmed:** Jithin was right. The V3 workflow seeder (deployed 2026-05-09) dropped the V2 margin condition `doc.custom_auto_approve_ok == 1` from the `Draft → Submit` transition. The system still computed the flag correctly (QN-LTD-26-02011 had `custom_auto_approve_ok = 0` AND `custom_level_1_approve_ok = 0` — needed Level 2 approval) but the workflow no longer asked the system about it.
+
+**Three-layer fix:**
+
+- **UI gate** — V3 seeder template updated: `Draft → Submit → Submitted` and `Submitted → Approve → Approved` now require `doc.custom_auto_approve_ok == 1`. New `Draft → Send for Approval → Pending For Approval` transition added for low-margin quotes.
+- **Server gate** — new `validate_margin_approval_required` in `events/quotation.py` throws on direct Submit when margin requires L1/L2 — catches REST API / script bypass too.
+- **Audit cleanup** — patch `fix_post_v3_quotation_margin_leaks.py` runs on next migrate to clean up post-V3 leaks.
+
+**Audit results (post-V3 only, since 2026-05-09):**
+
+*8 quotes auto-routed back to Pending For Approval (Draft) — patch handled automatically:*
+
+| Reference | Company |
+|---|---|
+| QN-FZCO-26-00183 | Avientek FZCO |
+| QN-FZCO-26-00189 | Avientek FZCO |
+| QN-FZCO-26-00191 | Avientek FZCO |
+| QN-LLC-26-00413 | Avientek Electronics Trading L.L.C |
+| QN-LTD-26-01995 | Avientek Electronics Trading PVT. LTD |
+| QN-LTD-26-02001-1 | Avientek Electronics Trading PVT. LTD |
+| QN-LTD-26-02002 | Avientek Electronics Trading PVT. LTD |
+| QN-LTD-26-02006 | Avientek Electronics Trading PVT. LTD |
+
+*Plus the original QN-LTD-26-02011 — manually moved to `docstatus=0 / status=Draft / workflow_state=Pending For Approval` on local; same SQL queued for prod via Bench Console.*
+
+*9 quotes left as-is per Jithin's decision (already at "Approved" — likely have linked Sales Orders / Invoices, so cancel+amend would disrupt downstream documents):*
+
+| Reference | Company | Customer | Submitted By |
+|---|---|---|---|
+| QN-LTD-26-02008 | Avientek Electronics Trading PVT. LTD | C-AETPL-00724 | sales@avientek.com |
+| QN-KSA-26-00127 | AVIENTEK TRADING LLC | CUST-2024-00492 | me.sales4@avientek.com |
+| QN-LTD-26-01998 | Avientek Electronics Trading PVT. LTD | C-AETPL-00609 | sales@avientek.com |
+| QN-FZCO-26-00184 | Avientek FZCO | C-FZCO-0354 | me.sales@avientek.com |
+| QN-LLC-26-00404 | Avientek Electronics Trading L.L.C | C-LLC-0180 | me.sales1@avientek.com |
+| QN-LTD-26-01997 | Avientek Electronics Trading PVT. LTD | C-AETPL-00630 | sales@avientek.com |
+| QN-LTD-26-01996 | Avientek Electronics Trading PVT. LTD | C-AETPL-00815 | sales@avientek.com |
+| QN-LTD-26-01993 | Avientek Electronics Trading PVT. LTD | C-AETPL-00453 | sales@avientek.com |
+| QN-LLC-26-00402 | Avientek Electronics Trading L.L.C | C-LLC-0180 | me.sales1@avientek.com |
+
+**Going forward (post-deploy):** every new quote where margin requires approval is blocked at all three layers (UI button hidden, workflow condition, server validate). No path remains for a low-margin quote to skip Level 1 / Level 2.
+
+**Files:** `patches/seed_quotation_approval_v3_workflow.py` (template updated), `events/quotation.py` (`validate_margin_approval_required`), `hooks.py` (Quotation validate wired), `patches/fix_post_v3_quotation_margin_leaks.py` (new — cleanup), `patches/restore_quotation_margin_gate_on_v3_workflow.py` (historical standalone, not registered), `patches.txt`
+
 ---
 
 ## Open items
@@ -95,3 +142,6 @@ The picker SQL and `_recompute_prf_status` compare `base_paid_amount` against `t
 | `_recompute_prf_status("AVWLL-00345")` runs clean | ✓ |
 | Payment Request Form Summary report returns 27 rows | ✓ |
 | Python + JS syntax all clean | ✓ |
+| Quotation V3 workflow has 27 transitions (margin gate restored) | ✓ |
+| `fix_post_v3_quotation_margin_leaks` patch routed 8 Submitted leaks, logged 9 Approved | ✓ |
+| QN-LTD-26-02011 reachable at `Pending For Approval / Draft` on local | ✓ |
