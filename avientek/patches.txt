@@ -83,6 +83,13 @@ avientek.patches.prf_internal_transfer_skip_l2
 # the explicit second column was redundant. This patch deletes the
 # stray Property Setter; the in_standard_filter one stays.
 avientek.patches.remove_prf_workflow_state_in_list_view
+# Sammish 2026-05-16 (Jithin follow-up): Internal Transfer bypasses
+# BOTH Approve Level 1 AND Approve Level 2. Workflow for IT becomes
+# Draft → Authorised → Released. Non-IT vouchers keep the full
+# Authorised → Approved L1 → Approved L2 → Released chain. Adds the
+# L1 skip on top of the earlier prf_internal_transfer_skip_l2 patch.
+# Idempotent.
+avientek.patches.prf_internal_transfer_skip_l1_and_l2
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.

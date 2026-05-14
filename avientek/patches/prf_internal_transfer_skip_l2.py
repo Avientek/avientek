@@ -31,17 +31,42 @@ Idempotent.
 import frappe
 
 
-WORKFLOW_NAME = "Payment Request Form"
+# Sammish 2026-05-16 fix: the actual workflow on this site is named
+# "Payment Request Form Approval" (suffix added by
+# create_payment_request_workflow). The original constant
+# "Payment Request Form" silently mismatched and the patch did
+# nothing on every site. Resolve dynamically by document_type now.
+DOCTYPE = "Payment Request Form"
 IT_CONDITION_SKIP = 'doc.payment_type != "Internal Transfer"'
 IT_CONDITION_ONLY = 'doc.payment_type == "Internal Transfer"'
 
 
+def _find_workflow_name():
+	rows = frappe.get_all(
+		"Workflow",
+		filters={"document_type": DOCTYPE, "is_active": 1},
+		fields=["name"],
+		order_by="modified desc",
+	)
+	if rows:
+		return rows[0]["name"]
+	any_wf = frappe.get_all(
+		"Workflow",
+		filters={"document_type": DOCTYPE},
+		fields=["name"],
+		order_by="modified desc",
+		limit=1,
+	)
+	return any_wf[0]["name"] if any_wf else None
+
+
 def execute():
-	if not frappe.db.exists("Workflow", WORKFLOW_NAME):
-		print(f"[prf_internal_transfer_skip_l2] {WORKFLOW_NAME} workflow missing — skipping")
+	wf_name = _find_workflow_name()
+	if not wf_name:
+		print(f"[prf_internal_transfer_skip_l2] no workflow for {DOCTYPE} — skipping")
 		return
 
-	wf = frappe.get_doc("Workflow", WORKFLOW_NAME)
+	wf = frappe.get_doc("Workflow", wf_name)
 	changed = False
 
 	# 1. Guard existing Approve Level 2 transitions.
@@ -90,5 +115,5 @@ def execute():
 	wf.save()
 	frappe.db.commit()
 	print(
-		f"[prf_internal_transfer_skip_l2] updated workflow — total transitions={len(wf.transitions)}"
+		f"[prf_internal_transfer_skip_l2] updated workflow {wf_name!r} — total transitions={len(wf.transitions)}"
 	)
