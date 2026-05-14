@@ -55,6 +55,29 @@ class PaymentRequestForm(Document):
 		self._guard_bank_edits_after_submit()
 		self._set_internal_transfer_title()
 		self._dedupe_attachments()
+		self._set_is_internal_party()
+
+	def _set_is_internal_party(self):
+		"""Sammish 2026-05-16 (Jithin): pre-compute the `is_internal_party`
+		Check field by reading `is_internal_customer` / `is_internal_supplier`
+		from the linked Customer / Supplier. The PRF workflow uses this
+		flag to skip Level 1 approval for inter-company PRFs — workflow
+		conditions can't call frappe.db.get_value so we materialise the
+		boolean on the doc itself.
+
+		Idempotent: writes 0 when no party / non-internal party so
+		toggling the flag on the master propagates on next save."""
+		flag = 0
+		party_type = (self.party_type or "").strip()
+		party = (self.party or "").strip()
+		if party and party_type == "Customer":
+			flag = int(bool(frappe.db.get_value("Customer", party, "is_internal_customer")))
+		elif party and party_type == "Supplier":
+			flag = int(bool(frappe.db.get_value("Supplier", party, "is_internal_supplier")))
+		# Use direct attribute write — set_value would dirty the form
+		# during JS-triggered refresh paths.
+		if int(self.get("is_internal_party") or 0) != flag:
+			self.is_internal_party = flag
 
 	def _dedupe_attachments(self):
 		"""Sammish 2026-05-16 (Jithin #3): bank letters / supplier docs
