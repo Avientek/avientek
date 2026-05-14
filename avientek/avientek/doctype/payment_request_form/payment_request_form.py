@@ -3285,7 +3285,14 @@ def get_payment_voucher_context(docname):
         "rows_data": rows_data,
         "formatted_currency_totals": formatted_currency_totals,
         "total_base_formatted": fmt_money(total_base, currency=company_currency),
-        "tr_total_formatted": "{:,.2f}".format(tr_total),
+        # Sammish 2026-05-16 (Jithin): format with fmt_money(currency=tr_currency)
+        # so the printed TR Amount carries the currency symbol natively
+        # (€ for EUR, د.إ for AED, $ for USD, ₹ for INR, etc.). The
+        # bare `"{:,.2f}".format(tr_total)` we had before printed a
+        # plain number and left the print template to manually prepend
+        # "EUR" / "AED" — fine but inconsistent with the rest of the
+        # voucher (Invoice Details table uses fmt_money too).
+        "tr_total_formatted": fmt_money(tr_total, currency=tr_currency_for_total),
         # Always matches the currency tr_total was summed in (see TR/LC
         # block above) so the printed label and amount stay coherent.
         "tr_currency": tr_currency_for_total,
