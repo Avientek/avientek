@@ -104,6 +104,12 @@ avientek.patches.prf_internal_party_skip_l1
 # also sets is_internal_party=1 when payment_type=="Internal
 # Transfer", so the existing internal-party transitions cover IT.
 avientek.patches.prf_internal_transfer_keep_l2
+# Sammish 2026-05-16 (Jithin caught it on AVWLL-00346): widen workflow
+# conditions to check payment_type directly (so IT works without
+# validate having backfilled is_internal_party) + SQL backfill
+# is_internal_party on every existing PRF whose party is internal or
+# payment_type is Internal Transfer. Idempotent.
+avientek.patches.prf_workflow_check_payment_type_directly
 # seed_quotation_approval_v3_workflow runs from after_migrate only —
 # patches.txt phase happens BEFORE schema sync, so any Custom Field /
 # Property Setter changes wouldn't be live yet when the seeder runs.
