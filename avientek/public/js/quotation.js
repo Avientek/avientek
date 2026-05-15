@@ -2152,6 +2152,12 @@ function show_update_special_price_dialog(frm) {
         custom_margin_: row.custom_margin_,
     }));
 
+    // Jithin 2026-05-17 — pin the dialog's Currency formatting to the
+    // QUOTE'S currency. Without `options`, Frappe falls back to the
+    // system default currency (AED on this site), which made INR
+    // quotes show prices with the د.إ symbol.
+    const doc_currency = frm.doc.currency || frappe.defaults.get_global_default("currency") || "AED";
+
     let fields = [
         {
             fieldtype: "Table",
@@ -2165,9 +2171,9 @@ function show_update_special_price_dialog(frm) {
                 { fieldname: "name", fieldtype: "Data", hidden: 1 },
                 { fieldname: "item_code", fieldtype: "Data", label: __("Item Code"), in_list_view: 1, read_only: 1, columns: 2 },
                 { fieldname: "qty", fieldtype: "Float", label: __("Qty"), in_list_view: 1, read_only: 1, columns: 1 },
-                { fieldname: "custom_special_price", fieldtype: "Currency", label: __("Special Price"), in_list_view: 1, columns: 2 },
+                { fieldname: "custom_special_price", fieldtype: "Currency", options: doc_currency, label: __("Special Price"), in_list_view: 1, columns: 2 },
                 { fieldname: "custom_special_price_note", fieldtype: "Data", label: __("Special Price Note"), in_list_view: 1, columns: 2 },
-                { fieldname: "custom_special_rate", fieldtype: "Currency", label: __("Selling Price"), in_list_view: 1, read_only: 1, columns: 2 },
+                { fieldname: "custom_special_rate", fieldtype: "Currency", options: doc_currency, label: __("Selling Price"), in_list_view: 1, read_only: 1, columns: 2 },
                 { fieldname: "custom_margin_", fieldtype: "Percent", label: __("Margin %"), in_list_view: 1, read_only: 1, columns: 1 },
             ]
         }
