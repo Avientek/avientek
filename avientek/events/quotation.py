@@ -1521,3 +1521,146 @@ def update_special_price(quotation_name, items):
     frappe.db.commit()
 
     return {"message": "Special Price updated successfully"}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Sammish 2026-05-15 — Quotation → Sales Order mapper replacement.
+#
+# Bug context: on Frappe Cloud (frappe 15.107.5 / erpnext 15.108.1),
+# clicking "Create → Sales Order" on QN-FZCO-26-00192 (and likely
+# many others) opens a Sales Order with the customer field populated
+# but the items table empty. Identical data + identical avientek
+# overrides on local (frappe 15.100.1 / erpnext 15.95.2) produce a
+# Sales Order with all 21 items mapped correctly.
+#
+# Diagnosis: a regression somewhere in the upstream 15.95 → 15.108
+# deltas (the items-iteration path in ERPNext's _make_sales_order)
+# strips items even when can_map_row evaluates to True.
+#
+# Fix: reproduce the working 15.95.2 mapper logic here and route the
+# Quotation "Create → Sales Order" button to it via
+# `override_whitelisted_methods` in hooks.py. Zero UX change for users.
+# Until ERPNext patches the upstream regression, this is the unblock.
+# ──────────────────────────────────────────────────────────────────────
+@frappe.whitelist()
+def make_sales_order_safe(source_name, target_doc=None, args=None):
+    from frappe.utils import getdate, nowdate
+    from frappe.model.mapper import get_mapped_doc
+    from erpnext.selling.doctype.quotation.quotation import (
+        _make_customer,
+        get_ordered_items,
+    )
+
+    # 1) Expiry guard — mirrors the public ERPNext check.
+    if not frappe.db.get_singles_value(
+        "Selling Settings", "allow_sales_order_creation_for_expired_quotation"
+    ):
+        q = frappe.db.get_value(
+            "Quotation",
+            source_name,
+            ["transaction_date", "valid_till"],
+            as_dict=1,
+        )
+        if q and q.valid_till and (
+            q.valid_till < q.transaction_date or q.valid_till < getdate(nowdate())
+        ):
+            frappe.throw(_("Validity period of this quotation has ended."))
+
+    if args is None:
+        args = {}
+    if isinstance(args, str):
+        args = json.loads(args)
+
+    customer = _make_customer(source_name, ignore_permissions=False)
+    ordered_items = get_ordered_items(source_name)
+    selected_rows = [
+        x.get("name") for x in (frappe.flags.get("args", {}) or {}).get("selected_items", [])
+    ]
+
+    has_unit_price_items = frappe.db.get_value(
+        "Quotation", source_name, "has_unit_price_items"
+    )
+
+    def is_unit_price_row(source):
+        return bool(has_unit_price_items) and source.qty == 0
+
+    def set_missing_values(source, target):
+        if customer:
+            target.customer = customer.name
+            target.customer_name = customer.customer_name
+            if not target.get("sales_team"):
+                for d in customer.get("sales_team") or []:
+                    target.append(
+                        "sales_team",
+                        {
+                            "sales_person": d.sales_person,
+                            "allocated_percentage": d.allocated_percentage or None,
+                            "commission_rate": d.commission_rate,
+                        },
+                    )
+        if source.referral_sales_partner:
+            target.sales_partner = source.referral_sales_partner
+            target.commission_rate = frappe.get_value(
+                "Sales Partner", source.referral_sales_partner, "commission_rate"
+            )
+        target.flags.ignore_permissions = False
+        target.run_method("set_missing_values")
+        target.run_method("calculate_taxes_and_totals")
+
+    def update_item(obj, target, source_parent):
+        balance_qty = (
+            obj.qty
+            if is_unit_price_row(obj)
+            else obj.qty - ordered_items.get(obj.name, 0.0)
+        )
+        target.qty = balance_qty if balance_qty > 0 else 0
+        target.stock_qty = flt(target.qty) * flt(obj.conversion_factor)
+        if obj.against_blanket_order:
+            target.against_blanket_order = obj.against_blanket_order
+            target.blanket_order = obj.blanket_order
+            target.blanket_order_rate = obj.blanket_order_rate
+
+    def can_map_row(item):
+        if not (
+            (item.qty > ordered_items.get(item.name, 0.0)) or is_unit_price_row(item)
+        ):
+            return False
+        if not selected_rows:
+            return not item.is_alternative
+        if selected_rows and (item.is_alternative or item.has_alternative_item):
+            return item.name in selected_rows
+        return True
+
+    def select_item(d):
+        filtered_items = args.get("filtered_children", []) if isinstance(args, dict) else []
+        return d.name in filtered_items if filtered_items else True
+
+    doclist = get_mapped_doc(
+        "Quotation",
+        source_name,
+        {
+            "Quotation": {
+                "doctype": "Sales Order",
+                "validation": {"docstatus": ["=", 1]},
+            },
+            "Quotation Item": {
+                "doctype": "Sales Order Item",
+                "field_map": {
+                    "parent": "prevdoc_docname",
+                    "name": "quotation_item",
+                },
+                "postprocess": update_item,
+                "condition": lambda d: can_map_row(d) and select_item(d),
+            },
+            "Sales Taxes and Charges": {
+                "doctype": "Sales Taxes and Charges",
+                "reset_value": True,
+            },
+            "Sales Team": {"doctype": "Sales Team", "add_if_empty": True},
+            "Payment Schedule": {"doctype": "Payment Schedule", "add_if_empty": True},
+        },
+        target_doc,
+        set_missing_values,
+        ignore_permissions=False,
+    )
+    return doclist
