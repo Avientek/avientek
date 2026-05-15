@@ -596,12 +596,6 @@ override_whitelisted_methods = {
 	"frappe.desk.reportview.export_query": "avientek.api.quotation_access.restricted_export_query",
 	"frappe.core.doctype.data_import.data_import.download_template": "avientek.api.quotation_access.restricted_download_template",
 	"frappe.desk.query_report.run": "avientek.api.quotation_access.restricted_query_report_run",
-	# Sammish 2026-05-15 — bypass ERPNext 15.108.1 regression where
-	# `_make_sales_order` strips every item even though can_map_row
-	# evaluates to True. Our replacement reproduces the working
-	# 15.95.2 logic verbatim. Local-vs-prod ERPNext version drift
-	# diagnosis in docs/daily_update_2026_05_17.md.
-	"erpnext.selling.doctype.quotation.quotation.make_sales_order": "avientek.events.quotation.make_sales_order_safe",
 }
 # override_whitelisted_methods = {
 # 	# "frappe.desk.doctype.event.event.get_events": "avientek.event.get_events"
