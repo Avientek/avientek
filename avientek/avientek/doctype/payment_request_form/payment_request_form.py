@@ -1634,7 +1634,17 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         fields=["file_name", "file_url"],
         order_by="creation asc",
     ) or []
-    _combined_self_name = f"{docname}_combined.pdf"
+    # Sammish 2026-05-15: Frappe auto-renames duplicate uploads with a
+    # random suffix (e.g. AVFZC-02148_combined9de9f8.pdf) so the prior
+    # exact-name filter `{docname}_combined.pdf` let those slip through
+    # — and recursed the OLD combined PDF as a sidebar attachment into
+    # the NEW one. Jithin saw the "PRF Attachment: <docname>_combined…"
+    # header repeated. Match any filename starting with
+    # `{docname}_combined` AND ending with `.pdf`.
+    _combined_prefix = f"{docname}_combined"
+    def _is_combined_self(file_name):
+        n = (file_name or "").strip().lower()
+        return n.startswith(_combined_prefix.lower()) and n.endswith(".pdf")
     # Sammish 2026-05-16: also exclude doc.bank_letter from the sidebar
     # loop. Without this, Jithin saw the bank letter appear TWICE in the
     # combined PDF — once via step 3 (the explicit doc.bank_letter
@@ -1651,7 +1661,7 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     }
     sidebar_pdfs = [
         f for f in _sidebar_files_all
-        if (f.file_name or "").strip() != _combined_self_name
+        if not _is_combined_self(f.file_name)
         and (f.file_url or "").lower().endswith(".pdf")
         and (f.file_url or "").strip() != _bank_letter_url
         and (f.file_url or "").strip() not in _addl_doc_urls
@@ -3291,7 +3301,14 @@ def get_payment_voucher_context(docname):
             fields=["file_name", "file_url"],
             order_by="creation asc",
         ) or []
-        combined_self_name = f"{docname}_combined.pdf"
+        # Sammish 2026-05-15: match the same widened pattern as
+        # _build_combined_pdf_bytes — Frappe auto-renames duplicates
+        # with a random suffix (e.g. AVFZC-02148_combined9de9f8.pdf).
+        # The previous exact-name filter only caught the un-suffixed
+        # variant, letting stale combined PDFs leak back in as sidebar
+        # attachments → "PRF Attachment: <docname>_combined…" header
+        # repeated in the print output.
+        _combined_prefix_lc = f"{docname}_combined".lower()
         # Sammish 2026-05-16: same de-dup as combined PDF builder — the
         # bank letter and Additional Documents rows are rendered as
         # their own sections in the print, so picking them up again here
@@ -3305,7 +3322,8 @@ def get_payment_voucher_context(docname):
         for f in sidebar_files:
             fname = (f.file_name or "").strip()
             furl = (f.file_url or "").strip()
-            if fname == combined_self_name:
+            fname_lc = fname.lower()
+            if fname_lc.startswith(_combined_prefix_lc) and fname_lc.endswith(".pdf"):
                 continue
             if furl and furl == _print_bank_letter_url:
                 continue
