@@ -8,6 +8,16 @@ def after_migrate():
 	make_property_setter(
 		"Item", None, "search_fields", "item_name,description,item_group,customer_code,part_number", "Data", for_doctype="Doctype"
 	)
+	# Jithin 2026-05-15 — default PRF print format = "Payment Voucher
+	# Fast". Frappe's `/app/print/<doctype>/<name>` preview defaults to
+	# the doctype-level setting, so without this property setter the
+	# preview rendered the bare "Standard" format (empty body, just
+	# letterhead) even though Combined PDF correctly used the Fast
+	# format. Idempotent via make_property_setter.
+	make_property_setter(
+		"Payment Request Form", None, "default_print_format",
+		"Payment Voucher Fast", "Data", for_doctype="Doctype",
+	)
 	_create_asset_dam_fields()
 	_deactivate_old_quotation_workflows()
 	_fix_quotation_item_calc_layout()
