@@ -2151,6 +2151,25 @@ function show_update_special_price_dialog(frm) {
     // point each Currency column's `options` at that column name.
     const doc_currency = frm.doc.currency || frappe.defaults.get_global_default("currency") || "AED";
 
+    // Jithin 2026-05-15 (real-time Margin %) — capture each row's cost
+    // components by name so we can recompute margin client-side as
+    // the user changes Special Price. Mirrors the server-side formula
+    // in avientek.events.quotation.update_special_price exactly.
+    const cost_map = {};
+    (frm.doc.items || []).forEach(row => {
+        cost_map[row.name] = {
+            std_price:     flt(row.custom_standard_price_),
+            shipping_per:  flt(row.shipping_per),
+            finance_per:   flt(row.custom_finance_),
+            transport_per: flt(row.custom_transport_),
+            reward_per:    flt(row.reward_per),
+            incentive_per: flt(row.custom_incentive_),
+            customs_per:   flt(row.custom_customs_),
+            selling:       flt(row.custom_selling_price),
+            qty:           Math.max(cint(row.qty), 1),
+        };
+    });
+
     let items = (frm.doc.items || []).map(row => ({
         name: row.name,
         item_code: row.item_code,
@@ -2216,7 +2235,66 @@ function show_update_special_price_dialog(frm) {
         }
     });
 
+    // Jithin 2026-05-15 — live Margin % recompute when Special Price
+    // changes. Mirrors avientek.events.quotation.update_special_price.
+    function compute_margin_for_row(row) {
+        const c = cost_map[row.name];
+        if (!c) return null;
+        const new_sp    = flt(row.custom_special_price);
+        const qty       = c.qty;
+        const shipping  = flt(c.shipping_per  * c.std_price / 100 * qty, 4);
+        const finance   = flt(c.finance_per   * new_sp      / 100 * qty, 4);
+        const transport = flt(c.transport_per * c.std_price / 100 * qty, 4);
+        const reward    = flt(c.reward_per    * new_sp      / 100 * qty, 4);
+        const base_amt  = flt(new_sp * qty + shipping + finance + transport + reward, 4);
+        const incentive = flt(c.incentive_per * new_sp * qty / 100, 4);
+        const cogs_pre  = flt(base_amt + incentive, 4);
+        const customs   = flt(c.customs_per * cogs_pre / 100, 4);
+        const cogs      = flt(cogs_pre + customs, 4);
+        const selling   = c.selling;
+        const margin_val = flt(selling - cogs, 4);
+        const margin_pct = selling ? flt(margin_val / selling * 100, 4) : 0;
+        return { margin_pct, cogs };
+    }
+
     d.show();
+
+    // Refresh the visible Margin % cell when user edits Special Price.
+    // DOM-level binding is the most reliable cross-version pattern for
+    // Dialog Tables (the field-def `change` callback doesn't fire on
+    // dialog tables in v15 the way it does on form child grids).
+    $(d.$wrapper).on("change input keyup", '[data-fieldname="custom_special_price"] input', function () {
+        const $row = $(this).closest(".grid-row");
+        const idx_attr = $row.attr("data-idx");
+        if (!idx_attr) return;
+        const idx = parseInt(idx_attr, 10) - 1;
+        const data = d.fields_dict.items.df.data || [];
+        const row = data[idx];
+        if (!row) return;
+
+        // Sync the typed value into the row data, stripping thousand separators.
+        const raw = $(this).val();
+        if (raw !== undefined) {
+            row.custom_special_price = flt((raw + "").replace(/,/g, ""));
+        }
+
+        const result = compute_margin_for_row(row);
+        if (!result) return;
+        row.custom_margin_ = result.margin_pct;
+
+        // Update the read-only Margin % cell display.
+        const $cell = $row.find('[data-fieldname="custom_margin_"]').first();
+        if ($cell.length) {
+            const display = flt(result.margin_pct, 2) + " %";
+            const $static = $cell.find(".static-area, .ellipsis").first();
+            if ($static.length) {
+                $static.text(display);
+            } else {
+                $cell.text(display);
+            }
+        }
+    });
+
     // Widen dialog beyond extra-large default for better table readability
     d.$wrapper.find(".modal-dialog").css("max-width", "1100px");
 }

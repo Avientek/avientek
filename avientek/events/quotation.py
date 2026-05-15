@@ -1517,6 +1517,63 @@ def update_special_price(quotation_name, items):
             "custom_margin_value": margin_val,
         }, update_modified=True)
 
+    # Jithin 2026-05-15 — also refresh the doc-level totals (Total Margin
+    # Percent, Total Margin, Total Cost, Total Selling, …) AND the
+    # Brand Summary child table. Without this, item rows updated above
+    # but the parent display + Brand Summary still showed pre-edit
+    # values until the user manually re-saved the doc.
+    frappe.db.commit()  # flush item-row changes so doc.reload() sees them
+    doc.reload()
+    rebuild_brand_summary(doc)
+    recalc_doc_totals(doc)
+
+    # Persist parent totals (bypasses submit-validation for fields
+    # without allow_on_submit=1).
+    parent_updates = {
+        "custom_total_shipping_new":       flt(doc.get("custom_total_shipping_new") or 0, 4),
+        "custom_total_finance_new":        flt(doc.get("custom_total_finance_new") or 0, 4),
+        "custom_total_transport_new":      flt(doc.get("custom_total_transport_new") or 0, 4),
+        "custom_total_reward_new":         flt(doc.get("custom_total_reward_new") or 0, 4),
+        "custom_total_incentive_new":      flt(doc.get("custom_total_incentive_new") or 0, 4),
+        "custom_total_customs_new":        flt(doc.get("custom_total_customs_new") or 0, 4),
+        "custom_total_margin_new":         flt(doc.get("custom_total_margin_new") or 0, 4),
+        "custom_total_margin_percent_new": flt(doc.get("custom_total_margin_percent_new") or 0, 4),
+        "custom_total_cost_new":           flt(doc.get("custom_total_cost_new") or 0, 4),
+        "custom_total_selling_new":        flt(doc.get("custom_total_selling_new") or 0, 4),
+        "custom_total_buying_price":       flt(doc.get("custom_total_buying_price") or 0, 4),
+    }
+    frappe.db.set_value("Quotation", quotation_name, parent_updates, update_modified=True)
+
+    # Rebuild the Brand Summary child rows in DB: rebuild_brand_summary
+    # populated doc.custom_quotation_brand_summary in memory; persist
+    # them via delete + insert. Submitted-doc save would require every
+    # field to be allow_on_submit, so we go around it with raw rows.
+    BS_DT = "Quotation Brand Summary"
+    BS_FIELDS = (
+        "brand", "buying_price",
+        "shipping", "shipping_percent",
+        "finance", "finance_percent",
+        "processing", "processing_percent",
+        "reward", "reward_percent",
+        "incentive", "incentive_percent",
+        "customs", "customs_",
+        "total_cost", "total_selling",
+        "margin", "margin_percent", "std_margin_percent",
+        "approval_status",
+    )
+    frappe.db.delete(BS_DT, {"parent": quotation_name, "parenttype": "Quotation"})
+    for idx, bs in enumerate(doc.get("custom_quotation_brand_summary") or [], start=1):
+        bs_doc = frappe.new_doc(BS_DT)
+        bs_doc.parent = quotation_name
+        bs_doc.parenttype = "Quotation"
+        bs_doc.parentfield = "custom_quotation_brand_summary"
+        bs_doc.idx = idx
+        for fn in BS_FIELDS:
+            val = bs.get(fn)
+            if val is not None:
+                bs_doc.set(fn, val)
+        bs_doc.db_insert()
+
     frappe.db.set_value("Quotation", quotation_name, "modified", frappe.utils.now())
     frappe.db.commit()
 
