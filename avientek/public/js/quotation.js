@@ -2141,6 +2141,16 @@ function setup_items_grid_click_handler(frm) {
  * Does NOT recalculate Selling Price or Selling Amount.
  */
 function show_update_special_price_dialog(frm) {
+    // Jithin 2026-05-15 — pin the dialog's Currency formatting to the
+    // quote's currency. First attempt used `options: <literal_code>`
+    // (e.g., "INR") which Frappe's grid Currency formatter treats as a
+    // fieldname reference, not a literal — so when no row column with
+    // that name exists, it silently falls back to the system default
+    // currency (AED on this site). Fix: embed `currency_code` as a
+    // hidden column on every row carrying frm.doc.currency, then
+    // point each Currency column's `options` at that column name.
+    const doc_currency = frm.doc.currency || frappe.defaults.get_global_default("currency") || "AED";
+
     let items = (frm.doc.items || []).map(row => ({
         name: row.name,
         item_code: row.item_code,
@@ -2150,13 +2160,8 @@ function show_update_special_price_dialog(frm) {
         custom_special_rate: row.custom_special_rate,
         custom_selling_price: row.custom_selling_price,
         custom_margin_: row.custom_margin_,
+        currency_code: doc_currency,
     }));
-
-    // Jithin 2026-05-17 — pin the dialog's Currency formatting to the
-    // QUOTE'S currency. Without `options`, Frappe falls back to the
-    // system default currency (AED on this site), which made INR
-    // quotes show prices with the د.إ symbol.
-    const doc_currency = frm.doc.currency || frappe.defaults.get_global_default("currency") || "AED";
 
     let fields = [
         {
@@ -2169,11 +2174,12 @@ function show_update_special_price_dialog(frm) {
             data: items,
             fields: [
                 { fieldname: "name", fieldtype: "Data", hidden: 1 },
+                { fieldname: "currency_code", fieldtype: "Data", hidden: 1 },
                 { fieldname: "item_code", fieldtype: "Data", label: __("Item Code"), in_list_view: 1, read_only: 1, columns: 2 },
                 { fieldname: "qty", fieldtype: "Float", label: __("Qty"), in_list_view: 1, read_only: 1, columns: 1 },
-                { fieldname: "custom_special_price", fieldtype: "Currency", options: doc_currency, label: __("Special Price"), in_list_view: 1, columns: 2 },
+                { fieldname: "custom_special_price", fieldtype: "Currency", options: "currency_code", label: __("Special Price"), in_list_view: 1, columns: 2 },
                 { fieldname: "custom_special_price_note", fieldtype: "Data", label: __("Special Price Note"), in_list_view: 1, columns: 2 },
-                { fieldname: "custom_special_rate", fieldtype: "Currency", options: doc_currency, label: __("Selling Price"), in_list_view: 1, read_only: 1, columns: 2 },
+                { fieldname: "custom_special_rate", fieldtype: "Currency", options: "currency_code", label: __("Selling Price"), in_list_view: 1, read_only: 1, columns: 2 },
                 { fieldname: "custom_margin_", fieldtype: "Percent", label: __("Margin %"), in_list_view: 1, read_only: 1, columns: 1 },
             ]
         }
