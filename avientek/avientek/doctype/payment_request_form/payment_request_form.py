@@ -3349,6 +3349,58 @@ def get_payment_voucher_context(docname):
         # Never let attachment fetch failures break the voucher print.
         prf_attachments = []
 
+    # Jithin 2026-05-17 — Additional Documents (child table) rendered
+    # as their own print section. They flow through Combined PDF as
+    # full pages already (step 4 in _build_combined_pdf_bytes), but
+    # the print template wasn't iterating them so user-uploaded
+    # proforma invoices, cost sheets, etc. were invisible on the
+    # on-screen print preview. Rasterize PDFs to images for inline
+    # embedding; image attachments embed directly.
+    additional_documents_print = []
+    try:
+        if doc.get("additional_documents"):
+            # Pre-fetch ALL PDF page-images attached to this PRF in
+            # one call. We can't reuse the prf_attachments-time fetch
+            # because it was scoped to non-addl files via the URL
+            # exclusion above.
+            pdf_pages_by_filename = {}
+            try:
+                pdf_data = get_pdf_as_images("Payment Request Form", docname, max_pages=5) or []
+                for pd in pdf_data:
+                    fn = pd.get("file_name")
+                    if fn:
+                        pdf_pages_by_filename[fn] = pd.get("images") or []
+            except Exception:
+                pdf_pages_by_filename = {}
+
+            for addl in (doc.additional_documents or []):
+                attach_url = (addl.attachment or "").strip()
+                if not attach_url:
+                    continue
+                fname = frappe.db.get_value("File", {"file_url": attach_url}, "file_name") or attach_url.rsplit("/", 1)[-1]
+                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+                images = []
+                if ext == "pdf":
+                    images = pdf_pages_by_filename.get(fname, [])
+                elif ext in ("jpg", "jpeg", "png", "gif", "webp"):
+                    try:
+                        images = get_attachment_as_images(attach_url, max_pages=1) or []
+                    except Exception:
+                        images = []
+                if images:
+                    # Fieldname on the child doctype is `label`
+                    # (display label is "Description"). Falling back to
+                    # the file name keeps the print legible if the
+                    # user didn't fill the description.
+                    desc = (addl.get("label") or "").strip() or fname
+                    additional_documents_print.append({
+                        "description": desc,
+                        "file_name": fname,
+                        "images": images,
+                    })
+    except Exception:
+        additional_documents_print = []
+
     # Signers for the signature block in print (#10)
     signers = _get_workflow_signers(doc)
     prepared_by_name = (
@@ -3435,6 +3487,14 @@ def get_payment_voucher_context(docname):
         # the PRF (not to a linked reference). Rendered at the end of
         # the print format after row_attachments.
         "prf_attachments": prf_attachments,
+        # Jithin 2026-05-17: Additional Documents (child table). The
+        # Combined PDF builder already merges these as full PDF pages
+        # (step 4 in _build_combined_pdf_bytes), but the on-screen
+        # print template didn't iterate them, so the user-uploaded
+        # "Profoma Invoice / Cost Sheet / Whatever" was invisible in
+        # the print view. Rasterize PDFs to images + embed images
+        # directly, same pattern as prf_attachments.
+        "additional_documents_print": additional_documents_print,
     }
 
 
