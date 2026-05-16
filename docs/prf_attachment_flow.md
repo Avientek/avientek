@@ -1,108 +1,67 @@
-# PRF Attachment Flow — where each upload renders
+# Payment Request Form — where your attachments show up
 
-This document explains every place a file can be uploaded on a Payment Request Form (PRF), and exactly where that file shows up in the on-screen Print view and the Combined PDF download. Use this when answering "why isn't my attachment showing in the print?".
+This guide explains where each file you attach to a Payment Request Form (PRF) actually appears — in the print preview on screen, and in the combined PDF you download. Use it as a quick answer to *"I attached a file but I don't see it on the print."*
 
-## TL;DR — five attachment slots, two render targets
+## Quick answer — the five places you can attach a file
 
-| Upload slot on PRF | On-screen Print preview (`/app/print/...`) | Downloaded Combined PDF |
-|---|---|---|
-| **1. Costing Sheet** on a Payment References row (`payment_references[].costing_sheet_attachment`) | ✓ embedded as images per row | ✓ embedded as full pages |
-| **2. Bank Letter** field (`doc.bank_letter`) | ✓ embedded as images | ✓ appended as full PDF page(s) |
-| **3. Additional Documents** child table (`additional_documents[].attachment`) | ✓ embedded as images **(fixed 2026-05-17)** | ✓ appended as full PDF page(s) |
-| **4. Sidebar Attachments** (drag-drop into the Attachments widget) | ✓ embedded as images | ✓ appended as full PDF page(s) |
-| **5. Auto-generated Combined PDF** (`<docname>_combined*.pdf`) | — excluded (would recurse) | — excluded (would recurse) |
+There are five different places to attach a file on a PRF. Each one shows up in a slightly different way:
 
-Both render targets dedupe — a single file uploaded to multiple slots only shows once.
+| Where you attach the file | What it's typically used for | Shows up on print preview? | Shows up in Combined PDF? |
+|---|---|---|---|
+| **Costing Sheet** column (inside the payment row) | Cost breakdown for a specific invoice / PO line | Yes — right under that row | Yes — bundled with that row |
+| **Bank Letter** field (in Party Bank Details) | Supplier's bank verification letter | Yes — right after bank details | Yes — as a separate page |
+| **Additional Documents** table (description + file) | Proforma invoice, cost sheet, anything supporting the payment | Yes — right after the voucher table | Yes — as separate pages |
+| **Attachments** widget (drag-drop area on the left sidebar of the form) | Any other related document | Yes — at the end of the print | Yes — as separate pages |
+| Auto-generated Combined PDF (`...combined.pdf` file) | Created automatically when you click *Download Combined PDF* | No (skipped on purpose) | No (skipped on purpose) |
 
-## Detailed flow per slot
+If you upload the same file in more than one place, it only shows up once — the system removes duplicates automatically.
 
-### 1. Costing Sheet — per Payment References row
+## How each one works in plain terms
 
-**Where it lives:** `payment_references[*].costing_sheet_attachment` (Attach field on the child table).
+### Costing Sheet (per row)
+This is the small attach icon inside each payment line in the "Payment References" table. Use it when the file relates ONLY to that specific invoice or purchase order — like a cost breakdown for that one item. On both the print and the combined PDF, it appears nestled with the row it belongs to.
 
-**On-screen print:** Rendered in the per-row attachments block via `ctx.row_attachments[*].costing_images`. The print template iterates each payment reference and embeds its costing images right under the row.
+### Bank Letter
+This is the dedicated *Bank Letter* attach field. Use it for the supplier's official bank letter showing their account number / IBAN / SWIFT. On print, it appears immediately after the "BANK DETAILS" section so the approver can see the document right next to the numbers it confirms. In the combined PDF, it sits as its own page after the supporting invoices.
 
-**Combined PDF:** The PDF builder fetches `ctx.row_attachments` and merges those PDFs as part of the per-reference step. They appear interleaved between the voucher and the linked PI/PO/Quotation pages.
+### Additional Documents (the description + file table)
+The table with a *Description* column and an *Attachment* column near the bottom of the form. Use it when you want to attach a few related documents and label each one — for example *"Proforma invoice for PO 533"* + the PDF. Each row shows up as its own section in both the print and the combined PDF, with your description as the title and the file content underneath.
 
-**Source code:**
-- Builder: `get_payment_voucher_context()` → `row_attachments` block
-- Template: `payment_voucher_fast.json` → `{% for att in ctx.row_attachments %}`
+> **What changed on 17-May-2026:** Additional Documents already worked in the downloaded Combined PDF, but they were missing from the on-screen print preview. After today's update, they appear in both places.
 
-### 2. Bank Letter — `doc.bank_letter`
+### Sidebar Attachments (the drag-drop widget on the left of the form)
+The general "Attachments" widget on the form's left sidebar. Use it for anything else — anything that doesn't fit the more specific slots above. These appear at the end of the print and the combined PDF, each labeled with the original file name.
 
-**Where it lives:** Single `Attach` field on the parent PRF. Typically a PDF of the supplier's bank letter showing IBAN / SWIFT / Account No.
+### Auto-generated Combined PDF
+When you click *Download Combined PDF*, the system saves the result as a file attached to the same PRF (so you can re-download later). To avoid the bundle including a copy of yesterday's bundle, the system intentionally skips any file whose name starts with `<PRF name>_combined`. This is invisible to you — it just means the combined PDF doesn't contain a copy of an older combined PDF inside it.
 
-**On-screen print:** Auto-fetched as part of `ctx.row_attachments` (Bank Letter is bundled with the first row's images so the bank verification appears immediately after the bank-details table).
+## "I attached a file but I can't see it on the print"
 
-**Combined PDF:** Step 3 of `_build_combined_pdf_bytes` — appended as a full PDF page after all the per-reference attachments. Dedupes against any sidebar pass that might also pick up the same file.
+Quick checklist:
 
-**Source code:**
-- Builder: `get_payment_voucher_context()` → `row_attachments[0].bank_images`
-- Combined: `_build_combined_pdf_bytes()` → `# 3. Bank letter`
+1. **Was the update done on production?**
+   Run *Update* from the Frappe Cloud dashboard. Today's print improvements only apply after this step. If you're seeing a screen from before the update, your browser may also be holding an old cached copy — press *Ctrl-Shift-R* (Windows) or *Cmd-Shift-R* (Mac) on the print page.
 
-### 3. Additional Documents — `additional_documents[*]`
+2. **Is the right format selected?**
+   On the print page, the print format selector should say *Payment Voucher Fast*. If it shows *Standard* or anything else, switch to *Payment Voucher Fast* — that's the only one designed to show your attachments.
 
-**Where it lives:** Child table with two columns: *Description* (free text) and *Attachment* (Attach). Used for proforma invoices, cost sheets attached to the payment request that don't belong on a specific Payment References row.
+3. **Did you fill the *Description* on the Additional Documents row?**
+   The description is optional but it makes the section title meaningful. If left blank, the section uses the file name instead.
 
-**On-screen print:** Rendered as its own section between the voucher table and the sidebar attachments via `ctx.additional_documents_print`. Each row shows `Additional Document: <description>` as the header, followed by the rasterized pages of the attachment.
+4. **What file type did you upload?**
+   PDFs and standard image formats (JPG, PNG, GIF, WEBP) display correctly. Excel sheets, Word documents and other office files are NOT displayed inline — they only appear as attachments in the file sidebar of the form, not in the print. Convert them to PDF first if they need to appear on the print.
 
-**Combined PDF:** Step 4 of `_build_combined_pdf_bytes` — each Additional Document's attachment is appended as a full PDF page (or images for non-PDF).
+5. **Did you upload it to the right slot?**
+   If you uploaded a bank letter into the Additional Documents table instead of the dedicated *Bank Letter* field, it will still show — just under "Additional Document" header instead of after the bank details. Both are fine.
 
-**Source code:**
-- Builder: `get_payment_voucher_context()` → `additional_documents_print` block (added 2026-05-17)
-- Template: `payment_voucher_fast.json` → `{% for att in ctx.additional_documents_print %}`
-- Combined: `_build_combined_pdf_bytes()` → `# 4. Additional documents`
+## "I see the bank letter twice in the combined PDF"
 
-> **Pre-2026-05-17 gap:** the context builder ALREADY excluded Additional Documents from `prf_attachments` (to prevent duplication between sidebar pass and the Additional Documents merge step in Combined PDF) but the print template had no separate section for them. Net effect: Additional Documents appeared in the Combined PDF only, never in the on-screen print preview. **Fixed in commit on 2026-05-17.**
+This happens if the same file was uploaded both via the *Bank Letter* field AND via the sidebar attachments. The system de-duplicates by file location, so if the SAME file is in both places, it only shows once. But if you uploaded two SEPARATE copies (e.g. once when creating the PRF, then again after adjusting it), they're two different files and both will appear. Remove the duplicate from the sidebar.
 
-### 4. Sidebar Attachments — drag-drop into the Attachments widget
+## "An old combined PDF is showing inside my new combined PDF"
 
-**Where it lives:** File records attached to the PRF doctype (created by drag-dropping into the sidebar widget on the form). These are NOT linked to any specific child row — they're loose attachments at the parent level.
+This was a real bug reported on 15-May-2026 — fixed in the same-day update. The bundle used to (incorrectly) include any older combined PDFs it found in the attachments. After the fix, all auto-generated combined PDFs are skipped, regardless of any random suffix the system added to keep filenames unique.
 
-**On-screen print:** Rendered via `ctx.prf_attachments`. Each shows `PRF Attachment: <file_name>` as the header followed by the rasterized pages.
+## "Print preview is blank — just the letterhead, no voucher content"
 
-**Combined PDF:** Step 5 of `_build_combined_pdf_bytes` — each sidebar PDF is appended as a full PDF page.
-
-**Dedup:** The context builder explicitly excludes files matching `doc.bank_letter` OR any `additional_documents[*].attachment` URL — those flow through their own dedicated paths above. It also excludes any file whose name starts with `<docname>_combined` (the auto-generated combined PDF itself; see slot 5).
-
-**Source code:**
-- Builder: `get_payment_voucher_context()` → `prf_attachments` block
-- Combined: `_build_combined_pdf_bytes()` → `# 5. PRF sidebar attachments`
-
-### 5. Auto-generated Combined PDF — `<docname>_combined*.pdf`
-
-**Where it lives:** Auto-created File record attached to the PRF when the user clicks Download Combined PDF. Frappe may auto-rename duplicates with a random suffix (e.g. `AVFZC-02148_combined9de9f8.pdf`).
-
-**On-screen print + Combined PDF:** **Excluded from both.** Including the auto-generated bundle as a sidebar attachment would recurse it back into the next bundle (the "header repeated" symptom Jithin reported on 2026-05-15). The filter matches `<docname>_combined*.pdf` case-insensitive prefix + `.pdf` suffix to catch all auto-renamed variants.
-
-## Troubleshooting
-
-### "My Additional Document doesn't show in the print"
-- Confirm prod has been updated since 2026-05-17 (the fix that added the print render section).
-- Open the PRF print preview and check the format selector is set to **Payment Voucher Fast** (default — see [docs/daily_update_2026_05_17.md](daily_update_2026_05_17.md)).
-- Check the attachment field is populated on the Additional Document row.
-- Check the file is PDF/JPG/PNG/GIF/WEBP — other types are skipped (Excel, Word, etc.).
-
-### "My bank letter shows twice in the Combined PDF"
-- A user uploaded the same file via both the `bank_letter` field AND the sidebar Attachments widget.
-- The builder dedupes by file_url, so a single file uploaded twice creates two File records with different URLs that both get included.
-- Workaround: remove the duplicate File row from the sidebar.
-
-### "An old combined PDF is showing up inside the new combined PDF"
-- This was the 2026-05-15 bug — filter was too narrow (`<docname>_combined.pdf` exact match), letting random-suffix variants through.
-- Fixed 2026-05-15 (commit `acf7070`). Pattern now matches any `<docname>_combined*.pdf`.
-
-### "Print preview is empty / shows only letterhead"
-- Confirm default print format is "Payment Voucher Fast" on prod. See `Property Setter` named `Payment Request Form-main-default_print_format`.
-- The 2026-05-15 fix added a Property Setter that pins this default; also persisted via `after_migrate` so it survives DB restores.
-
-## Source-file index
-
-| Concern | File |
-|---|---|
-| Context builder (assembles `ctx` for print template) | `avientek/avientek/doctype/payment_request_form/payment_request_form.py` → `get_payment_voucher_context()` |
-| Combined PDF builder | same file → `_build_combined_pdf_bytes()` |
-| Print template (Fast — default) | `avientek/avientek/print_format/payment_voucher_fast/payment_voucher_fast.json` |
-| Print template (Professional) | `avientek/avientek/print_format/payment_voucher_professional/payment_voucher_professional.json` |
-| Default-print-format Property Setter | `avientek/migrate.py::after_migrate` |
-| Print format auto-sync to DB | `avientek/migrate.py::_sync_payment_voucher_formats` |
+This means the print format selector is on *Standard* (which just shows bare field labels) instead of *Payment Voucher Fast* (which has the full voucher layout). The default was changed on 15-May-2026 to use *Payment Voucher Fast* automatically. If you still see *Standard* selected, log out and log back in — your saved session may be holding the old preference.
