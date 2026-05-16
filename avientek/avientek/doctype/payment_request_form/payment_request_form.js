@@ -2409,6 +2409,38 @@ frappe.ui.form.on('Payment Request Reference', {
     reference_doctype: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
 
+        // Jithin 2026-05-17 — clear stale links when the user switches
+        // reference_doctype to a different value. Without this, picking
+        // a row's type as e.g. "Sales Order" + selecting an SO via the
+        // picker (which writes document_reference), then changing the
+        // type to "Purchase Order" + typing a PO name into the
+        // (editable) reference_name field, leaves the row in a broken
+        // mixed state: reference_doctype=PO, reference_name=PO_NAME,
+        // document_reference=SO_NAME. That's how AVFZC-02153/4/5 got
+        // their stale SO references on 2026-05-15.
+        // Compare against `row._prev_reference_doctype` (tracked on
+        // ourselves) — Frappe doesn't expose `_doc_before_change` for
+        // child rows reliably, so we cache the prior value here.
+        const prev = row._prev_reference_doctype;
+        if (prev && prev !== row.reference_doctype) {
+            // Type changed — wipe carry-over fields so the picker re-
+            // prompts AND no SO/PO name from the prior type lingers.
+            if (row.document_reference) {
+                frappe.model.set_value(cdt, cdn, "document_reference", "");
+            }
+            if (row.bill_no) {
+                frappe.model.set_value(cdt, cdn, "bill_no", "");
+            }
+            // Only clear reference_name if it looks system-set (matches
+            // a document name pattern); leave free-text intact when
+            // possible. Conservative: always clear on type change so
+            // the user is forced to re-pick from the right pool.
+            if (row.reference_name) {
+                frappe.model.set_value(cdt, cdn, "reference_name", "");
+            }
+        }
+        row._prev_reference_doctype = row.reference_doctype;
+
         // Sridhar 2026-05-06 #1b: when adding/changing a row's type,
         // default the currency from the party's master record (e.g. the
         // Supplier's billing currency). Falls back to company default

@@ -124,6 +124,13 @@ avientek.patches.backfill_is_company_account_internal_party
 # is set programmatically by avientek.events.payment_entry on PE
 # submit/cancel — no Workflow transitions are added.
 avientek.patches.add_pe_prf_link_and_processed_states
+# Jithin 2026-05-17: AVFZC-02153/4/5 had reference_doctype=Purchase
+# Order but document_reference = a Sales Order (linked-via-PO-item)
+# because the reference_doctype change handler didn't clear stale
+# document_reference. JS handler fixed; this one-time DB repair
+# restores document_reference = reference_name on the 3 already-
+# broken rows. Idempotent.
+avientek.patches.fix_prf_po_rows_with_stale_so_document_reference
 
 [post_model_sync]
 # Sammish 2026-05-15: backfill is_internal_party on existing PRFs
