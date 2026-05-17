@@ -3363,27 +3363,16 @@ def get_payment_voucher_context(docname):
     # proforma invoices, cost sheets, etc. were invisible on the
     # on-screen print preview. Rasterize PDFs to images for inline
     # embedding; image attachments embed directly.
+    # Rasterize each Additional Documents row by its file_url DIRECTLY,
+    # not via the attached_to-filtered `get_pdf_as_images` lookup. Older
+    # PRFs (e.g. AVFZC-02154 on prod) reference a file in the addl row
+    # whose `tabFile` record has no attached_to link back to the PRF —
+    # so the attached_to-filtered list misses it and the print preview
+    # silently drops the section. `get_attachment_as_images` resolves
+    # straight from the URL and works regardless of File linkage.
     additional_documents_print = []
     try:
         if doc.get("additional_documents"):
-            # Pre-fetch ALL PDF page-images attached to this PRF in
-            # one call. We can't reuse the prf_attachments-time fetch
-            # because it was scoped to non-addl files via the URL
-            # exclusion above.
-            pdf_pages_by_filename = {}
-            try:
-                # Jithin 2026-05-17: bumped from max_pages=5 → 20 so
-                # multi-page Additional Documents (proforma invoices,
-                # cost sheets) show in full on the print preview.
-                # See companion comment in the prf_attachments path.
-                pdf_data = get_pdf_as_images("Payment Request Form", docname, max_pages=20) or []
-                for pd in pdf_data:
-                    fn = pd.get("file_name")
-                    if fn:
-                        pdf_pages_by_filename[fn] = pd.get("images") or []
-            except Exception:
-                pdf_pages_by_filename = {}
-
             for addl in (doc.additional_documents or []):
                 attach_url = (addl.attachment or "").strip()
                 if not attach_url:
@@ -3392,7 +3381,10 @@ def get_payment_voucher_context(docname):
                 ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
                 images = []
                 if ext == "pdf":
-                    images = pdf_pages_by_filename.get(fname, [])
+                    try:
+                        images = get_attachment_as_images(attach_url, max_pages=20) or []
+                    except Exception:
+                        images = []
                 elif ext in ("jpg", "jpeg", "png", "gif", "webp"):
                     try:
                         images = get_attachment_as_images(attach_url, max_pages=1) or []
