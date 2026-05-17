@@ -3334,7 +3334,14 @@ def get_payment_voucher_context(docname):
                 # Render PDF pages as images so they embed in the print
                 # format like other attachment sections.
                 images = []
-                pdf_data = get_pdf_as_images("Payment Request Form", docname, max_pages=5) or []
+                # Jithin 2026-05-17: max_pages=5 was cutting off long
+                # attachments (PI, cost sheets, multi-page bank docs)
+                # — the Combined PDF showed full content but the
+                # on-screen print preview showed only first 5 pages.
+                # Bumped to 20 so 10-15-page attachments render in
+                # full. Beyond 20 the user can still see all pages in
+                # the downloaded Combined PDF.
+                pdf_data = get_pdf_as_images("Payment Request Form", docname, max_pages=20) or []
                 for pd in pdf_data:
                     if pd.get("file_name") == fname:
                         images = pd.get("images") or []
@@ -3365,7 +3372,11 @@ def get_payment_voucher_context(docname):
             # exclusion above.
             pdf_pages_by_filename = {}
             try:
-                pdf_data = get_pdf_as_images("Payment Request Form", docname, max_pages=5) or []
+                # Jithin 2026-05-17: bumped from max_pages=5 → 20 so
+                # multi-page Additional Documents (proforma invoices,
+                # cost sheets) show in full on the print preview.
+                # See companion comment in the prf_attachments path.
+                pdf_data = get_pdf_as_images("Payment Request Form", docname, max_pages=20) or []
                 for pd in pdf_data:
                     fn = pd.get("file_name")
                     if fn:
