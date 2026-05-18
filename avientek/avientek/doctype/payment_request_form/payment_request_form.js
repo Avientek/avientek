@@ -2096,7 +2096,17 @@ frappe.ui.form.on('Payment Request Form', {
                     frm.doc.account_no = newAccountNo;
                     try { frm.refresh_field("account_no"); } catch (e) {}
                 }
-                if (!newAccount) return;
+                // If the newly-picked Bank Account has no GL link, the
+                // currency is unknown — clear stale issued_currency
+                // from a previous selection so the form doesn't display
+                // the wrong currency symbol on issued_amount.
+                if (!newAccount) {
+                    if (frm.doc.issued_currency) {
+                        frm.doc.issued_currency = "";
+                        try { frm.refresh_field("issued_currency"); } catch (e) {}
+                    }
+                    return;
+                }
                 // Chain: fetch the GL Account's currency and assign to issued_currency.
                 frappe.db.get_value("Account", newAccount, ["account_currency"]).then(r => {
                     // Sammish 2026-05-16 (Jithin "Not Saved" regression):
@@ -2157,7 +2167,22 @@ frappe.ui.form.on('Payment Request Form', {
                     frm.doc.receving_account_no = newAccountNo;
                     try { frm.refresh_field("receving_account_no"); } catch (e) {}
                 }
-                if (!newAccount) return;
+                // If the newly-picked Bank Account has no GL link, clear
+                // stale receiving_currency + receiving_amount from a
+                // previous selection — otherwise the wrong currency
+                // symbol bleeds through (e.g. user switches from a USD
+                // bank to a misconfigured AED bank and still sees $).
+                if (!newAccount) {
+                    if (frm.doc.receiving_currency) {
+                        frm.doc.receiving_currency = "";
+                        try { frm.refresh_field("receiving_currency"); } catch (e) {}
+                    }
+                    if (frm.doc.receiving_amount) {
+                        frm.doc.receiving_amount = 0;
+                        try { frm.refresh_field("receiving_amount"); } catch (e) {}
+                    }
+                    return;
+                }
                 frappe.db.get_value("Account", newAccount, ["account_currency"]).then(r => {
                     if (r && r.message) {
                         const newVal = r.message.account_currency || "";
