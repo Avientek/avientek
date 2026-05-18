@@ -516,8 +516,7 @@
    "fieldname": "receiving_amount",
    "fieldtype": "Currency",
    "label": "Amount",
-   "options": "receiving_currency",
-   "read_only": 1
+   "options": "receiving_currency"
   },
   {
    "fieldname": "connections_tab",
