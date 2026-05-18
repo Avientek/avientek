@@ -689,19 +689,32 @@ frappe.ui.form.on('Payment Request Form', {
         });
 
         // Jithin 2026-05-18 (AVFZC-02160): on existing IT PRFs the
-        // issued-side `account` / `account_no` / `issued_currency` /
-        // `issued_amount` were missing from the form because
-        // `fetch_from` on those fields fires only on issued_bank change,
-        // not on form reload. If the doc was saved before the fetch
-        // landed (or the linked Bank Account had blanks at that moment),
-        // the cascade gates on issued_currency (`doc.account`) and
-        // issued_amount (`doc.issued_currency`) keep them hidden. On
-        // refresh, re-run the issued_bank handler so the chain repopulates
-        // and the fields surface.
-        if (frm.doc.payment_type === "Internal Transfer"
-            && frm.doc.issued_bank
-            && (!frm.doc.account || !frm.doc.account_no || !frm.doc.issued_currency)) {
-            try { frm.events.issued_bank(frm); } catch (e) {}
+        // issued / receiving Account / Account No / Currency / Amount
+        // were missing from the form because `fetch_from` on those
+        // fields fires only on bank change, not on form reload. If the
+        // doc was saved before the fetch landed (or the linked Bank
+        // Account had blanks at that moment), the cascade gates on
+        // `issued_currency` / `receiving_currency` (depend on the
+        // respective GL account) keep the chain hidden. On refresh,
+        // re-run the bank handlers so the chain repopulates and the
+        // fields surface.
+        if (frm.doc.payment_type === "Internal Transfer") {
+            if (frm.doc.issued_bank
+                && (!frm.doc.account || !frm.doc.account_no || !frm.doc.issued_currency)) {
+                try { frm.events.issued_bank(frm); } catch (e) {}
+            }
+            if (frm.doc.receiving_bank
+                && (!frm.doc.receiving_account || !frm.doc.receving_account_no || !frm.doc.receiving_currency)) {
+                try { frm.events.receiving_bank(frm); } catch (e) {}
+            }
+            // Per Jithin: receiving_amount is auto-computed
+            // (issued_amount × exchange rate). Lock it read-only on IT
+            // — the user only edits the issued side and (optionally)
+            // the exchange rate. Frappe v15 makes ALL fields read-only
+            // on submit, so this only affects Draft state.
+            if (frm.fields_dict.receiving_amount) {
+                frm.set_df_property("receiving_amount", "read_only", 1);
+            }
         }
 
         // Setup invoice drill-down links and View buttons
@@ -2131,26 +2144,45 @@ frappe.ui.form.on('Payment Request Form', {
     },
     receiving_bank : function(frm) {
         if (frm.doc.receiving_bank) {
-            frappe.call({
-                method: "frappe.client.get_value",
-                args: {
-                    doctype: "Account",
-                    filters: {
-                        name: frm.doc.receiving_account
-                    },
-                    fieldname: ["account_currency"]
-                },
-                callback: function(r) {
-                    // Same "Not Saved" mitigation as the issued_bank
-                    // handler above — direct-assign only on change.
-                    if (r.message) {
+            // Jithin 2026-05-18 (AVFZC-02160 follow-up): same fetch_from
+            // race as issued_bank — `receiving_account` and
+            // `receving_account_no` rely on Frappe fetch_from which only
+            // fires on change, not reliably on reload. Fetch from the
+            // Bank Account record directly, populate the fields, then
+            // chain to the GL Account for `account_currency` →
+            // `receiving_currency`. After currency lands, kick off the
+            // FX rate fetch so receiving_amount auto-computes.
+            frappe.db.get_value("Bank Account", frm.doc.receiving_bank,
+                ["account", "bank_account_no"]).then(rr => {
+                const ba = (rr && rr.message) || {};
+                const newAccount = ba.account || "";
+                const newAccountNo = ba.bank_account_no || "";
+                if ((frm.doc.receiving_account || "") !== newAccount) {
+                    frm.doc.receiving_account = newAccount;
+                    try { frm.refresh_field("receiving_account"); } catch (e) {}
+                }
+                if ((frm.doc.receving_account_no || "") !== newAccountNo) {
+                    frm.doc.receving_account_no = newAccountNo;
+                    try { frm.refresh_field("receving_account_no"); } catch (e) {}
+                }
+                if (!newAccount) return;
+                frappe.db.get_value("Account", newAccount, ["account_currency"]).then(r => {
+                    if (r && r.message) {
                         const newVal = r.message.account_currency || "";
                         if ((frm.doc.receiving_currency || "") !== newVal) {
                             frm.doc.receiving_currency = newVal;
                             try { frm.refresh_field("receiving_currency"); } catch (e) {}
                         }
+                        // Once we have both currencies, auto-fetch the
+                        // FX rate so the user sees the converted
+                        // receiving_amount immediately. The
+                        // calculate_transfer_amounts helper handles
+                        // same-currency (rate=1) and the FX call.
+                        if (frm.doc.issued_currency && frm.doc.issued_amount) {
+                            frm.events.calculate_transfer_amounts(frm, 'issued');
+                        }
                     }
-                }
+                });
             });
         }
     },
