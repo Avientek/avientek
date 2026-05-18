@@ -21,6 +21,7 @@
   "signature_images",
   "notifications_section",
   "enable_quotation_notifications",
+  "enable_workflow_state_notifications",
   "restrict_notifications_to_workflow_participants"
  ],
  "fields": [
@@ -128,6 +129,13 @@
    "fieldtype": "Check",
    "label": "Enable Quotation Email Notifications",
    "description": "When OFF, no Avientek-generated quotation emails are sent. ToDo creation continues regardless. Useful during testing or when the outgoing mailbox is rate-limited."
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_workflow_state_notifications",
+   "fieldtype": "Check",
+   "label": "Enable Workflow-State Notifications",
+   "description": "Phase 2 opt-in. When ON, transitions to Pending For Approval / Pending L2 Approval / Approved / Rejected create ToDos for the relevant users and send templated emails (routed by Sales Person → User Permission match per BRD). ToDos are created regardless of the master email switch."
   },
   {
    "default": "1",

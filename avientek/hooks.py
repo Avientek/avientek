@@ -506,6 +506,18 @@ doc_events = {
             # Rahul/Sridhar 2026-05-08 — fire notification when probability
             # transitions to 100% (the unlock event for downstream teams).
             "avientek.api.quotation_high_probability.notify_probability_100",
+            # Sammish 2026-05-18 (Phase 2 of Notification BRD): workflow-
+            # state transition dispatcher for post-submit states
+            # (Approved / Rejected). Pre-submit transitions (→ Pending
+            # For Approval) fire from on_update below. Gated by
+            # `enable_workflow_state_notifications` toggle.
+            "avientek.events.quotation_notifications.on_state_change",
+        ],
+        "on_update": [
+            # Pre-submit state transitions (e.g. Draft → Pending For
+            # Approval) fire here since on_update_after_submit only runs
+            # on submitted docs.
+            "avientek.events.quotation_notifications.on_state_change",
         ],
     },
     "Purchase Receipt": {

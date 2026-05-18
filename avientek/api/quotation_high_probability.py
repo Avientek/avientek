@@ -480,12 +480,27 @@ def _resolve_prob_100_recipients(doc):
     if doc.owner:
         emails.append(doc.owner)
 
-    # Sales team
+    # Sales person — primary is the Avientek Custom Field on Quotation;
+    # legacy/standard sales_team child table supported as fallback.
+    sp_pool = []
+    primary_sp = (doc.get("sales_person") or "").strip()
+    if primary_sp:
+        sp_pool.append(primary_sp)
     for row in (doc.get("sales_team") or []):
         sp_name = getattr(row, "sales_person", None)
-        if not sp_name:
+        if sp_name and sp_name not in sp_pool:
+            sp_pool.append(sp_name)
+    for sp_name in sp_pool:
+        # Resolve via Sales Person → Employee → User chain. The
+        # standard Sales Person doctype has no direct email field on
+        # this site, so the older email_address lookup returned NULL.
+        employee = frappe.db.get_value("Sales Person", sp_name, "employee")
+        if not employee:
             continue
-        user_email = frappe.db.get_value("Sales Person", sp_name, "email_address")
+        user_id = frappe.db.get_value("Employee", employee, "user_id")
+        if not user_id:
+            continue
+        user_email = frappe.db.get_value("User", user_id, "email") or user_id
         if user_email:
             emails.append(user_email)
 
