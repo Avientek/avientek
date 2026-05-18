@@ -707,14 +707,6 @@ frappe.ui.form.on('Payment Request Form', {
                 && (!frm.doc.receiving_account || !frm.doc.receving_account_no || !frm.doc.receiving_currency)) {
                 try { frm.events.receiving_bank(frm); } catch (e) {}
             }
-            // Per Jithin: receiving_amount is auto-computed
-            // (issued_amount × exchange rate). Lock it read-only on IT
-            // — the user only edits the issued side and (optionally)
-            // the exchange rate. Frappe v15 makes ALL fields read-only
-            // on submit, so this only affects Draft state.
-            if (frm.fields_dict.receiving_amount) {
-                frm.set_df_property("receiving_amount", "read_only", 1);
-            }
         }
 
         // Setup invoice drill-down links and View buttons
