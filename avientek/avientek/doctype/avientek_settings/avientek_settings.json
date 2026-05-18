@@ -18,7 +18,9 @@
   "quote_creator_roles",
   "quote_high_prob_restricted_roles",
   "signature_images_section",
-  "signature_images"
+  "signature_images",
+  "notifications_section",
+  "enable_quotation_notifications"
  ],
  "fields": [
   {
@@ -112,6 +114,19 @@
    "fieldtype": "Table",
    "label": "Signature Images",
    "options": "Avientek Signature Image"
+  },
+  {
+   "fieldname": "notifications_section",
+   "fieldtype": "Section Break",
+   "label": "Notifications",
+   "description": "Master switch for Avientek-generated transactional emails (Quotation approval requests, approved / rejected confirmations, prob-100 alerts). Uses the default outgoing Email Account configured under Email Domain → Email Account."
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_quotation_notifications",
+   "fieldtype": "Check",
+   "label": "Enable Quotation Email Notifications",
+   "description": "When OFF, no Avientek-generated quotation emails are sent. ToDo creation continues regardless. Useful during testing or when the outgoing mailbox is rate-limited."
   }
  ],
  "grid_page_length": 50,

@@ -358,6 +358,30 @@ def on_update_after_submit(doc, method=None):
 # ─────────────────────────────────────────────────────────────────────
 
 
+def _render_quotation_email(template_name, doc):
+    """Render an Email Template against a Quotation doc.
+
+    Returns (subject, message) — both empty strings if the template
+    doesn't exist (caller falls back to inline HTML).
+    """
+    try:
+        tmpl = frappe.db.get_value(
+            "Email Template", template_name, ["subject", "response"], as_dict=True
+        )
+        if not tmpl:
+            return "", ""
+        ctx = {"doc": doc}
+        subject = frappe.render_template(tmpl.subject or "", ctx)
+        message = frappe.render_template(tmpl.response or "", ctx)
+        return subject, message
+    except Exception:
+        frappe.log_error(
+            title=f"Email Template render failed: {template_name}",
+            message=frappe.get_traceback(),
+        )
+        return "", ""
+
+
 def notify_probability_100(doc, method=None):
     """Send an email + system notification when a Quotation's
     probability transitions to 100% on a submitted doc.
@@ -393,19 +417,35 @@ def notify_probability_100(doc, method=None):
         if not recipients:
             return
 
-        subject = _("Quotation {0} reached 100% probability").format(doc.name)
-        message = (
-            f"<p>Quotation <a href='/app/quotation/{doc.name}'>{doc.name}</a> "
-            f"has been confirmed at <b>100% probability</b>.</p>"
-            f"<ul>"
-            f"<li>Customer: {(doc.party_name or doc.quotation_to or '—')}</li>"
-            f"<li>Grand Total: {(doc.grand_total or 0):,.2f} {(doc.currency or '')}</li>"
-            f"<li>Owner: {doc.owner}</li>"
-            f"<li>Valid Till: {(doc.valid_till or '—')}</li>"
-            f"</ul>"
-            f"<p>This quote is now visible to downstream teams "
-            f"(Procurement / Dispatch) for fulfillment.</p>"
+        # Honour the master switch on Avientek Settings — admins disable
+        # this during testing or when the outgoing mailbox is rate-
+        # limited. The doc still saves at prob=100 either way.
+        if not frappe.db.get_single_value(
+            "Avientek Settings", "enable_quotation_notifications"
+        ):
+            return
+
+        # Use the Email Template if it exists (admins can edit wording
+        # without code changes); fall back to inline HTML so the
+        # notification still goes out on sites that haven't loaded the
+        # fixture yet.
+        subject, message = _render_quotation_email(
+            "Quotation Confirmed at 100% Probability", doc
         )
+        if not subject:
+            subject = _("Quotation {0} reached 100% probability").format(doc.name)
+            message = (
+                f"<p>Quotation <a href='/app/quotation/{doc.name}'>{doc.name}</a> "
+                f"has been confirmed at <b>100% probability</b>.</p>"
+                f"<ul>"
+                f"<li>Customer: {(doc.party_name or doc.quotation_to or '—')}</li>"
+                f"<li>Grand Total: {(doc.grand_total or 0):,.2f} {(doc.currency or '')}</li>"
+                f"<li>Owner: {doc.owner}</li>"
+                f"<li>Valid Till: {(doc.valid_till or '—')}</li>"
+                f"</ul>"
+                f"<p>This quote is now visible to downstream teams "
+                f"(Procurement / Dispatch) for fulfillment.</p>"
+            )
         frappe.sendmail(
             recipients=list(set(recipients)),
             subject=subject,
