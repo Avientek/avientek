@@ -688,6 +688,22 @@ frappe.ui.form.on('Payment Request Form', {
             }
         });
 
+        // Jithin 2026-05-18 (AVFZC-02160): on existing IT PRFs the
+        // issued-side `account` / `account_no` / `issued_currency` /
+        // `issued_amount` were missing from the form because
+        // `fetch_from` on those fields fires only on issued_bank change,
+        // not on form reload. If the doc was saved before the fetch
+        // landed (or the linked Bank Account had blanks at that moment),
+        // the cascade gates on issued_currency (`doc.account`) and
+        // issued_amount (`doc.issued_currency`) keep them hidden. On
+        // refresh, re-run the issued_bank handler so the chain repopulates
+        // and the fields surface.
+        if (frm.doc.payment_type === "Internal Transfer"
+            && frm.doc.issued_bank
+            && (!frm.doc.account || !frm.doc.account_no || !frm.doc.issued_currency)) {
+            try { frm.events.issued_bank(frm); } catch (e) {}
+        }
+
         // Setup invoice drill-down links and View buttons
         frm.events.setup_invoice_drilldown(frm);
 
@@ -2051,29 +2067,45 @@ frappe.ui.form.on('Payment Request Form', {
 
     issued_bank : function(frm) {
         if (frm.doc.issued_bank) {
-            frappe.call({
-                method: "frappe.client.get_value",
-                args: {
-                    doctype: "Account",
-                    filters: {
-                        name: frm.doc.account
-                    },
-                    fieldname: ["account_currency"]
-                },
-                callback: function(r) {
+            // Jithin 2026-05-18 (AVFZC-02160): on Internal Transfer the
+            // issued-side Account / Account No / Currency / Amount were
+            // not appearing because the `account` and `account_no`
+            // fields rely on Frappe `fetch_from` from the Bank Account
+            // record. `fetch_from` only fires on the change event, not
+            // reliably on form load — and when it doesn't fire,
+            // `frm.doc.account` stays empty, which then keeps
+            // `issued_currency` (depends_on doc.account) and
+            // `issued_amount` (depends_on doc.issued_currency) hidden.
+            // Fetch from Bank Account directly, populate the fields
+            // ourselves, then chain to the GL Account for currency.
+            frappe.db.get_value("Bank Account", frm.doc.issued_bank,
+                ["account", "bank_account_no"]).then(rr => {
+                const ba = (rr && rr.message) || {};
+                const newAccount = ba.account || "";
+                const newAccountNo = ba.bank_account_no || "";
+                if ((frm.doc.account || "") !== newAccount) {
+                    frm.doc.account = newAccount;
+                    try { frm.refresh_field("account"); } catch (e) {}
+                }
+                if ((frm.doc.account_no || "") !== newAccountNo) {
+                    frm.doc.account_no = newAccountNo;
+                    try { frm.refresh_field("account_no"); } catch (e) {}
+                }
+                if (!newAccount) return;
+                // Chain: fetch the GL Account's currency and assign to issued_currency.
+                frappe.db.get_value("Account", newAccount, ["account_currency"]).then(r => {
                     // Sammish 2026-05-16 (Jithin "Not Saved" regression):
                     // direct-assignment when value differs. set_value in
-                    // v15 always dirties — and this callback fires async
-                    // after form load when account fetch_from re-triggers
-                    // the issued_bank chain, marking saved docs dirty.
-                    if (r.message) {
+                    // v15 always dirties — keep direct writes here so
+                    // the form doesn't go dirty on auto-load.
+                    if (r && r.message) {
                         const newVal = r.message.account_currency || "";
                         if ((frm.doc.issued_currency || "") !== newVal) {
                             frm.doc.issued_currency = newVal;
                             try { frm.refresh_field("issued_currency"); } catch (e) {}
                         }
                     }
-                }
+                });
             });
 
             // Sammish 2026-05-16 (Jithin #10): bank letter is now sourced
