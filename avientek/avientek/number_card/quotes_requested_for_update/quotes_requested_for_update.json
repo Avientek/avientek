@@ -2,14 +2,15 @@
  "color": "#8E44AD",
  "doctype": "Number Card",
  "document_type": "Quotation",
- "filters_json": "[[\"Quotation\",\"workflow_state\",\"=\",\"Requested for update\"]]",
+ "filters_json": "[]",
  "function": "Count",
  "is_public": 1,
  "is_standard": 1,
  "label": "Quotes Requested for Update",
+ "method": "avientek.api.quotation_cards.count_quotes_requested_for_update",
  "module": "Avientek",
  "name": "Quotes Requested for Update",
- "show_percentage_stats": 1,
+ "show_percentage_stats": 0,
  "stats_time_interval": "Daily",
- "type": "Document Type"
+ "type": "Custom"
 }
