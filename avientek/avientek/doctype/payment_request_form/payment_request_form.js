@@ -2215,15 +2215,26 @@ frappe.ui.form.on('Payment Request Form', {
         }
     },
 
-    // Internal Transfer: Auto-update issued amount when receiving amount changes
+    // Internal Transfer: When user manually edits receiving_amount, keep
+    // issued_amount fixed and recompute the exchange rate to match the
+    // entered receiving value. Jithin 2026-05-18 PM: "if user changes
+    // received amount, exchange rate will update, not change issued
+    // amount" — common when the bank's actual transfer rate differs
+    // from the system's quoted rate (forex spread, charges, etc.).
     receiving_amount: function(frm) {
-        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.receiving_amount) {
-            // Only calculate if user manually changed receiving amount
-            // (not from an issued→receiving forward calc).
-            if (!frm._calculating_from_issued) {
-                frm.events.calculate_transfer_amounts(frm, 'receiving');
-            }
-        }
+        if (frm.doc.payment_type !== "Internal Transfer") return;
+        if (!frm.doc.receiving_amount) return;
+        if (frm._calculating_from_issued) return;  // came from issued forward calc; not user input
+        if (!frm.doc.issued_amount || flt(frm.doc.issued_amount) <= 0) return;
+        const new_rate = flt(frm.doc.receiving_amount / frm.doc.issued_amount, 6);
+        if (flt(frm.doc.transfer_exchange_rate, 6) === new_rate) return;
+        // Suppress the rate change handler — otherwise it'd recompute
+        // receiving_amount = issued × new_rate, overwriting the value
+        // the user just typed (it would land on the same number due to
+        // rounding, but the unnecessary write blinks the field).
+        frm._suppress_rate_change_recalc = true;
+        frm.set_value('transfer_exchange_rate', new_rate);
+        frm._suppress_rate_change_recalc = false;
     },
 
     // Calculate transfer amounts based on currency exchange rates
@@ -2317,6 +2328,10 @@ frappe.ui.form.on('Payment Request Form', {
     // Recalculate when exchange rate is manually changed
     transfer_exchange_rate: function(frm) {
         if (frm.doc.payment_type === "Internal Transfer" && frm.doc.transfer_exchange_rate) {
+            // Suppress when the rate was just set by the receiving_amount
+            // handler (user manually adjusted receiving_amount) — the
+            // receiving value is already correct, no need to overwrite.
+            if (frm._suppress_rate_change_recalc) return;
             let rate = flt(frm.doc.transfer_exchange_rate);
             if (rate > 0 && frm.doc.issued_amount) {
                 frm._calculating_from_issued = true;
