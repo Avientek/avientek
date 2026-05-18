@@ -2207,6 +2207,10 @@ frappe.ui.form.on('Payment Request Form', {
     // Internal Transfer: Auto-update receiving amount when issued amount changes
     issued_amount: function(frm) {
         if (frm.doc.payment_type === "Internal Transfer" && frm.doc.issued_amount) {
+            // Suppress recalc when this change came from a receiving→issued
+            // back-calc — otherwise the round-trip mutates the user's
+            // original receiving_amount entry due to flt(_, 2) rounding.
+            if (frm._calculating_from_receiving) return;
             frm.events.calculate_transfer_amounts(frm, 'issued');
         }
     },
@@ -2214,7 +2218,8 @@ frappe.ui.form.on('Payment Request Form', {
     // Internal Transfer: Auto-update issued amount when receiving amount changes
     receiving_amount: function(frm) {
         if (frm.doc.payment_type === "Internal Transfer" && frm.doc.receiving_amount) {
-            // Only calculate if user manually changed receiving amount (not from issued calculation)
+            // Only calculate if user manually changed receiving amount
+            // (not from an issued→receiving forward calc).
             if (!frm._calculating_from_issued) {
                 frm.events.calculate_transfer_amounts(frm, 'receiving');
             }
@@ -2236,7 +2241,9 @@ frappe.ui.form.on('Payment Request Form', {
                 frm.set_value('receiving_amount', frm.doc.issued_amount);
                 frm._calculating_from_issued = false;
             } else {
+                frm._calculating_from_receiving = true;
                 frm.set_value('issued_amount', frm.doc.receiving_amount);
+                frm._calculating_from_receiving = false;
             }
             return;
         }
@@ -2251,7 +2258,9 @@ frappe.ui.form.on('Payment Request Form', {
                 frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
                 frm._calculating_from_issued = false;
             } else if (source === 'receiving' && frm.doc.receiving_amount) {
+                frm._calculating_from_receiving = true;
                 frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
+                frm._calculating_from_receiving = false;
             }
         } else {
             // Fetch exchange rate
@@ -2296,7 +2305,9 @@ frappe.ui.form.on('Payment Request Form', {
                         frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
                         frm._calculating_from_issued = false;
                     } else if (source === 'receiving' && frm.doc.receiving_amount) {
+                        frm._calculating_from_receiving = true;
                         frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
+                        frm._calculating_from_receiving = false;
                     }
                 }
             }
