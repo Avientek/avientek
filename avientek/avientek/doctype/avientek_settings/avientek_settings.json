@@ -20,7 +20,8 @@
   "signature_images_section",
   "signature_images",
   "notifications_section",
-  "enable_quotation_notifications"
+  "enable_quotation_notifications",
+  "restrict_notifications_to_workflow_participants"
  ],
  "fields": [
   {
@@ -127,6 +128,13 @@
    "fieldtype": "Check",
    "label": "Enable Quotation Email Notifications",
    "description": "When OFF, no Avientek-generated quotation emails are sent. ToDo creation continues regardless. Useful during testing or when the outgoing mailbox is rate-limited."
+  },
+  {
+   "default": "1",
+   "fieldname": "restrict_notifications_to_workflow_participants",
+   "fieldtype": "Check",
+   "label": "Restrict to Workflow Participants",
+   "description": "When ON, quotation emails (incl. the 100%-probability alert) only go to users who took part in the document's workflow — the creator, configured sales persons on the quote, and anyone who acted on a Workflow Action for it. When OFF, the broader role-based recipient list is used (everyone with the approver role)."
   }
  ],
  "grid_page_length": 50,

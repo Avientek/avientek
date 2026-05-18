@@ -463,35 +463,72 @@ def notify_probability_100(doc, method=None):
 
 
 def _resolve_prob_100_recipients(doc):
-    """Build the recipient list for the prob=100 notification. Reads
-    dynamically — recipients change as soon as Avientek Settings
-    approver roles or doc.sales_team change."""
+    """Build the recipient list for the prob=100 notification.
+
+    When `Avientek Settings → Restrict to Workflow Participants` is ON
+    (default), only includes users who actually took part in the
+    document's lifecycle — the creator, sales persons listed on the
+    quote, and anyone with a Workflow Action row for it (assigned or
+    completed). This is the BRD's "don't notify users who weren't part
+    of this workflow" rule.
+
+    When OFF, falls back to the broader role-based blast: every user
+    holding any configured approver role gets the email regardless of
+    whether they touched this specific quote.
+    """
     emails = []
     if doc.owner:
         emails.append(doc.owner)
+
     # Sales team
     for row in (doc.get("sales_team") or []):
         sp_name = getattr(row, "sales_person", None)
         if not sp_name:
             continue
-        # Sales Person → User email (or contact_no if email blank)
         user_email = frappe.db.get_value("Sales Person", sp_name, "email_address")
         if user_email:
             emails.append(user_email)
-    # Approver role users — any of the configured approver roles.
-    cfg = _settings_roles()
-    approver_roles = cfg.get("approver_roles") or ((cfg.get("approver_role"),) if cfg.get("approver_role") else ())
-    if approver_roles:
-        users = frappe.db.sql(
-            """SELECT DISTINCT u.name
-               FROM `tabUser` u
-               INNER JOIN `tabHas Role` hr
-                 ON hr.parent = u.name AND hr.parenttype = 'User'
-               WHERE u.enabled = 1 AND u.email IS NOT NULL
-                 AND hr.role IN %(roles)s""",
-            {"roles": tuple(approver_roles)},
+
+    restrict = bool(frappe.db.get_single_value(
+        "Avientek Settings", "restrict_notifications_to_workflow_participants"
+    ))
+
+    if restrict:
+        # Workflow participants = anyone who has a Workflow Action row
+        # against this doc, either as the assigned user OR the actual
+        # completer. Captures every approver who saw or acted on the
+        # quote without sweeping in role-holders who never touched it.
+        actions = frappe.db.get_all(
+            "Workflow Action",
+            filters={
+                "reference_doctype": "Quotation",
+                "reference_name": doc.name,
+            },
+            fields=["user", "completed_by"],
         )
-        emails.extend([u[0] for u in users])
+        for a in actions:
+            if a.get("user"):
+                emails.append(a["user"])
+            if a.get("completed_by"):
+                emails.append(a["completed_by"])
+    else:
+        # Broad blast: every user holding any configured approver role.
+        cfg = _settings_roles()
+        approver_roles = cfg.get("approver_roles") or (
+            (cfg.get("approver_role"),) if cfg.get("approver_role") else ()
+        )
+        if approver_roles:
+            users = frappe.db.sql(
+                """SELECT DISTINCT u.name
+                   FROM `tabUser` u
+                   INNER JOIN `tabHas Role` hr
+                     ON hr.parent = u.name AND hr.parenttype = 'User'
+                   WHERE u.enabled = 1 AND u.email IS NOT NULL
+                     AND hr.role IN %(roles)s""",
+                {"roles": tuple(approver_roles)},
+            )
+            emails.extend([u[0] for u in users])
+
     # Filter out empty + Administrator (not a real inbox)
     return [e for e in emails if e and e.lower() not in ("administrator",)]
 
