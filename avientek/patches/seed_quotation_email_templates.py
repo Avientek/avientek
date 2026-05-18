@@ -12,14 +12,17 @@ Used by `avientek.api.quotation_high_probability._render_quotation_email`
 import frappe
 
 
+# Avientek brand palette — taken from avientek.com (Jithin 2026-05-18):
+# black header background, bright cyan-blue accent (the logo colour),
+# white card body. Matches the site's hero strip exactly.
 _BRAND_HEADER = (
     '<table width="100%" cellpadding="0" cellspacing="0" '
-    'style="background:#1f4e3d;color:#f7f1e3;'
+    'style="background:#000000;color:#ffffff;'
     'font-family:Segoe UI,Arial,sans-serif;">'
-    '<tr><td style="padding:14px 22px;font-size:18px;font-weight:600;'
-    'letter-spacing:0.5px;">AVIENTEK</td>'
-    '<td align="right" style="padding:14px 22px;font-size:11px;'
-    'color:#d4b95e;">{{ doc.doctype }} {{ doc.name }}</td></tr></table>'
+    '<tr><td style="padding:18px 24px;font-size:20px;font-weight:700;'
+    'letter-spacing:1px;color:#00aeef;">AVIENTEK</td>'
+    '<td align="right" style="padding:18px 24px;font-size:11px;'
+    'color:#cccccc;letter-spacing:0.3px;">{{ doc.doctype }} {{ doc.name }}</td></tr></table>'
 )
 
 _DETAIL_TABLE = (
@@ -27,33 +30,33 @@ _DETAIL_TABLE = (
     'style="border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;'
     'font-size:13px;margin-top:18px;">'
     '<tr><td style="padding:6px 0;color:#666;width:38%;">Customer</td>'
-    '<td style="padding:6px 0;font-weight:500;">'
+    '<td style="padding:6px 0;font-weight:500;color:#111;">'
     '{{ doc.party_name or doc.quotation_to or "—" }}</td></tr>'
     '<tr><td style="padding:6px 0;color:#666;">Salesperson</td>'
-    '<td style="padding:6px 0;">{{ doc.owner }}</td></tr>'
+    '<td style="padding:6px 0;color:#111;">{{ doc.owner }}</td></tr>'
     '<tr><td style="padding:6px 0;color:#666;">Grand Total</td>'
-    '<td style="padding:6px 0;font-weight:600;color:#1f4e3d;">'
+    '<td style="padding:6px 0;font-weight:700;color:#00aeef;">'
     '{{ "{:,.2f}".format(doc.grand_total or 0) }} {{ doc.currency or "" }}</td></tr>'
     '<tr><td style="padding:6px 0;color:#666;">Probability</td>'
-    '<td style="padding:6px 0;">{{ doc.probability or 0 }}%</td></tr>'
+    '<td style="padding:6px 0;color:#111;">{{ doc.probability or 0 }}%</td></tr>'
     '<tr><td style="padding:6px 0;color:#666;">Valid Till</td>'
-    '<td style="padding:6px 0;">{{ doc.valid_till or "—" }}</td></tr>'
+    '<td style="padding:6px 0;color:#111;">{{ doc.valid_till or "—" }}</td></tr>'
     '</table>'
 )
 
 _BUTTON = (
-    '<p style="margin-top:24px;">'
+    '<p style="margin-top:26px;">'
     '<a href="{{ frappe.utils.get_url() }}/app/quotation/{{ doc.name }}" '
-    'style="display:inline-block;padding:10px 22px;background:#d4b95e;'
-    'color:#1f4e3d;text-decoration:none;font-weight:600;'
+    'style="display:inline-block;padding:11px 24px;background:#00aeef;'
+    'color:#ffffff;text-decoration:none;font-weight:600;'
     'font-family:Segoe UI,Arial,sans-serif;font-size:13px;'
-    'border-radius:3px;">Open Quotation →</a></p>'
+    'border-radius:3px;letter-spacing:0.3px;">Open Quotation →</a></p>'
 )
 
 _FOOTER = (
-    '<p style="margin-top:30px;font-size:11px;color:#999;'
+    '<p style="margin-top:32px;font-size:11px;color:#999;'
     'font-family:Segoe UI,Arial,sans-serif;border-top:1px solid #eee;'
-    'padding-top:12px;">'
+    'padding-top:14px;">'
     'This is an automated notification from Avientek ERP. To turn these '
     'emails off, edit <b>Avientek Settings → Notifications</b>.</p>'
 )
@@ -61,10 +64,10 @@ _FOOTER = (
 
 def _body(intro_html):
     return (
-        '<div style="max-width:640px;margin:0 auto;background:#fdfaf3;'
-        'padding:0 0 24px 0;">'
+        '<div style="max-width:640px;margin:0 auto;background:#ffffff;'
+        'padding:0 0 24px 0;border:1px solid #ececec;">'
         + _BRAND_HEADER
-        + '<div style="padding:24px;">'
+        + '<div style="padding:26px;color:#222;">'
         + intro_html
         + _DETAIL_TABLE
         + _BUTTON
@@ -88,7 +91,7 @@ _TEMPLATES = [
         "subject": "Approved: Quotation {{ doc.name }} — {{ doc.party_name }}",
         "response": _body(
             '<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;">'
-            'Your quotation has been <b style="color:#1f4e3d;">approved</b> and is '
+            'Your quotation has been <b style="color:#00aeef;">approved</b> and is '
             'ready to share with the customer.</p>'
         ),
     },
