@@ -146,6 +146,13 @@ avientek.patches.prf_internal_party_skip_l2
 # `Avientek Reports`, then re-saves affected users so their
 # User.block_modules sync from the updated profile. Idempotent.
 avientek.patches.unblock_avientek_module_for_module_profiles
+# Jithin 2026-05-19: he couldn't link an Internal Supplier to an
+# existing company Bank Account because the standard ERPNext doctype
+# hides the "Party Details" section when is_company_account=1. The
+# inter-company workflow needs BOTH (company account + party link)
+# on the same record. This patch blanks the section's depends_on
+# via Property Setter so the fields are always visible. Idempotent.
+avientek.patches.show_bank_account_party_section_always
 # Sammish 2026-05-18: seed 4 Email Templates for Quotation approval
 # notifications (Approval Required / Approved / Rejected / Confirmed
 # at 100%). Idempotent — only creates if missing. Admins can edit the
