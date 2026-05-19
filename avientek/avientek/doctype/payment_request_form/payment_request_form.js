@@ -2221,46 +2221,24 @@ frappe.ui.form.on('Payment Request Form', {
         }
     },
 
-    // Internal Transfer: receiving_amount handler. Two cases:
+    // Internal Transfer: receiving_amount handler.
     //
-    // (a) Issued amount is ALREADY set → user is adjusting the
-    //     receiving value. Keep issued fixed and recompute the
-    //     exchange rate to match. Then the user can fine-tune the
-    //     rate from there.
-    //     (Jithin 2026-05-18 PM: "if user changes received amount,
-    //     exchange rate will update, not change issued amount".)
+    // Jithin 2026-05-19 FINAL (supersedes the 18-May "receiving edit
+    // updates rate" rule): Exchange Rate is read-only and auto-fetched
+    // — never user-edited. Editing the Receiving Amount recomputes
+    // the Issued Amount via the locked rate. (And editing the Issued
+    // Amount recomputes the Receiving Amount via the same rate.) Both
+    // amounts editable, both directions via Rate, Rate itself
+    // immutable from the UI.
     //
-    // (b) Issued amount is EMPTY → user entered receiving FIRST.
-    //     Compute issued from the receiving + existing exchange rate,
-    //     OR fetch a fresh rate from the FX API if none is set and
-    //     then back-fill issued. User can later override the rate.
-    //     (Jithin 2026-05-19: "both ways — either Issued or
-    //     Receiving entered first should populate the other side".)
+    // calculate_transfer_amounts handles all sub-cases:
+    //   - rate > 0: issued = receiving / rate
+    //   - rate == 0 (FX not yet fetched): fetch from API, then compute
+    //   - same currency: 1:1
     receiving_amount: function(frm) {
         if (frm.doc.payment_type !== "Internal Transfer") return;
         if (!frm.doc.receiving_amount) return;
         if (frm._calculating_from_issued) return;  // came from issued forward calc; not user input
-
-        const recv = flt(frm.doc.receiving_amount);
-        const issued = flt(frm.doc.issued_amount);
-        const rate = flt(frm.doc.transfer_exchange_rate);
-
-        if (issued > 0) {
-            // (a) Both amounts present → recompute rate from them.
-            const new_rate = flt(recv / issued, 6);
-            if (flt(rate, 6) === new_rate) return;
-            // Suppress the rate handler so it doesn't recompute
-            // receiving = issued × new_rate and blink the field.
-            frm._suppress_rate_change_recalc = true;
-            frm.set_value('transfer_exchange_rate', new_rate);
-            frm._suppress_rate_change_recalc = false;
-            return;
-        }
-
-        // (b) Issued is empty — back-fill it. calculate_transfer_amounts
-        // handles both same-currency (rate=1) and different-currency
-        // (uses existing rate, or fetches one from the FX API and then
-        // sets issued = receiving / rate).
         frm.events.calculate_transfer_amounts(frm, 'receiving');
     },
 
@@ -2352,13 +2330,13 @@ frappe.ui.form.on('Payment Request Form', {
         });
     },
 
-    // Recalculate when exchange rate is manually changed
+    // Rate change handler — fires whenever the FX API populates the
+    // rate (the rate is read-only from the UI, so this only triggers
+    // on programmatic set_value calls from fetch_transfer_exchange_rate).
+    // When the rate lands, recompute Receiving from the current Issued
+    // so the form stays consistent.
     transfer_exchange_rate: function(frm) {
         if (frm.doc.payment_type === "Internal Transfer" && frm.doc.transfer_exchange_rate) {
-            // Suppress when the rate was just set by the receiving_amount
-            // handler (user manually adjusted receiving_amount) — the
-            // receiving value is already correct, no need to overwrite.
-            if (frm._suppress_rate_change_recalc) return;
             let rate = flt(frm.doc.transfer_exchange_rate);
             if (rate > 0 && frm.doc.issued_amount) {
                 frm._calculating_from_issued = true;
