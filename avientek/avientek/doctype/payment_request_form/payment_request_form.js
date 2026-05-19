@@ -592,9 +592,15 @@ frappe.ui.form.on('Payment Request Form', {
         });
 
         frm.set_query("supplier_bank_account", function() {
+            // Jithin 2026-05-19: legacy filter `is_company_account: 0`
+            // hid legitimate inter-company banks (Internal Supplier /
+            // Customer banks are marked is_company_account=1 for the
+            // represented entity). Server-side helper relaxes that
+            // filter when the party is internal, keeps it for external
+            // parties.
             return {
+                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.supplier_bank_account_query",
                 filters: {
-                    is_company_account: 0,
                     party_type: frm.doc.party_type,
                     party: frm.doc.party
                 }

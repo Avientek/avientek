@@ -336,6 +336,75 @@ def bank_account_query_with_internal(doctype, txt, searchfield, start, page_len,
 
 @frappe.whitelist()
 @frappe.read_only()
+def supplier_bank_account_query(doctype, txt, searchfield, start, page_len, filters):
+	"""Frappe set_query backend for the PRF supplier_bank_account picker.
+
+	The legacy declarative filter `{is_company_account: 0, party_type, party}`
+	hides legitimate inter-company banks: when Avientek WLL pays Avientek
+	FZCO as an Internal Supplier, the receiving Bank Account
+	(AVIENTEK FZCO - …) is marked is_company_account=1 (it's FZCO's own
+	bank). Filtering on `is_company_account=0` excludes it and the user
+	can't pick the bank where the money is actually going.
+
+	This helper:
+	  - Always matches `party_type=<filters.party_type>` AND
+	    `party=<filters.party>` so we only show banks linked to the chosen
+	    supplier/customer/employee.
+	  - Drops the `is_company_account=0` requirement when the chosen party
+	    is an internal supplier/customer (those entities legitimately have
+	    is_company_account=1 banks).
+	  - Keeps the `is_company_account=0` requirement for external parties
+	    so accidental misconfiguration on a normal supplier doesn't surface
+	    a company-owned bank in the supplier picker.
+
+	Jithin 2026-05-19.
+	"""
+	party_type = (filters or {}).get("party_type") or ""
+	party = (filters or {}).get("party") or ""
+	txt_like = f"%{(txt or '').strip()}%"
+	start = int(start or 0)
+	page_len = int(page_len or 20)
+
+	is_internal = False
+	if party_type == "Supplier" and party:
+		is_internal = bool(frappe.db.get_value(
+			"Supplier", party, "is_internal_supplier"
+		))
+	elif party_type == "Customer" and party:
+		is_internal = bool(frappe.db.get_value(
+			"Customer", party, "is_internal_customer"
+		))
+
+	company_account_clause = (
+		"" if is_internal else "AND IFNULL(ba.is_company_account, 0) = 0"
+	)
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT ba.name, ba.account_name
+		FROM `tabBank Account` ba
+		WHERE IFNULL(ba.disabled, 0) = 0
+		  AND ba.party_type = %(party_type)s
+		  AND ba.party = %(party)s
+		  {company_account_clause}
+		  AND (ba.name LIKE %(txt)s OR ba.account_name LIKE %(txt)s)
+		ORDER BY ba.name ASC
+		LIMIT %(start)s, %(page_len)s
+		""",
+		{
+			"party_type": party_type,
+			"party": party,
+			"txt": txt_like,
+			"start": start,
+			"page_len": page_len,
+		},
+		as_list=True,
+	)
+	return [(r[0], r[1] or "") for r in rows]
+
+
+@frappe.whitelist()
+@frappe.read_only()
 def get_outstanding_payment_request_forms(party_type=None, party=None, company=None):
 	"""Return Released / Partially Processed PRFs eligible to be paid.
 
