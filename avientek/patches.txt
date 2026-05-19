@@ -138,6 +138,14 @@ avientek.patches.fix_prf_po_rows_with_stale_so_document_reference
 # so the path is Authorised → Approve L1 → Released. External Pay /
 # Advance Pay keeps the full L1+L2 chain.
 avientek.patches.prf_internal_party_skip_l2
+# Jithin 2026-05-19: Rahul (GM-CS) couldn't see the Sales Team
+# workspace. Traced to GM-CS-Module Module Profile blocking the
+# Avientek module entirely (not the workspace roles, not perms — it
+# was the v15 sidebar-filter respecting Module-Profile-level blocks).
+# This patch scans EVERY Module Profile and unblocks `Avientek` +
+# `Avientek Reports`, then re-saves affected users so their
+# User.block_modules sync from the updated profile. Idempotent.
+avientek.patches.unblock_avientek_module_for_module_profiles
 # Sammish 2026-05-18: seed 4 Email Templates for Quotation approval
 # notifications (Approval Required / Approved / Rejected / Confirmed
 # at 100%). Idempotent — only creates if missing. Admins can edit the

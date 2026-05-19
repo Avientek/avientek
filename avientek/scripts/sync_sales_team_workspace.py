@@ -24,11 +24,32 @@ def run():
             "label": row.get("label"),
             "number_card_name": row.get("number_card_name"),
         })
+    # Jithin 2026-05-19: also sync shortcuts. Earlier sync only handled
+    # number_cards + content, so the on-disk shortcuts list never reached
+    # prod — leaving the workspace with too few accessible items for
+    # GM-CS users (Frappe v15 sidebar filter hides workspaces whose
+    # shortcuts/links all point to things the user can't read).
+    ws.set("shortcuts", [])
+    for row in spec.get("shortcuts", []):
+        ws.append("shortcuts", {
+            "label": row.get("label"),
+            "link_to": row.get("link_to"),
+            "type": row.get("type"),
+            "color": row.get("color"),
+            "doc_view": row.get("doc_view"),
+            "format": row.get("format"),
+            "stats_filter": row.get("stats_filter"),
+            "url": row.get("url"),
+            "kanban_board": row.get("kanban_board"),
+            "report_ref_doctype": row.get("report_ref_doctype"),
+        })
     ws.content = spec.get("content") or ws.content
     ws.flags.ignore_permissions = True
     ws.flags.ignore_validate = True
     ws.save()
     frappe.db.commit()
-    print(f"  ✓ wrote {len(ws.number_cards)} number_cards rows on Sales Team")
+    print(f"  ✓ wrote {len(ws.number_cards)} number_cards + {len(ws.shortcuts)} shortcuts on Sales Team")
     for r in ws.number_cards:
-        print(f"      - {r.number_card_name}")
+        print(f"      [card] {r.number_card_name}")
+    for s in ws.shortcuts:
+        print(f"      [shortcut] {s.label}  →  {s.type}: {s.link_to}")
