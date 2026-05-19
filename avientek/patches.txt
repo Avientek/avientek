@@ -131,6 +131,13 @@ avientek.patches.add_pe_prf_link_and_processed_states
 # restores document_reference = reference_name on the 3 already-
 # broken rows. Idempotent.
 avientek.patches.fix_prf_po_rows_with_stale_so_document_reference
+# Jithin 2026-05-19 (reverses 2026-05-16 final): internal-party PRFs
+# (Internal Transfer / Internal Customer / Internal Supplier) now go
+# through L1 only, skipping L2. Previous patch had them skipping L1
+# and going Authorised → Approve L2 → Released; that's been reversed
+# so the path is Authorised → Approve L1 → Released. External Pay /
+# Advance Pay keeps the full L1+L2 chain.
+avientek.patches.prf_internal_party_skip_l2
 # Sammish 2026-05-18: seed 4 Email Templates for Quotation approval
 # notifications (Approval Required / Approved / Rejected / Confirmed
 # at 100%). Idempotent — only creates if missing. Admins can edit the
