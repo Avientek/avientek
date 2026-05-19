@@ -36,14 +36,23 @@ def _user_can_see_all_quotations() -> bool:
     return bool(approver_roles & user_roles)
 
 
-def _count_by_state(workflow_state: str) -> dict:
+def _count_by_state(workflow_state) -> dict:
     """Count Quotations in `workflow_state`, scoped to the current user
-    unless they are an approver. Returns a dict shaped for Number Card
-    type=Custom — `value` is the number, `route` makes the card
-    clickable through to a filtered list view.
+    unless they are an approver. `workflow_state` may be a single
+    string OR a list/tuple of state names — list inputs become a
+    SQL `IN (...)` match.
+
+    Returns a dict shaped for Number Card type=Custom — `value` is
+    the number, `route` makes the card clickable through to a
+    filtered list view.
     """
-    filters = {"workflow_state": workflow_state}
-    route_options = {"workflow_state": workflow_state}
+    if isinstance(workflow_state, (list, tuple)):
+        state_filter = ["in", list(workflow_state)]
+    else:
+        state_filter = workflow_state
+
+    filters = {"workflow_state": state_filter}
+    route_options = {"workflow_state": state_filter}
     if not _user_can_see_all_quotations():
         filters["owner"] = frappe.session.user
         route_options["owner"] = frappe.session.user
@@ -64,3 +73,12 @@ def count_cancelled_quotations(filters=None):
 @frappe.whitelist()
 def count_quotes_requested_for_update(filters=None):
     return _count_by_state("Requested for update")
+
+
+@frappe.whitelist()
+def count_cancellation_requests(filters=None):
+    """Quotes pending cancellation approval — anything in
+    'Cancellation Requested' or 'Cancellation L2 Pending'. Mirrors the
+    'Quotes Requested for Update' card but for cancellation flow.
+    Jithin/Rahul 2026-05-19."""
+    return _count_by_state(["Cancellation Requested", "Cancellation L2 Pending"])
