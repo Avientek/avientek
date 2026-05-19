@@ -212,30 +212,56 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 	start = int(start or 0)
 	searchfield = searchfield or "name"
 
-	# Build the OR clause based on which internal flag applies.
+	# Build the OR clause based on which internal flag applies, plus
+	# the "is this party active?" column — Supplier/Customer use
+	# `disabled` (Check, 0=active); Employee uses `status` (Data,
+	# values: Active/Inactive/Suspended/Left). Jithin 2026-05-19:
+	# crashed with `Unknown column 'tabEmployee.disabled'` when
+	# selecting an Employee party because we always wrote `disabled=0`.
 	if party_type == "Supplier":
 		internal_clause = "OR `tabSupplier`.is_internal_supplier = 1"
 		table = "Supplier"
+		active_clause = "`tabSupplier`.disabled = 0"
 	elif party_type == "Customer":
 		internal_clause = "OR `tabCustomer`.is_internal_customer = 1"
 		table = "Customer"
+		active_clause = "`tabCustomer`.disabled = 0"
+	elif party_type == "Employee":
+		internal_clause = ""
+		table = "Employee"
+		active_clause = "`tabEmployee`.status = 'Active'"
 	else:
-		# Employee or anything else — no internal flag, plain company match.
+		# Anything else — no internal flag, no active filter (defensive
+		# default; we'd rather show everyone than crash on a column we
+		# don't know about).
 		internal_clause = ""
 		table = party_type or doctype or "Supplier"
+		active_clause = "1=1"
 
 	match_cond = get_match_cond(table)
 
+	# Employee uses `employee_name` for the display column; Supplier/
+	# Customer have their own *_name columns; everything else just shows
+	# `name`. Build the extra columns inline so the outer SELECT can
+	# pull a unified display string.
+	if table == "Supplier":
+		display_select = "`tabSupplier`.supplier_name AS display_name"
+	elif table == "Customer":
+		display_select = "`tabCustomer`.customer_name AS display_name"
+	elif table == "Employee":
+		display_select = "`tabEmployee`.employee_name AS display_name"
+	else:
+		display_select = "'' AS display_name"
+
 	rows = frappe.db.sql(
 		f"""
-		SELECT name, supplier_name, customer_name
+		SELECT name, display_name
 		FROM (
 			SELECT
 				`tab{table}`.name AS name,
-				{'`tabSupplier`.supplier_name AS supplier_name' if table == 'Supplier' else "'' AS supplier_name"},
-				{'`tabCustomer`.customer_name AS customer_name' if table == 'Customer' else "'' AS customer_name"}
+				{display_select}
 			FROM `tab{table}`
-			WHERE `tab{table}`.disabled = 0
+			WHERE {active_clause}
 			  AND (`tab{table}`.{searchfield} LIKE %(txt)s
 			       OR `tab{table}`.name LIKE %(txt)s)
 			  AND (
@@ -252,10 +278,8 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 	)
 	# Frappe set_query expects a list of tuples; first column is the
 	# value, additional columns become the search-help description.
-	if table == "Supplier":
+	if table in ("Supplier", "Customer", "Employee"):
 		return [(r[0], r[1] or "") for r in rows]
-	if table == "Customer":
-		return [(r[0], r[2] or "") for r in rows]
 	return [(r[0],) for r in rows]
 
 
