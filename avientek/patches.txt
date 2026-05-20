@@ -153,6 +153,17 @@ avientek.patches.unblock_avientek_module_for_module_profiles
 # on the same record. This patch blanks the section's depends_on
 # via Property Setter so the fields are always visible. Idempotent.
 avientek.patches.show_bank_account_party_section_always
+# Jithin 2026-05-21: AVFZC-02174 showed PRF rows where reference_doctype
+# = Purchase Order but document_reference held the linked Sales Order
+# instead of the PO. Root cause: events/purchase_order.create_payment_request
+# (the "Create -> Payment Request Form" button on PO) was writing
+# source.items[0].sales_order into document_reference and source.name
+# into reference_name. JS fix-forward shipped same day. This patch
+# repairs historical rows: for any PR Reference row where
+# reference_doctype=PO and reference_name is a PO name but
+# document_reference isn't, move PO name to document_reference and
+# blank out reference_name. Idempotent.
+avientek.patches.fix_prf_rows_from_po_create_payment_request
 # Sammish 2026-05-18: seed 4 Email Templates for Quotation approval
 # notifications (Approval Required / Approved / Rejected / Confirmed
 # at 100%). Idempotent — only creates if missing. Admins can edit the

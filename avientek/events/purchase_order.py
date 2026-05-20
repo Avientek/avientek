@@ -426,10 +426,21 @@ def create_payment_request(source_name, target_doc=None, args=None):
         if not target.company:
             target.company = source.company
 
-        # Get related Sales Order from first item
-        sales_order = source.items[0].sales_order if source.items else ""
-
         # 3. Append to payment references
+        # Jithin 2026-05-21: prior code put the first PO item's linked
+        # Sales Order into `document_reference`, and the PO name into
+        # `reference_name`. That violates the canonical contract for
+        # this row (established 2026-05-18): `document_reference` must
+        # point to a document of the type given by `reference_doctype`.
+        # For PO rows the convention is:
+        #   - reference_name = ""    (user fills the supplier invoice
+        #                             number when goods arrive)
+        #   - bill_no        = ""
+        #   - document_reference = PO name (canonical system pointer)
+        # Matches the existing _open_po_picker and _fetch_outstanding
+        # PO flows. The Sales Order link is still reachable via PO's
+        # "Connections" tab or PO Item's sales_order field — no need
+        # to leak it into document_reference.
         exchange_rate = source.conversion_rate or 1
         # PO doesn't have outstanding_amount, use grand_total as full amount
         os_company = source.base_grand_total or 0
@@ -437,7 +448,8 @@ def create_payment_request(source_name, target_doc=None, args=None):
 
         target.append("payment_references", {
             "reference_doctype": "Purchase Order",
-            "reference_name": source.name,
+            "reference_name": "",
+            "bill_no": "",
             "grand_total": source.grand_total,
             "base_grand_total": source.base_grand_total,
             "outstanding_amount": os_invoice,
@@ -445,7 +457,7 @@ def create_payment_request(source_name, target_doc=None, args=None):
             "invoice_date": source.transaction_date,
             "due_date": source.schedule_date,
             "exchange_rate": exchange_rate,
-            "document_reference": sales_order,
+            "document_reference": source.name,
             "currency": source.currency,
         })
 
