@@ -2242,44 +2242,61 @@ frappe.ui.form.on('Payment Request Form', {
         frm.events.calculate_transfer_amounts(frm, 'receiving');
     },
 
-    // Calculate transfer amounts based on currency exchange rates
+    // Silent field assignment helper. Mutates the doc directly and
+    // refreshes the rendered field WITHOUT dispatching the field's
+    // change event. Used by the Internal Transfer amount/rate flow to
+    // break the loop where setting `issued_amount` would re-fire
+    // `receiving_amount` recompute and vice-versa. `frm.set_value`
+    // can't be used here because it returns a Promise — the change
+    // event dispatches async, so the prior "flag=true; set_value;
+    // flag=false" loop guard always lost the race (flag reset to
+    // false BEFORE the handler runs). Direct assignment + refresh
+    // + dirty mark avoids the dispatch entirely.
+    _assign_silent: function(frm, fieldname, value) {
+        if (frm.doc[fieldname] === value) return;
+        frm.doc[fieldname] = value;
+        try { frm.refresh_field(fieldname); } catch (e) {}
+        try { frm.dirty(); } catch (e) {}
+    },
+
+    // Calculate transfer amounts based on currency exchange rates.
+    // Jithin 2026-05-19 (drift bug): the prior "_calculating_from_X
+    // flag + frm.set_value" pattern was broken because frm.set_value
+    // is async — the change event dispatches AFTER set_value returns,
+    // by which time the loop-guard flag has already been reset to
+    // false. So the recipient handler re-fired and recomputed the
+    // value the user just typed (e.g. 205,000 receiving →
+    // 205,000.02 after the round-trip × rate ÷ rate with flt(_, 2)
+    // rounding on each leg). Switched to _assign_silent which
+    // bypasses the change-event dispatch entirely — loop impossible
+    // by construction.
     calculate_transfer_amounts: function(frm, source) {
         let issued_currency = frm.doc.issued_currency;
         let receiving_currency = frm.doc.receiving_currency;
 
         if (!issued_currency || !receiving_currency) return;
 
-        // If same currency, amounts are equal
+        // Same currency → amounts are equal, rate = 1
         if (issued_currency === receiving_currency) {
-            frm.set_value('transfer_exchange_rate', 1);
+            frm.events._assign_silent(frm, 'transfer_exchange_rate', 1);
             if (source === 'issued') {
-                frm._calculating_from_issued = true;
-                frm.set_value('receiving_amount', frm.doc.issued_amount);
-                frm._calculating_from_issued = false;
+                frm.events._assign_silent(frm, 'receiving_amount', flt(frm.doc.issued_amount, 2));
             } else {
-                frm._calculating_from_receiving = true;
-                frm.set_value('issued_amount', frm.doc.receiving_amount);
-                frm._calculating_from_receiving = false;
+                frm.events._assign_silent(frm, 'issued_amount', flt(frm.doc.receiving_amount, 2));
             }
             return;
         }
 
-        // Use existing exchange rate if set and valid (not 1 for different currencies)
         let rate = flt(frm.doc.transfer_exchange_rate);
 
         if (rate && rate > 0 && rate !== 1) {
-            // Use existing rate for calculation
             if (source === 'issued' && frm.doc.issued_amount) {
-                frm._calculating_from_issued = true;
-                frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
-                frm._calculating_from_issued = false;
+                frm.events._assign_silent(frm, 'receiving_amount', flt(frm.doc.issued_amount * rate, 2));
             } else if (source === 'receiving' && frm.doc.receiving_amount) {
-                frm._calculating_from_receiving = true;
-                frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
-                frm._calculating_from_receiving = false;
+                frm.events._assign_silent(frm, 'issued_amount', flt(frm.doc.receiving_amount / rate, 2));
             }
         } else {
-            // Fetch exchange rate
+            // Rate not yet known — fetch from FX API
             frm.events.fetch_transfer_exchange_rate(frm, source);
         }
     },
@@ -2302,56 +2319,40 @@ frappe.ui.form.on('Payment Request Form', {
                 if (r.message) {
                     let rate = flt(r.message);
 
-                    // If rate is 1 for different currencies, it means no rate found - show message
+                    // No rate found — show msgprint, leave rate at 0 so the
+                    // user knows admin needs to enter one (rate is read-only
+                    // in the UI now, so admin needs to set it via DB).
                     if (rate === 1 && issued_currency !== receiving_currency) {
                         frappe.msgprint({
                             title: __('Exchange Rate'),
-                            message: __('No exchange rate found for {0} to {1}. Please enter the rate manually.', [issued_currency, receiving_currency]),
+                            message: __('No exchange rate found for {0} to {1}. Please contact admin.', [issued_currency, receiving_currency]),
                             indicator: 'orange'
                         });
-                        frm.set_value('transfer_exchange_rate', 0);
+                        frm.events._assign_silent(frm, 'transfer_exchange_rate', 0);
                         return;
                     }
 
-                    frm.set_value('transfer_exchange_rate', rate);
+                    frm.events._assign_silent(frm, 'transfer_exchange_rate', rate);
 
-                    // Calculate amounts
                     if (source === 'issued' && frm.doc.issued_amount) {
-                        frm._calculating_from_issued = true;
-                        frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
-                        frm._calculating_from_issued = false;
+                        frm.events._assign_silent(frm, 'receiving_amount', flt(frm.doc.issued_amount * rate, 2));
                     } else if (source === 'receiving' && frm.doc.receiving_amount) {
-                        frm._calculating_from_receiving = true;
-                        frm.set_value('issued_amount', flt(frm.doc.receiving_amount / rate, 2));
-                        frm._calculating_from_receiving = false;
+                        frm.events._assign_silent(frm, 'issued_amount', flt(frm.doc.receiving_amount / rate, 2));
                     }
                 }
             }
         });
     },
 
-    // Rate change handler — fires whenever the FX API populates the
-    // rate (the rate is read-only from the UI, so this only triggers
-    // on programmatic set_value calls from fetch_transfer_exchange_rate).
-    // When the rate lands, recompute Receiving from the current Issued
-    // so the form stays consistent.
-    transfer_exchange_rate: function(frm) {
-        if (frm.doc.payment_type === "Internal Transfer" && frm.doc.transfer_exchange_rate) {
-            let rate = flt(frm.doc.transfer_exchange_rate);
-            if (rate > 0 && frm.doc.issued_amount) {
-                frm._calculating_from_issued = true;
-                frm.set_value('receiving_amount', flt(frm.doc.issued_amount * rate, 2));
-                frm._calculating_from_issued = false;
-            }
-        }
-    },
-
     // Recalculate when currencies change
     issued_currency: function(frm) {
         if (frm.doc.payment_type === "Internal Transfer") {
-            // Reset exchange rate when currency changes
-            frm.set_value('transfer_exchange_rate', 0);
-            frm.set_value('receiving_amount', 0);
+            // Reset exchange rate + receiving when issued currency
+            // changes. Use _assign_silent (not set_value) so we don't
+            // cascade into the amount handlers and accidentally
+            // re-fire receiving recompute on save reload.
+            frm.events._assign_silent(frm, 'transfer_exchange_rate', 0);
+            frm.events._assign_silent(frm, 'receiving_amount', 0);
             if (frm.doc.issued_amount && frm.doc.receiving_currency) {
                 frm.events.fetch_transfer_exchange_rate(frm, 'issued');
             }
@@ -2360,9 +2361,8 @@ frappe.ui.form.on('Payment Request Form', {
 
     receiving_currency: function(frm) {
         if (frm.doc.payment_type === "Internal Transfer") {
-            // Reset exchange rate when currency changes
-            frm.set_value('transfer_exchange_rate', 0);
-            frm.set_value('receiving_amount', 0);
+            frm.events._assign_silent(frm, 'transfer_exchange_rate', 0);
+            frm.events._assign_silent(frm, 'receiving_amount', 0);
             if (frm.doc.issued_amount && frm.doc.issued_currency) {
                 frm.events.fetch_transfer_exchange_rate(frm, 'issued');
             }
