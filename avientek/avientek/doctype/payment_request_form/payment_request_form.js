@@ -1314,6 +1314,65 @@ frappe.ui.form.on('Payment Request Form', {
                 },
             },
         };
+        // Jithin 2026-05-20: Journal Entry needs special handling.
+        // The generic recipe path pulls `total_debit/total_credit` from
+        // the JV header, but a JV typically has expense + tax + party
+        // payable + round-off rows — the PRF must only carry the
+        // party-specific portion (the credit row for the chosen
+        // Supplier/Customer/Employee), not the JV's whole total.
+        // Bug example: JV-LTD-26-00161 had Trade Payable ₹6,000 +
+        // round-off ₹0.01; old path pulled ₹6,000.01 (drift), new
+        // path returns ₹6,000.00.
+        if (actual_dt === "Journal Entry" && frm.doc.party_type && frm.doc.party) {
+            frappe.call({
+                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_journal_entry_party_amount",
+                args: {
+                    journal_entry: doc_name,
+                    party_type: frm.doc.party_type,
+                    party: frm.doc.party,
+                },
+                callback: function (resp) {
+                    const m = (resp && resp.message) || {};
+                    if (!m || !m.amount) {
+                        // No party row matched on this JV — leave row
+                        // blank so the user notices.
+                        frm.refresh_field("payment_references");
+                        return;
+                    }
+                    const amount = parseFloat(m.amount) || 0;
+                    const base_amount = parseFloat(m.base_amount) || amount;
+                    const updates = {
+                        invoice_date: m.posting_date || "",
+                        due_date: m.posting_date || "",
+                        currency: m.currency || "",
+                        exchange_rate: parseFloat(m.exchange_rate) || 1,
+                        grand_total: amount,
+                        base_grand_total: base_amount,
+                        outstanding_amount: amount,
+                        base_outstanding_amount: base_amount,
+                    };
+                    const promises = [];
+                    for (const k of Object.keys(updates)) {
+                        if (updates[k] !== undefined && updates[k] !== null && updates[k] !== "") {
+                            promises.push(
+                                frappe.model.set_value(cdt, cdn, k, updates[k])
+                            );
+                        }
+                    }
+                    Promise.all(promises).then(function () {
+                        frm.refresh_field("payment_references");
+                        if (frm.events.recalculate_totals) {
+                            frm.events.recalculate_totals(frm);
+                        }
+                        if (frm.events.apply_debit_note_styling) {
+                            frm.events.apply_debit_note_styling(frm);
+                        }
+                    });
+                },
+            });
+            return;
+        }
+
         const recipe = RECIPES[actual_dt];
         if (!recipe) {
             frm.refresh_field("payment_references");

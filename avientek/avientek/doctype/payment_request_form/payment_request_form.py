@@ -4255,6 +4255,66 @@ def get_linked_po_for_invoice(invoice_name):
 
 
 @frappe.whitelist()
+@frappe.read_only()
+def get_journal_entry_party_amount(journal_entry, party_type, party):
+	"""Return the party-specific amount on a Journal Entry.
+
+	Jithin 2026-05-20: JV-LTD-26-00161 had a Trade Payable row for
+	Supplier S-FZCO-00355 with credit ₹6,000.00 plus expense/tax/
+	round-off rows totalling ₹6,000.01. When the PRF referenced that
+	JV, the row's grand_total + outstanding_amount got filled with
+	the JV's `total_debit` (₹6,000.01) instead of the supplier's
+	specific payable (₹6,000.00) — a paise drift caused by the
+	round-off row leaking into the PRF.
+
+	This helper queries `Journal Entry Account` for rows matching
+	`party_type` + `party` on the given JV, and returns the dominant
+	side (credit if we owe the party, debit if they owe us).
+
+	Returns: {amount, base_amount, currency, exchange_rate,
+	          posting_date} — empty dict if no party row found.
+	"""
+	if not journal_entry or not party_type or not party:
+		return {}
+	if not frappe.db.exists("Journal Entry", journal_entry):
+		return {}
+
+	je = frappe.get_doc("Journal Entry", journal_entry)
+	matched = [acc for acc in (je.accounts or [])
+	           if acc.party_type == party_type and acc.party == party]
+	if not matched:
+		return {}
+
+	credit_fc = sum(flt(a.credit_in_account_currency) for a in matched)
+	debit_fc = sum(flt(a.debit_in_account_currency) for a in matched)
+	credit_base = sum(flt(a.credit) for a in matched)
+	debit_base = sum(flt(a.debit) for a in matched)
+
+	# Whichever side is nonzero is the party's balance row. If both
+	# sides are populated (rare reclassification entries), take the
+	# net — sign indicates direction; PRF expects a positive amount.
+	if abs(credit_fc) > abs(debit_fc):
+		amount = credit_fc
+		base_amount = credit_base
+	else:
+		amount = debit_fc
+		base_amount = debit_base
+
+	currency = matched[0].account_currency or frappe.get_cached_value(
+		"Company", je.company, "default_currency"
+	)
+	exchange_rate = flt(matched[0].exchange_rate) or 1
+
+	return {
+		"amount": amount,
+		"base_amount": base_amount,
+		"currency": currency,
+		"exchange_rate": exchange_rate,
+		"posting_date": str(je.posting_date) if je.posting_date else "",
+	}
+
+
+@frappe.whitelist()
 def get_attachment_as_images(file_url, max_pages=2):
     """
     Convert a PDF attachment URL to base64 images.
