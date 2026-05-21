@@ -193,6 +193,18 @@ avientek.patches.backfill_prf_is_internal_party
 # Approval); logs Approved-state leaks for manual review (likely
 # have downstream SOs). Idempotent.
 avientek.patches.fix_post_v3_quotation_margin_leaks
+# Sammish 2026-05-21 (Jithin escalation): all Create→PRF paths except
+# Purchase Order (already fix-forwarded morning of 2026-05-21, commit
+# 136d1f3) had the same canonical-contract bug — Frappe doc name in
+# reference_name and either empty or wrong document_reference. This
+# one-time heal walks Payment Request Reference rows for PI / SI /
+# Credit Note / JV / EC / PE and repoints document_reference to the
+# Frappe doc name (which had been placed in reference_name) +
+# clears reference_name (or moves it to the supplier bill_no for
+# PI). Idempotent. Fix-forwards shipped same day in
+# avientek/events/{purchase_invoice,sales_invoice,journal_entry,
+# expense_claim,payment_entry}.py.
+avientek.patches.heal_prf_rows_from_create_buttons
 # Jithin 2026-05-17 (URGENT — financial impact): the V3 Quotation
 # workflow seeder (`seed_quotation_approval_v3_workflow`, runs from
 # after_migrate) was updated in-place to restore the margin approval

@@ -91,15 +91,27 @@ def create_payment_request(source_name, target_doc=None, args=None):
         os_company = flt(source.outstanding_amount) or 0
         os_invoice = os_company / exchange_rate if exchange_rate else os_company
 
+        # Sammish 2026-05-21 (Jithin escalation): Create → Payment Request
+        # Form on a Sales Invoice was putting the Frappe SI doc name into
+        # `reference_name` and leaving `document_reference` empty. That
+        # violates the canonical contract (established 2026-05-18):
+        #   - reference_name      = customer-side bill identifier (blank
+        #                           for SI — Avientek's own SI doc IS the
+        #                           invoice from the customer's view)
+        #   - document_reference  = Frappe doc name of the SI (canonical
+        #                           pointer used by Combined PDF builder,
+        #                           print template and Connections panel)
         target.append("payment_references", {
             "reference_doctype": ref_type,
-            "reference_name": source.name,
+            "reference_name": "",
+            "bill_no": "",
             "grand_total": flt(source.grand_total),
             "base_grand_total": flt(source.base_grand_total),
             "outstanding_amount": abs(os_invoice),
             "base_outstanding_amount": abs(os_company),
             "invoice_date": source.posting_date,
             "due_date": source.due_date,
+            "document_reference": source.name,
             "currency": source.currency,
             "exchange_rate": exchange_rate,
             "is_return": source.is_return,

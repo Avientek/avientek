@@ -80,14 +80,23 @@ def create_payment_request(source_name, target_doc=None, args=None):
         target.party = source.party
         target.party_name = source.party_name
 
+        # Sammish 2026-05-21 (Jithin escalation): Create → Payment Request
+        # Form on a Payment Entry was putting the Frappe PE doc name into
+        # `reference_name` and leaving `document_reference` empty. That
+        # broke the print + Combined PDF resolver. Canonical contract:
+        #   - reference_name      = "" (PE has no third-party bill_no)
+        #   - document_reference  = Frappe doc name of the PE (canonical
+        #                           pointer)
         target.append("payment_references", {
             "reference_doctype": "Payment Entry",
-            "reference_name": source.name,
+            "reference_name": "",
+            "bill_no": "",
             "grand_total": flt(source.paid_amount),
             "base_grand_total": flt(source.base_paid_amount),
             "outstanding_amount": flt(source.unallocated_amount) or flt(source.paid_amount),
             "base_outstanding_amount": flt(source.base_paid_amount),
             "invoice_date": source.posting_date,
+            "document_reference": source.name,
             "currency": source.paid_from_account_currency or source.paid_to_account_currency,
             "exchange_rate": flt(source.source_exchange_rate) or 1,
         })

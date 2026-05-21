@@ -32,15 +32,27 @@ def create_payment_request(source_name, target_doc=None, args=None):
                 )
                 break
 
+        # Sammish 2026-05-21 (Jithin escalation): Create → Payment Request
+        # Form on a Journal Entry was putting the Frappe JV doc name into
+        # `reference_name` and the (often empty) `custom_sales_invoice`
+        # custom field into `document_reference`. Canonical contract:
+        #   - reference_name      = "" (JV has no supplier bill_no)
+        #   - document_reference  = Frappe doc name of the JV (canonical
+        #                           pointer)
+        # If the user separately wants the JV-linked SI/PI rendered too,
+        # they should pick it as another reference row via Get Outstanding
+        # Invoice — that path correctly sets document_reference on each
+        # row.
         target.append("payment_references", {
             "reference_doctype": "Journal Entry",
-            "reference_name": source.name,
+            "reference_name": "",
+            "bill_no": "",
             "grand_total": source.total_debit,
             "base_grand_total": source.total_debit,
             "outstanding_amount": source.total_debit,
             "base_outstanding_amount": source.total_debit,
             "invoice_date": source.posting_date,
-            "document_reference": source.custom_sales_invoice or "",
+            "document_reference": source.name,
             "currency": frappe.db.get_value("Company", source.company, "default_currency"),
             "exchange_rate": 1,
         })

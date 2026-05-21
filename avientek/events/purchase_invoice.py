@@ -40,25 +40,35 @@ def create_payment_request(source_name, target_doc=None, args=None):
         target.party_name = source.supplier_name or source.supplier
         target.posting_date = frappe.utils.nowdate()
 
-        purchase_order = source.items[0].purchase_order if source.items else ""
-
         exchange_rate = source.conversion_rate or 1
         os_company = source.outstanding_amount or 0  # in company currency
         os_invoice = os_company / exchange_rate if exchange_rate else os_company
 
-        # PaymentRequestReference schema: reference_doctype, reference_name,
-        # grand_total, base_grand_total, outstanding_amount,
-        # base_outstanding_amount, exchange_rate, invoice_date, currency,
-        # document_reference, remarks, due_date.
+        # Sammish 2026-05-21 (Jithin escalation): Create → Payment Request
+        # Form on a Purchase Invoice was leaking the linked Purchase Order
+        # into `document_reference` and the Frappe PI doc name into
+        # `reference_name`. That violates the canonical contract
+        # (established 2026-05-18, used by Combined PDF builder + print
+        # template + Connections panel resolver):
+        #   - reference_name      = supplier's bill_no (free text)
+        #   - bill_no             = same supplier bill_no, mirrored for
+        #                           list display and downstream sorting
+        #   - document_reference  = Frappe doc name of the PI (canonical
+        #                           system pointer)
+        # Symptoms of the prior bug: "Document Reference" column showed
+        # PO-FZCO-NNNN instead of the PI; print preview + Combined PDF
+        # rendered the PO copy instead of the PI; Connections panel could
+        # not navigate back to the PI.
         target.append("payment_references", {
             "reference_doctype": "Purchase Invoice",
-            "reference_name": source.name,
+            "reference_name": source.bill_no or "",
+            "bill_no": source.bill_no or "",
             "grand_total": source.grand_total,
             "base_grand_total": source.base_grand_total,
             "outstanding_amount": os_invoice,
             "base_outstanding_amount": os_company,
             "invoice_date": source.bill_date or source.posting_date,
-            "document_reference": purchase_order,
+            "document_reference": source.name,
             "currency": source.currency,
             "due_date": source.due_date,
             "exchange_rate": exchange_rate,

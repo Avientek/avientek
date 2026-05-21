@@ -11,14 +11,24 @@ def create_payment_request(source_name, target_doc=None, args=None):
 
         outstanding = flt(source.total_sanctioned_amount) - flt(source.total_amount_reimbursed)
 
+        # Sammish 2026-05-21 (Jithin escalation): Create → Payment Request
+        # Form on an Expense Claim was putting the Frappe EC doc name into
+        # `reference_name` and leaving `document_reference` empty. That
+        # broke the print + Combined PDF resolver. Canonical contract:
+        #   - reference_name      = "" (EC has no third-party bill_no)
+        #   - document_reference  = Frappe doc name of the EC (canonical
+        #                           pointer used by every downstream
+        #                           renderer / resolver)
         target.append("payment_references", {
             "reference_doctype": "Expense Claim",
-            "reference_name": source.name,
+            "reference_name": "",
+            "bill_no": "",
             "grand_total": flt(source.total_sanctioned_amount),
             "base_grand_total": flt(source.total_sanctioned_amount),
             "outstanding_amount": outstanding,
             "base_outstanding_amount": outstanding,
             "invoice_date": source.posting_date,
+            "document_reference": source.name,
             "currency": frappe.get_cached_value("Company", source.company, "default_currency"),
             "exchange_rate": 1,
         })
