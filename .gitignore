@@ -53,3 +53,10 @@ jspm_packages/
 
 # Aider AI Chat
 .aider*
+
+# Local-only working docs (BRDs, mockups, WhatsApp drafts, diagnostics).
+# These live on the dev laptop only — never pushed to the repo.
+docs/
+avientek/reports/
+.tmp_diag/
+dump.rdb
