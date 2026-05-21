@@ -1711,7 +1711,35 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     # Precompute total stage count so the progress bar shows a stable denominator.
     ref_count = len(doc.payment_references or [])
     addl_count = sum(1 for a in (doc.additional_documents or []) if a.attachment)
-    bank_letter_count = 1 if doc.bank_letter else 0
+    # Sammish 2026-05-21 (Jithin AVFZC-02162 / AVLLC-00944): the supplier
+    # bank's bank_letter (Custom Field on Bank Account) now also gets
+    # bundled into the Combined PDF, alongside the issued bank letter,
+    # under separate labelled sections so reviewers can tell them apart.
+    # Compute the actual URL here (cheap one-query lookup mirroring the
+    # supplier_bank cascade in get_payment_voucher_context) so the
+    # progress-bar denominator and the assembler step both agree.
+    _supplier_bank_letter_url = ""
+    if (
+        doc.payment_type != "Internal Transfer"
+        and doc.party and doc.party_type
+    ):
+        if doc.get("supplier_bank_account"):
+            _supplier_bank_letter_url = frappe.db.get_value(
+                "Bank Account", doc.supplier_bank_account, "bank_letter"
+            ) or ""
+        if not _supplier_bank_letter_url:
+            _supplier_bank_letter_url = frappe.db.get_value(
+                "Bank Account",
+                {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
+                "bank_letter",
+            ) or ""
+        if not _supplier_bank_letter_url:
+            _supplier_bank_letter_url = frappe.db.get_value(
+                "Bank Account",
+                {"party_type": doc.party_type, "party": doc.party},
+                "bank_letter",
+            ) or ""
+    bank_letter_count = (1 if doc.bank_letter else 0) + (1 if _supplier_bank_letter_url else 0)
 
     # Sammish 2026-05-15: PRF sidebar attachments (Files uploaded
     # directly on the form, e.g. supplier bank letter) get bundled at
@@ -2019,6 +2047,21 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     # types (JV, PE, SI, SO, DN, PO-direct) get their attached files
     # merged in; the second + third progress steps are emitted as
     # "(n/a)" so the bar still ticks predictably.
+    #
+    # Sammish 2026-05-21 (Jithin AVFZC-02174): skip Step (a) file_urls
+    # that are ALREADY rendered inline via the voucher template's
+    # `additional_documents_print` context — otherwise the same
+    # Crestron proforma invoice surfaces twice in the Combined PDF
+    # (once with "Additional Document:" banner, once raw). Build a
+    # one-shot URL set against the PRF's additional_documents table
+    # before the loop. Cross-reference dedup is also kept for the case
+    # where the same file is attached to multiple source PI docs.
+    addl_urls = {
+        (a.attachment or "").strip()
+        for a in (doc.additional_documents or [])
+        if a.attachment
+    }
+    appended_urls = set()
     for _ref_idx, (row, r) in enumerate(zip(refs, resolved), start=1):
         ref_type_lbl = (row.reference_doctype or "Manual").strip() or "Manual"
         if not r["target_doctype"]:
@@ -2029,10 +2072,18 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
 
         # Step (a) — attached files on the source doc (whichever type).
         for fu in r["file_urls"]:
-            pdf_bytes = _read_local_pdf(fu)
+            fu_norm = (fu or "").strip()
+            if not fu_norm:
+                continue
+            if fu_norm in addl_urls or fu_norm in appended_urls:
+                # Already rendered (inline via voucher template, or on a
+                # prior PRF reference). Don't duplicate.
+                continue
+            pdf_bytes = _read_local_pdf(fu_norm)
             if pdf_bytes:
                 merger.append(io.BytesIO(pdf_bytes))
                 appended += 1
+                appended_urls.add(fu_norm)
         _step(_("Reference {0}/{1} — {2} attachment").format(_ref_idx, ref_count, ref_type_lbl))
 
         # Steps (b)+(c) — only for Purchase Invoice rows, chain into
@@ -2062,13 +2113,24 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         f"unique_POs={len(unique_pos)} unique_QNs={len(unique_qns)}"
     )
 
-    # 3. Bank letter
+    # 3. Bank letters — Issued (Avientek's own) + Supplier (party's).
+    # Sammish 2026-05-21 (Jithin AVFZC-02162 / AVLLC-00944): both letters
+    # now bundled under distinct progress-bar labels so reviewers can
+    # tell them apart end-to-end. The supplier URL was resolved earlier
+    # (when bank_letter_count was computed) so the assembler reuses it
+    # without a second DB lookup.
     if doc.bank_letter:
         pdf_bytes = _read_local_pdf(doc.bank_letter)
         if pdf_bytes:
             merger.append(io.BytesIO(pdf_bytes))
             appended += 1
-        _step(_("Bank letter"))
+        _step(_("Issued bank letter"))
+    if _supplier_bank_letter_url:
+        pdf_bytes = _read_local_pdf(_supplier_bank_letter_url)
+        if pdf_bytes:
+            merger.append(io.BytesIO(pdf_bytes))
+            appended += 1
+        _step(_("Supplier bank letter"))
 
     # 4. Additional documents (Additional Documents child table)
     for addl in (doc.additional_documents or []):
@@ -2380,25 +2442,35 @@ def get_voucher_print_data(docname):
     #   4. Employee.bank_name/bank_ac_no/iban (HR setups w/o Bank Accounts)
     # SWIFT comes from Bank.swift_number, falling back to
     # Bank Account.branch_code.
+    # Sammish 2026-05-21 (Jithin AVFZC-02162/AVLLC-00944): include
+    # bank_letter and beneficiary_name in the supplier bank fetch so the
+    # voucher print template (Beneficiary Name row + Supplier Bank Letter
+    # preview) and Combined PDF assembler (supplier bank letter PDF page)
+    # can both source from one query. Prior code only pulled the bank
+    # identifiers, so the letter was invisible end-to-end.
+    SUPPLIER_BANK_FIELDS = [
+        "name", "bank", "bank_account_no", "iban", "branch_code",
+        "bank_letter", "beneficiary_name",
+    ]
     supplier_bank = {}
     if doc.get("supplier_bank_account"):
         supplier_bank = frappe.db.get_value(
             "Bank Account", doc.supplier_bank_account,
-            ["name", "bank", "bank_account_no", "iban", "branch_code"],
+            SUPPLIER_BANK_FIELDS,
             as_dict=True,
         ) or {}
     if not supplier_bank:
         supplier_bank = frappe.db.get_value(
             "Bank Account",
             {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
-            ["name", "bank", "bank_account_no", "iban", "branch_code"],
+            SUPPLIER_BANK_FIELDS,
             as_dict=True,
         ) or {}
     if not supplier_bank:
         supplier_bank = frappe.db.get_value(
             "Bank Account",
             {"party_type": doc.party_type, "party": doc.party},
-            ["name", "bank", "bank_account_no", "iban", "branch_code"],
+            SUPPLIER_BANK_FIELDS,
             as_dict=True,
         ) or {}
     if not supplier_bank and doc.party_type == "Employee":
@@ -2414,6 +2486,8 @@ def get_voucher_print_data(docname):
                 "bank_account_no": emp.get("bank_ac_no") or "",
                 "iban": emp.get("iban") or "",
                 "branch_code": "",
+                "bank_letter": "",
+                "beneficiary_name": "",
             }
 
     supplier_swift = ""
@@ -3159,6 +3233,17 @@ def get_payment_voucher_context(docname):
     # itself. The last fallback is new — on this site Employees have no
     # Bank Account records and their bank details live on Employee.bank_*,
     # so the print was showing blank for all Employee payments.
+    #
+    # Sammish 2026-05-21 (Jithin AVFZC-02162 / AVLLC-00944): include
+    # bank_letter + beneficiary_name in the field list so the voucher
+    # print template can render the Beneficiary Name row and the inline
+    # Supplier Bank Letter preview from one query — Jithin reported the
+    # supplier bank letter was attached on Bank Account but never
+    # surfaced on the voucher or Combined PDF.
+    SUPPLIER_BANK_FIELDS = [
+        "name", "bank", "bank_account_no", "iban", "branch_code",
+        "bank_letter", "beneficiary_name",
+    ]
     supplier_bank = {}
     supplier_swift = ""
     if doc.payment_type != "Internal Transfer" and doc.party and doc.party_type:
@@ -3166,21 +3251,21 @@ def get_payment_voucher_context(docname):
             supplier_bank = frappe.db.get_value(
                 "Bank Account",
                 doc.supplier_bank_account,
-                ["name", "bank", "bank_account_no", "iban", "branch_code"],
+                SUPPLIER_BANK_FIELDS,
                 as_dict=True,
             ) or {}
         if not supplier_bank:
             supplier_bank = frappe.db.get_value(
                 "Bank Account",
                 {"party_type": doc.party_type, "party": doc.party, "is_default": 1},
-                ["name", "bank", "bank_account_no", "iban", "branch_code"],
+                SUPPLIER_BANK_FIELDS,
                 as_dict=True,
             ) or {}
         if not supplier_bank:
             supplier_bank = frappe.db.get_value(
                 "Bank Account",
                 {"party_type": doc.party_type, "party": doc.party},
-                ["name", "bank", "bank_account_no", "iban", "branch_code"],
+                SUPPLIER_BANK_FIELDS,
                 as_dict=True,
             ) or {}
         # Employee bank fields fallback (bank_name / bank_ac_no / iban on
@@ -3199,6 +3284,8 @@ def get_payment_voucher_context(docname):
                     "bank_account_no": emp.get("bank_ac_no") or "",
                     "iban": emp.get("iban") or "",
                     "branch_code": "",
+                    "bank_letter": "",
+                    "beneficiary_name": "",
                 }
 
         if supplier_bank and supplier_bank.get("bank"):
@@ -3539,6 +3626,35 @@ def get_payment_voucher_context(docname):
     except Exception:
         signature_images = {}
 
+    # Sammish 2026-05-21 (Jithin AVFZC-02162 / AVLLC-00944): render the
+    # Issued Bank Letter (Avientek's own bank) and the Supplier Bank
+    # Letter (party's bank) as inline image previews so they appear
+    # under their own labelled sections on the print preview — matching
+    # the existing "Additional Document" / "PRF Attachment" preview
+    # convention. The Combined PDF builder bundles the raw PDFs
+    # separately (with the same labels) so finance reviewers see both
+    # sources end-to-end. get_attachment_as_images is already used by
+    # the costing_sheet_attachment block above so the helper is in
+    # scope and behaves identically (PDF→image conversion, max 3 pages,
+    # graceful no-op on missing files).
+    issued_bank_letter_images = []
+    if doc.bank_letter:
+        try:
+            issued_bank_letter_images = (
+                get_attachment_as_images(doc.bank_letter, max_pages=3) or []
+            )
+        except Exception:
+            issued_bank_letter_images = []
+    supplier_bank_letter_images = []
+    supplier_bank_letter_url = (supplier_bank or {}).get("bank_letter") or ""
+    if supplier_bank_letter_url:
+        try:
+            supplier_bank_letter_images = (
+                get_attachment_as_images(supplier_bank_letter_url, max_pages=3) or []
+            )
+        except Exception:
+            supplier_bank_letter_images = []
+
     return {
         "company_currency": company_currency,
         "issued_bank_details": issued_bank_details,
@@ -3548,6 +3664,11 @@ def get_payment_voucher_context(docname):
         "signers": signers,
         "signature_images": signature_images,
         "prepared_by_name": prepared_by_name,
+        # Bank letter inline previews (Sammish 2026-05-21)
+        "issued_bank_letter_images": issued_bank_letter_images,
+        "issued_bank_letter_url": doc.bank_letter or "",
+        "supplier_bank_letter_images": supplier_bank_letter_images,
+        "supplier_bank_letter_url": supplier_bank_letter_url,
         "issued_bank_currency": doc.issued_currency or company_currency,
         "receiving_bank_currency": doc.receiving_currency or company_currency,
         "party_name": doc.party_name or doc.party or "",
