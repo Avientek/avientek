@@ -281,6 +281,15 @@ doctype_list_js = {
 
 override_doctype_dashboards = {
 	"Asset": "avientek.overrides.asset_dashboard.get_data",
+	# Jithin 2026-05-21 (PINV-FZCO-26-00520): standard ERPNext puts
+	# Landed Cost Voucher in `non_standard_fieldnames` which queries the
+	# parent LCV table for `receipt_document` — but that field lives on
+	# the child `Landed Cost Purchase Receipt` table. The override moves
+	# it to `internal_links` so the Connections counter correctly walks
+	# LCV.purchase_receipts.receipt_document and shows the right LCVs
+	# linked to a Purchase Invoice / Purchase Receipt.
+	"Purchase Invoice": "avientek.overrides.purchase_invoice_dashboard.get_data",
+	"Purchase Receipt": "avientek.overrides.purchase_receipt_dashboard.get_data",
 }
 
 # Svg Icons
