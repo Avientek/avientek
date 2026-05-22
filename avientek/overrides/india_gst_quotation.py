@@ -1,4 +1,4 @@
-"""Avientek 2026-05-13 / extended 2026-05-22 — suppress
+"""Avientek 2026-05-13 / extended 2026-05-22 (twice) — suppress
 india_compliance's "Items not covered under GST cannot be clubbed with
 items for which GST is applicable" error for pre-tax-point documents.
 
@@ -7,7 +7,7 @@ Original case (2026-05-13, Quotation):
   Service): a mixed cart of Taxable + Non-GST items raised the
   validator and blocked save.
 
-Extension case (2026-05-22, Purchase Order):
+First extension case (2026-05-22 AM, Purchase Order / Purchase Receipt):
   Rahul Avientek hit this on POLTD26-27-00015 (Logitech Asia Pacific
   Limited, 21 mixed-GST line items) when trying to convert PO → PR.
   Same root cause — Purchase Order is the commercial agreement, not
@@ -15,10 +15,21 @@ Extension case (2026-05-22, Purchase Order):
   is not the tax event), Sales Order (commercial agreement), and
   Delivery Note (physical movement).
 
+Second extension case (2026-05-22 PM, Purchase Invoice — GRN717):
+  Rahul + Jithin: "GRN issue is solved, but while converting then GRN
+  to Purchase Invoice, the issue still exist. We must take inward and
+  process a payment to supplier — all stuck." The original design left
+  PI as the inbound tax point, but the natural workflow PO → PR → PI
+  carries forward the SAME mixed-item bundle that was already approved
+  upstream. Forcing users to manually split into two PIs blocks billing
+  for legitimate documents that already cleared PO + GRN. Each line
+  retains its own GST treatment / tax_category, so the GST returns
+  still bucket items correctly per HSN.
+
 Where the GST clubbing rule SHOULD fire (unchanged):
-  - Purchase Invoice  (inbound tax event)
-  - Sales Invoice     (outbound tax event)
-  These two doctypes keep their full india_compliance validation chain.
+  - Sales Invoice     (outbound tax event — customer-facing, splitting
+                       there is straightforward at quote→SI conversion)
+  Sales Invoice keeps its full india_compliance validation chain.
 
 Where the clubbing rule is SUPPRESSED (this patch):
   - Quotation         (pre-sale exploratory)
@@ -26,6 +37,8 @@ Where the clubbing rule is SUPPRESSED (this patch):
   - Delivery Note     (physical movement, no tax event)
   - Purchase Order    (commercial agreement, pre-invoice)
   - Purchase Receipt  (goods receipt, no tax event)
+  - Purchase Invoice  (allows mixed inward bundles from PR — tax
+                       bucketing still happens per line via tax_category)
 
 Strategy: monkey-patch
 `india_compliance.gst_india.overrides.transaction.validate_items` so
@@ -48,14 +61,15 @@ import frappe
 
 
 # Doctypes where the india_compliance clubbing + HSN + place-of-supply
-# validation should be SUPPRESSED. These are all "pre-tax-point" docs.
-# Purchase Invoice + Sales Invoice are intentionally NOT in this set.
+# validation should be SUPPRESSED. Sales Invoice intentionally remains
+# OUTSIDE this set — outbound tax compliance is enforced there.
 _SUPPRESSED_DOCTYPES = frozenset({
 	"Quotation",
 	"Sales Order",
 	"Delivery Note",
 	"Purchase Order",
 	"Purchase Receipt",
+	"Purchase Invoice",
 })
 
 

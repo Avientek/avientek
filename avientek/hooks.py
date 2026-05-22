@@ -560,7 +560,16 @@ doc_events = {
         ],
     },
     "Purchase Invoice": {
-        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
+        "before_validate": [
+            "avientek.events.utils.fill_missing_item_defaults",
+            # Rahul + Jithin 2026-05-22 (GRN717 → PI conversion):
+            # extend the india_compliance clubbing suppression to PI
+            # so a mixed-GST PR can be converted to a single PI
+            # (the existing PR suppression already lets the PR save,
+            # but the conversion to PI was hitting the same error
+            # because PI was deliberately outside the suppression set).
+            "avientek.overrides.india_gst_quotation.install_patch",
+        ],
         "validate": [
             "avientek.events.purchase_invoice.validate_supplier_company",
             "avientek.events.purchase_invoice.validate_item_tax_template",
