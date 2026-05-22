@@ -1330,8 +1330,45 @@ def set_margin_flags(doc, method=None):
         brand = bs_row.brand or ""
         new_margin = flt(bs_row.margin_percent)
         std_margin = flt(bs_row.std_margin_percent)
+        abs_margin = flt(bs_row.margin)
+        total_selling = flt(bs_row.total_selling)
+        total_cost = flt(bs_row.total_cost)
 
-        # Skip brands with no standard margin (no restriction)
+        # Hard sanity gate (Rahul / Jithin 2026-05-22 — QN-KSA-26-00132).
+        # Pre-fix, a brand with no `std_margin_percent` configured fell
+        # through `if not std_margin: APPROVED` even when the ABSOLUTE
+        # margin was negative (selling < cost) — auto-approving a
+        # SAR 21,451.50 loss-making quote. Two absolute checks now run
+        # BEFORE any std-margin / percent logic and force LEVEL_2
+        # regardless of the brand's configured threshold:
+        #   (a) margin < 0  → selling price below cost (guaranteed loss)
+        #   (b) total_selling == 0 with total_cost > 0 → degenerate
+        #       quote (the percent calc divides by zero and surfaces
+        #       margin_percent=0, hiding the loss)
+        if abs_margin < 0:
+            bs_row.approval_status = "LEVEL_2"
+            level_2_required = True
+            warnings.append(
+                _("Brand <b>{0}</b>: ABSOLUTE margin is <b>{1}</b> (negative — "
+                  "selling below cost). Level 2 approval mandatory.").format(
+                    brand, round(abs_margin, 2)
+                )
+            )
+            continue
+        if total_selling <= 0 and total_cost > 0:
+            bs_row.approval_status = "LEVEL_2"
+            level_2_required = True
+            warnings.append(
+                _("Brand <b>{0}</b>: Total Selling is <b>{1}</b> but Total Cost "
+                  "is <b>{2}</b> — degenerate quotation. Level 2 approval mandatory.").format(
+                    brand, round(total_selling, 2), round(total_cost, 2)
+                )
+            )
+            continue
+
+        # Skip brands with no standard margin (no restriction).
+        # Reached only when the absolute checks above passed, so the
+        # margin is guaranteed non-negative.
         if not std_margin:
             bs_row.approval_status = "APPROVED"
             continue
