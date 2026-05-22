@@ -262,6 +262,13 @@ function _apply_prfs_to_payment_entry(frm, prf_names, all_rows) {
 }
 
 function _apply_prfs_via_server(frm, prf_names) {
+    // Re-entry guard. Without this the refresh-hook AND the
+    // payment_request_form field-change handler can both fire apply
+    // in the same tick, causing two parallel populate races and
+    // duplicate success alerts.
+    if (frm._prf_apply_in_flight) return;
+    frm._prf_apply_in_flight = true;
+
     // Rahul 2026-05-22: server returns a complete payload — header
     // fields + the list of references rolled up from every selected
     // PRF's payment_references child rows. The sum of each row's
@@ -274,6 +281,7 @@ function _apply_prfs_via_server(frm, prf_names) {
         callback: function(r) {
             const data = r && r.message;
             if (!data || !data.valid) {
+                frm._prf_apply_in_flight = false;
                 frappe.msgprint({
                     title: __("Cannot apply PRF"),
                     message: (data && data.error) || __("Unknown error from server."),
@@ -282,62 +290,61 @@ function _apply_prfs_via_server(frm, prf_names) {
                 return;
             }
 
-            // Recursion guard — the `payment_request_form` form-level
-            // change handler watches this same field and would re-pull
-            // (via frappe.confirm dialog) if it sees the value change
-            // while references already exist. Set the flag for the
-            // duration of this sweep + a short tail to absorb async
-            // set_value chains.
             frm._prf_applying = true;
 
-            // 1. Header fields (company / party / bank / accounts /
-            // currencies / payment_type / mode). Set payment_request_form
-            // FIRST so any onchange handlers tied to it see the rest of
-            // the data already populated below.
-            frm.set_value("payment_request_form", data.first_prf);
+            // Rahul 2026-05-22: write fields DIRECTLY to frm.doc
+            // (no frm.set_value) so we don't trip ERPNext's chain of
+            // change handlers. ERPNext's payment_type handler internally
+            // calls mode_of_payment which calls get_payment_mode_account
+            // — that throws a 417 ValidationError on sites where the
+            // Mode of Payment ("Cheque", "Wire Transfer", etc.) has no
+            // default Cash/Bank account configured, breaking the whole
+            // apply mid-flight. ERPNext's party handler likewise fires
+            // an async get_party_details that calls clear_table("references")
+            // on return, wiping anything we populated.
+            //
+            // Our server payload already contains every field these
+            // cascades would have fetched (paid_from / paid_to /
+            // party_balance / party_account_currency / ...), so we
+            // don't need them to fire. Direct assignment + refresh_field
+            // sets the value without triggering the change-handler bus.
+
+            const _set = function(k, v) {
+                if (v === undefined || v === null || v === "") return;
+                frm.doc[k] = v;
+                frm.refresh_field(k);
+            };
+
+            _set("payment_request_form", data.first_prf);
             Object.keys(data.header).forEach(function(k) {
-                const v = data.header[k];
-                if (v) frm.set_value(k, v);
+                _set(k, data.header[k]);
             });
 
-            // 2. References + amounts. We DEFER this step by 400 ms.
-            //
-            // When set_value("party") above is a NEW value (not the
-            // same as before), ERPNext's party change-handler at
-            // erpnext/.../payment_entry.js:514 fires an async
-            // get_party_details AJAX and on return runs a
-            // frappe.run_serially chain that includes
-            //   frm.clear_table("references")
-            // If we populate references synchronously now, the AJAX
-            // callback will fire ~200-300 ms later and wipe them.
-            // The 400 ms timeout gives ERPNext's cascade time to
-            // complete its clear_table BEFORE we add our rows, so the
-            // refs survive.
-            //
-            // This is a no-op cost on the picker path (party is often
-            // already the same value → cascade doesn't fire), but
-            // critical for the PRF Create → PE refresh-hook path on a
-            // freshly-opened PE where party-set is a real change.
-            setTimeout(function() {
-                frm.clear_table("references");
-                (data.references || []).forEach(function(ref) {
-                    const child = frm.add_child("references");
-                    child.reference_doctype = ref.reference_doctype;
-                    child.reference_name = ref.reference_name;
-                    child.allocated_amount = ref.allocated_amount;
-                    if (ref.total_amount) child.total_amount = ref.total_amount;
-                    if (ref.due_date) child.due_date = ref.due_date;
-                    if (ref.exchange_rate) child.exchange_rate = ref.exchange_rate;
-                    if (ref.bill_no) child.bill_no = ref.bill_no;
-                });
-                frm.refresh_field("references");
+            // References child table — clear and rebuild from the
+            // consolidated PRF payload.
+            frm.clear_table("references");
+            (data.references || []).forEach(function(ref) {
+                const child = frm.add_child("references");
+                child.reference_doctype = ref.reference_doctype;
+                child.reference_name = ref.reference_name;
+                child.allocated_amount = ref.allocated_amount;
+                if (ref.total_amount) child.total_amount = ref.total_amount;
+                if (ref.due_date) child.due_date = ref.due_date;
+                if (ref.exchange_rate) child.exchange_rate = ref.exchange_rate;
+                if (ref.bill_no) child.bill_no = ref.bill_no;
+            });
+            frm.refresh_field("references");
 
-                // 3. Paid + received amount = sum of allocations.
-                frm.set_value("paid_amount", data.total_allocated);
-                frm.set_value("received_amount", data.total_allocated);
+            // Paid + received amount = sum of allocations.
+            _set("paid_amount", data.total_allocated);
+            _set("received_amount", data.total_allocated);
 
-                frm._prf_applying = false;
-            }, 400);
+            // Mark the form dirty so the Save button activates.
+            frm.dirty();
+
+            // Lift recursion + in-flight guards.
+            frm._prf_applying = false;
+            frm._prf_apply_in_flight = false;
 
             // 4. Audit trail for multi-PRF consolidations.
             if (data.prf_count > 1) {
