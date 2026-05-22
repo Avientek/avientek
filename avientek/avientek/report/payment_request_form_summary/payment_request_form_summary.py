@@ -12,11 +12,12 @@ from frappe import _
 
 def execute(filters=None):
     filters = frappe._dict(filters or {})
-    return _columns(), _data(filters)
+    show_base = bool(int(filters.get("show_base_currency") or 0))
+    return _columns(show_base), _data(filters, show_base)
 
 
-def _columns():
-    return [
+def _columns(show_base):
+    cols = [
         {"label": _("ID"), "fieldname": "name", "fieldtype": "Link",
          "options": "Payment Request Form", "width": 160},
         {"label": _("Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 95},
@@ -31,6 +32,18 @@ def _columns():
          "options": "currency_code", "width": 140},
         {"label": _("Currency"), "fieldname": "currency_code", "fieldtype": "Link",
          "options": "Currency", "width": 80},
+    ]
+    # Rahul 2026-05-22: Net Amount Base Currency — only when the user
+    # ticks the filter checkbox. Renders immediately after Net Amount /
+    # Currency so the two amounts sit side-by-side for easy comparison.
+    if show_base:
+        cols += [
+            {"label": _("Net Amount (Base Currency)"), "fieldname": "base_net_amount",
+             "fieldtype": "Currency", "options": "base_currency_code", "width": 160},
+            {"label": _("Base Currency"), "fieldname": "base_currency_code",
+             "fieldtype": "Link", "options": "Currency", "width": 90},
+        ]
+    cols += [
         {"label": _("Company"), "fieldname": "company", "fieldtype": "Link",
          "options": "Company", "width": 180},
         {"label": _("Department"), "fieldname": "department", "fieldtype": "Link",
@@ -42,10 +55,43 @@ def _columns():
         {"label": _("Created By"), "fieldname": "owner", "fieldtype": "Link",
          "options": "User", "width": 160},
     ]
+    return cols
 
 
-def _data(filters):
+def _data(filters, show_base):
     where, params = _build_conditions(filters)
+
+    # base_net_amount source:
+    #   * Pay / Advance Pay / Receive — sum base_outstanding_amount across
+    #     the Payment Request Reference rows (already in company currency).
+    #   * Internal Transfer — receiving_amount when receiving_currency
+    #     matches the company default; otherwise issued_amount when
+    #     issued_currency matches; else 0 (transfer between two non-base
+    #     currencies — no clean base equivalent without an explicit rate).
+    base_select = ""
+    if show_base:
+        base_select = """,
+            CASE
+                WHEN prf.payment_type = 'Internal Transfer' THEN
+                    CASE
+                        WHEN prf.receiving_currency =
+                            (SELECT default_currency FROM `tabCompany` WHERE name = prf.company)
+                            THEN prf.receiving_amount
+                        WHEN prf.issued_currency =
+                            (SELECT default_currency FROM `tabCompany` WHERE name = prf.company)
+                            THEN prf.issued_amount
+                        ELSE 0
+                    END
+                ELSE IFNULL((
+                    SELECT SUM(pr.base_outstanding_amount)
+                    FROM `tabPayment Request Reference` pr
+                    WHERE pr.parent = prf.name
+                ), 0)
+            END AS base_net_amount,
+            (SELECT default_currency FROM `tabCompany` WHERE name = prf.company)
+                AS base_currency_code
+        """
+
     sql = """
         SELECT
             prf.name,
@@ -68,11 +114,12 @@ def _data(filters):
             prf.payment_mode,
             prf.issued_bank,
             prf.owner
+            {base_select}
         FROM `tabPayment Request Form` prf
         WHERE prf.docstatus < 2
             {where}
         ORDER BY prf.posting_date DESC, prf.name DESC
-    """.format(where=where)
+    """.format(where=where, base_select=base_select)
     return frappe.db.sql(sql, params, as_dict=True)
 
 

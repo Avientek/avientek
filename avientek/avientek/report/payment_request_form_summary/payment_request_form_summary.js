@@ -69,5 +69,15 @@ frappe.query_reports["Payment Request Form Summary"] = {
             fieldtype: "Link",
             options: "Department",
         },
+        {
+            // Rahul 2026-05-22: when ticked, the Net Amount Base
+            // Currency column is added right after Net Amount /
+            // Currency so the same number can be compared in document
+            // currency and company currency side-by-side.
+            fieldname: "show_base_currency",
+            label: __("Show Base Currency Amount"),
+            fieldtype: "Check",
+            default: 0,
+        },
     ],
 };
