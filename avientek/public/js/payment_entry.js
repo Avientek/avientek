@@ -93,12 +93,58 @@ function _show_prf_picker(frm) {
                 size: "extra-large",
                 fields: fields,
                 primary_action_label: __("Close"),
-                primary_action: function() { dlg.hide(); },
+                primary_action: function() {
+                    // When ≥1 checkbox is ticked, the primary action
+                    // becomes "Add Selected" (handled here); when zero
+                    // are ticked it falls back to closing the dialog.
+                    const checked = _collect_checked_prfs(dlg);
+                    if (checked.length === 0) {
+                        dlg.hide();
+                        return;
+                    }
+                    dlg.hide();
+                    _apply_prfs_to_payment_entry(frm, checked, rows);
+                },
             });
             dlg.show();
 
-            // Wire row clicks (delegated).
-            $(dlg.body).on("click", ".prf-pick-row", function() {
+            // Repaint the primary button label/class based on how many
+            // checkboxes are ticked.
+            const _repaint_primary = function() {
+                const checked = _collect_checked_prfs(dlg);
+                const $btn = dlg.get_primary_btn();
+                if (!$btn || !$btn.length) return;
+                if (checked.length === 0) {
+                    $btn.text(__("Close"));
+                    $btn.removeClass("btn-success").addClass("btn-default");
+                } else {
+                    $btn.text(__("Add Selected ({0})", [checked.length]));
+                    $btn.removeClass("btn-default").addClass("btn-success");
+                }
+            };
+
+            // Per-row checkbox toggle — stop propagation so the row's
+            // single-click handler doesn't also fire.
+            $(dlg.body).on("click", ".prf-pick-cb", function(e) {
+                e.stopPropagation();
+                _repaint_primary();
+            });
+
+            // "Select all visible" header checkbox.
+            $(dlg.body).on("click", ".prf-pick-cb-all", function(e) {
+                e.stopPropagation();
+                const checked = $(this).is(":checked");
+                $(dlg.body).find("tbody.prf-pick-tbody tr.prf-pick-row:visible .prf-pick-cb").prop("checked", checked);
+                _repaint_primary();
+            });
+
+            // Row body click — single-PRF apply (preserves the old
+            // fast path). Skips when the click was on a checkbox or
+            // the PRF name link.
+            $(dlg.body).on("click", ".prf-pick-row", function(e) {
+                if ($(e.target).is(".prf-pick-cb, .prf-pick-cb-all")) return;
+                if ($(e.target).closest(".prf-pick-cb-cell").length) return;
+                if ($(e.target).is("a")) return;
                 const prf_name = $(this).attr("data-prf");
                 if (!prf_name) return;
                 dlg.hide();
@@ -124,8 +170,111 @@ function _show_prf_picker(frm) {
             // Auto-focus the search box.
             setTimeout(function() {
                 $(dlg.body).find(".prf-pick-search").trigger("focus");
+                _repaint_primary();
             }, 100);
         }
+    });
+}
+
+function _collect_checked_prfs(dlg) {
+    const names = [];
+    $(dlg.body).find("tbody.prf-pick-tbody tr.prf-pick-row .prf-pick-cb:checked").each(function() {
+        const row = $(this).closest("tr.prf-pick-row");
+        const name = row.attr("data-prf");
+        if (name) names.push(name);
+    });
+    return names;
+}
+
+function _apply_prfs_to_payment_entry(frm, prf_names, all_rows) {
+    // Multi-PRF apply: validate consistency (party / currency /
+    // company), sum outstanding into paid_amount, link to FIRST PRF
+    // (Payment Entry has only ONE payment_request_form field), and
+    // surface the consolidated PRFs in the remarks for audit.
+    if (!prf_names || !prf_names.length) return;
+    if (prf_names.length === 1) {
+        _apply_prf_to_payment_entry(frm, prf_names[0]);
+        return;
+    }
+
+    const selected = prf_names.map(function(n) {
+        return all_rows.find(function(r) { return r.name === n; });
+    }).filter(Boolean);
+
+    const parties = [...new Set(selected.map(function(r) { return r.party || ""; }))];
+    const currencies = [...new Set(selected.map(function(r) { return r.currency || ""; }))];
+    const companies = [...new Set(selected.map(function(r) { return r.company || ""; }))];
+    if (parties.length > 1) {
+        frappe.msgprint({
+            title: __("Cannot combine — different parties"),
+            message: __("Selected PRFs have different Parties: {0}. Pick PRFs from one party only.",
+                [parties.join(", ")]),
+            indicator: "red",
+        });
+        return;
+    }
+    if (currencies.length > 1) {
+        frappe.msgprint({
+            title: __("Cannot combine — different currencies"),
+            message: __("Selected PRFs have different Currencies: {0}. Pick PRFs in one currency only.",
+                [currencies.join(", ")]),
+            indicator: "red",
+        });
+        return;
+    }
+    if (companies.length > 1) {
+        frappe.msgprint({
+            title: __("Cannot combine — different companies"),
+            message: __("Selected PRFs belong to different Companies: {0}.",
+                [companies.join(", ")]),
+            indicator: "red",
+        });
+        return;
+    }
+
+    const total_outstanding = selected.reduce(function(s, r) {
+        return s + (r.outstanding_balance || 0);
+    }, 0);
+    const first = selected[0];
+
+    frappe.call({
+        method: "frappe.client.get",
+        args: { doctype: "Payment Request Form", name: first.name },
+        callback: function(r) {
+            const prf = r && r.message;
+            if (!prf) return;
+            frm.set_value("payment_request_form", prf.name);
+            frm.set_value("company", prf.company);
+            if (prf.payment_type) frm.set_value("payment_type", prf.payment_type);
+            if (prf.party_type) frm.set_value("party_type", prf.party_type);
+            if (prf.party) frm.set_value("party", prf.party);
+            if (prf.payment_mode) frm.set_value("mode_of_payment", prf.payment_mode);
+            if (prf.issued_bank) frm.set_value("bank_account", prf.issued_bank);
+            if (prf.supplier_bank_account) frm.set_value("party_bank_account", prf.supplier_bank_account);
+            if (prf.account) frm.set_value("paid_from", prf.account);
+            if (prf.receiving_account) frm.set_value("paid_to", prf.receiving_account);
+            if (prf.issued_currency) frm.set_value("paid_from_account_currency", prf.issued_currency);
+            if (prf.receiving_currency) frm.set_value("paid_to_account_currency", prf.receiving_currency);
+            frm.set_value("paid_amount", total_outstanding);
+            frm.set_value("received_amount", total_outstanding);
+
+            // Audit trail in remarks — accountant can see which PRFs
+            // were rolled into this PE.
+            const prf_list = prf_names.join(", ");
+            const note = __("Consolidated payment for {0} PRFs: {1}.",
+                [prf_names.length, prf_list]);
+            const existing = frm.doc.remarks || "";
+            frm.set_value("remarks", existing ? (existing + "\n\n" + note) : note);
+
+            frappe.show_alert({
+                message: __("{0} PRFs combined. Linked to {1}, Paid Amount = {2}.", [
+                    prf_names.length,
+                    first.name,
+                    format_currency(total_outstanding, first.currency || ""),
+                ]),
+                indicator: "green",
+            }, 10);
+        },
     });
 }
 
@@ -167,6 +316,9 @@ function _build_prf_picker_html(rows, frm) {
         <table class="table prf-pick-table">
             <thead>
                 <tr>
+                    <th class="prf-pick-cb-cell" title="${__("Select all visible")}">
+                        <input type="checkbox" class="prf-pick-cb-all" />
+                    </th>
                     <th>${__("PRF")}</th>
                     <th>${__("Date")}</th>
                     <th>${__("Party")}</th>
@@ -194,6 +346,7 @@ function _build_prf_picker_html(rows, frm) {
         return `
             <tr class="prf-pick-row" data-prf="${frappe.utils.escape_html(r.name)}"
                 data-search="${frappe.utils.escape_html(search_blob)}">
+                <td class="prf-pick-cb-cell"><input type="checkbox" class="prf-pick-cb" /></td>
                 <td><b class="prf-name">${frappe.utils.escape_html(r.name)}</b></td>
                 <td class="prf-date">${frappe.datetime.str_to_user(r.posting_date) || ""}</td>
                 <td>${frappe.utils.escape_html(r.party_name || r.party || "")}</td>
@@ -209,7 +362,7 @@ function _build_prf_picker_html(rows, frm) {
 
     const empty_filter = `
         <tr class="prf-pick-empty-filter" style="display:none;">
-            <td colspan="9" class="text-center text-muted" style="padding:24px;">
+            <td colspan="10" class="text-center text-muted" style="padding:24px;">
                 ${__("No PRFs match your search. Try a different keyword.")}
             </td>
         </tr>
@@ -244,6 +397,9 @@ function _picker_styles() {
         .prf-pick-row { cursor: pointer; transition: background 0.1s; }
         .prf-pick-row:hover { background: #f5faff; }
         .prf-pick-row:active { background: #e6f2ff; }
+
+        .prf-pick-cb-cell { width: 36px; text-align: center; vertical-align: middle !important; }
+        .prf-pick-cb, .prf-pick-cb-all { cursor: pointer; transform: scale(1.15); }
 
         .prf-name { color: #1d4ed8; }
         .prf-date { color: #6b7280; font-size: 11.5px; white-space: nowrap; }
