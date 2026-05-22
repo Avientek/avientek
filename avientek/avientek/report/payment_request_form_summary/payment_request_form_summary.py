@@ -92,6 +92,20 @@ def _data(filters, show_base):
                 AS base_currency_code
         """
 
+    # Rahul 2026-05-22 follow-up: net_amount must reflect DOCUMENT
+    # currency (e.g. EUR for a EUR PRF), not the company-currency total
+    # stored on prf.total_outstanding_amount (which is already in base —
+    # AED for FZCO). The document amount lives on the child
+    # `Payment Request Reference.outstanding_amount` rows, with each
+    # row's currency in `Payment Request Reference.currency`. For
+    # single-currency PRFs (the common case) we sum the child amounts
+    # and pick MAX(currency) — equivalent to picking the only value
+    # present. Multi-currency PRFs (rare) get a summed display in the
+    # alphabetically-last currency code; the base column always
+    # disambiguates.
+    #
+    # Internal Transfer rows have no child references, so we keep the
+    # parent's issued_amount / issued_currency for them.
     sql = """
         SELECT
             prf.name,
@@ -103,11 +117,21 @@ def _data(filters, show_base):
             prf.party_name,
             CASE
                 WHEN prf.payment_type = 'Internal Transfer' THEN prf.issued_amount
-                ELSE prf.total_outstanding_amount
+                ELSE IFNULL((
+                    SELECT SUM(pr.outstanding_amount)
+                    FROM `tabPayment Request Reference` pr
+                    WHERE pr.parent = prf.name
+                ), 0)
             END AS net_amount,
             CASE
                 WHEN prf.payment_type = 'Internal Transfer' THEN prf.issued_currency
-                ELSE prf.currency
+                ELSE IFNULL((
+                    SELECT MAX(pr.currency)
+                    FROM `tabPayment Request Reference` pr
+                    WHERE pr.parent = prf.name
+                      AND pr.currency IS NOT NULL
+                      AND pr.currency != ''
+                ), prf.currency)
             END AS currency_code,
             prf.company,
             prf.department,
