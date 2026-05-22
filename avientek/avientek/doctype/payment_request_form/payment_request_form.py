@@ -2155,6 +2155,20 @@ def create_payment_entry(source_name, target_doc=None, args=None):
             "Payment Request Form": {
                 "doctype": "Payment Entry",
                 "field_map": {
+                    # Rahul 2026-05-22: party_type / party / company /
+                    # posting_date pre-populated by the mapper so the
+                    # refresh-time auto-populate doesn't trigger
+                    # ERPNext's party-change cascade. The cascade fires
+                    # an async get_party_details AJAX and clears the
+                    # references table on return, wiping anything we'd
+                    # just populated. Setting these via field_map means
+                    # the form opens with them already in place; the
+                    # later set_value(party, SAME) in _apply_prfs_via_server
+                    # is a no-op and the cascade doesn't fire.
+                    "company": "company",
+                    "party_type": "party_type",
+                    "party": "party",
+                    "posting_date": "posting_date",
                     "payment_type": "payment_type",
                     "payment_mode": "mode_of_payment",
                     "supplier_bank_account": "party_bank_account",

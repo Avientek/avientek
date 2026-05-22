@@ -300,30 +300,44 @@ function _apply_prfs_via_server(frm, prf_names) {
                 if (v) frm.set_value(k, v);
             });
 
-            // 2. References child table — clear existing rows, then
-            // add one per consolidated PRF reference row. allocated_amount
-            // is the PRF row's Net Payment.
-            frm.clear_table("references");
-            (data.references || []).forEach(function(ref) {
-                const child = frm.add_child("references");
-                child.reference_doctype = ref.reference_doctype;
-                child.reference_name = ref.reference_name;
-                child.allocated_amount = ref.allocated_amount;
-                if (ref.total_amount) child.total_amount = ref.total_amount;
-                if (ref.due_date) child.due_date = ref.due_date;
-                if (ref.exchange_rate) child.exchange_rate = ref.exchange_rate;
-                if (ref.bill_no) child.bill_no = ref.bill_no;
-            });
-            frm.refresh_field("references");
+            // 2. References + amounts. We DEFER this step by 400 ms.
+            //
+            // When set_value("party") above is a NEW value (not the
+            // same as before), ERPNext's party change-handler at
+            // erpnext/.../payment_entry.js:514 fires an async
+            // get_party_details AJAX and on return runs a
+            // frappe.run_serially chain that includes
+            //   frm.clear_table("references")
+            // If we populate references synchronously now, the AJAX
+            // callback will fire ~200-300 ms later and wipe them.
+            // The 400 ms timeout gives ERPNext's cascade time to
+            // complete its clear_table BEFORE we add our rows, so the
+            // refs survive.
+            //
+            // This is a no-op cost on the picker path (party is often
+            // already the same value → cascade doesn't fire), but
+            // critical for the PRF Create → PE refresh-hook path on a
+            // freshly-opened PE where party-set is a real change.
+            setTimeout(function() {
+                frm.clear_table("references");
+                (data.references || []).forEach(function(ref) {
+                    const child = frm.add_child("references");
+                    child.reference_doctype = ref.reference_doctype;
+                    child.reference_name = ref.reference_name;
+                    child.allocated_amount = ref.allocated_amount;
+                    if (ref.total_amount) child.total_amount = ref.total_amount;
+                    if (ref.due_date) child.due_date = ref.due_date;
+                    if (ref.exchange_rate) child.exchange_rate = ref.exchange_rate;
+                    if (ref.bill_no) child.bill_no = ref.bill_no;
+                });
+                frm.refresh_field("references");
 
-            // 3. Paid + received amount = sum of allocations.
-            frm.set_value("paid_amount", data.total_allocated);
-            frm.set_value("received_amount", data.total_allocated);
+                // 3. Paid + received amount = sum of allocations.
+                frm.set_value("paid_amount", data.total_allocated);
+                frm.set_value("received_amount", data.total_allocated);
 
-            // Lift the recursion guard once Frappe's async set_value
-            // chain has settled. 200 ms is comfortable for typical
-            // change-bus latency.
-            setTimeout(function() { frm._prf_applying = false; }, 200);
+                frm._prf_applying = false;
+            }, 400);
 
             // 4. Audit trail for multi-PRF consolidations.
             if (data.prf_count > 1) {
