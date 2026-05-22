@@ -62,6 +62,60 @@ frappe.ui.form.on('Payment Entry', {
                     });
             }
         }
+    },
+
+    payment_request_form: function(frm) {
+        // Rahul 2026-05-22: keep the PE references table in sync with
+        // whatever PRF is currently linked.
+        //
+        //   * Cleared       → wipe references + zero paid_amount.
+        //   * Newly set     → fetch from server and populate refs.
+        //   * Changed (and  → frappe.confirm before overwriting the
+        //     refs exist)    existing rows (accountant may have
+        //                    manually adjusted allocations for a
+        //                    partial payment).
+        //
+        // _prf_applying flag short-circuits the recursion when the
+        // picker / Create-PE flow sets the field as part of its own
+        // populate sweep.
+        if (frm.doc.docstatus !== 0) return;
+        if (frm._prf_applying) return;
+
+        const prf = frm.doc.payment_request_form;
+        const existing = (frm.doc.references || []).filter(function(r) {
+            return r.reference_doctype && r.reference_name;
+        });
+
+        if (!prf) {
+            if (existing.length) {
+                frm.clear_table("references");
+                frm.refresh_field("references");
+                frm.set_value("paid_amount", 0);
+                frm.set_value("received_amount", 0);
+                frappe.show_alert({
+                    message: __("PRF link cleared. References table reset."),
+                    indicator: "blue",
+                }, 5);
+            }
+            return;
+        }
+
+        if (existing.length) {
+            frappe.confirm(
+                __("Refresh references from <b>{0}</b>? Your current {1} reference row(s) and any manual allocation changes will be replaced.",
+                    [frappe.utils.escape_html(prf), existing.length]),
+                function() {
+                    _apply_prfs_via_server(frm, [prf]);
+                },
+                function() {
+                    // Declined — references untouched. ERPNext's submit
+                    // validator may flag a mismatch with the linked PRF
+                    // but we leave that for the user to resolve.
+                }
+            );
+        } else {
+            _apply_prfs_via_server(frm, [prf]);
+        }
     }
 });
 
@@ -213,6 +267,14 @@ function _apply_prfs_via_server(frm, prf_names) {
                 return;
             }
 
+            // Recursion guard — the `payment_request_form` form-level
+            // change handler watches this same field and would re-pull
+            // (via frappe.confirm dialog) if it sees the value change
+            // while references already exist. Set the flag for the
+            // duration of this sweep + a short tail to absorb async
+            // set_value chains.
+            frm._prf_applying = true;
+
             // 1. Header fields (company / party / bank / accounts /
             // currencies / payment_type / mode). Set payment_request_form
             // FIRST so any onchange handlers tied to it see the rest of
@@ -242,6 +304,11 @@ function _apply_prfs_via_server(frm, prf_names) {
             // 3. Paid + received amount = sum of allocations.
             frm.set_value("paid_amount", data.total_allocated);
             frm.set_value("received_amount", data.total_allocated);
+
+            // Lift the recursion guard once Frappe's async set_value
+            // chain has settled. 200 ms is comfortable for typical
+            // change-bus latency.
+            setTimeout(function() { frm._prf_applying = false; }, 200);
 
             // 4. Audit trail for multi-PRF consolidations.
             if (data.prf_count > 1) {
