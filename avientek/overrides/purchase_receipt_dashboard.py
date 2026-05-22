@@ -6,6 +6,15 @@ declares `"Landed Cost Voucher": "receipt_document"` in
 `non_standard_fieldnames`, which queries the PARENT LCV table for a
 column that lives on the CHILD `Landed Cost Purchase Receipt` doctype.
 We move it to `internal_links` so Frappe walks the child table.
+
+Rahul 2026-05-22: signature must be `def get_data(data=None)` because
+Frappe v15 meta.py:672 calls every override_doctype_dashboards hook as
+`frappe.get_attr(hook)(data=data)`. The previous kwarg-less signature
+crashed every Purchase Receipt form load with `TypeError: get_data()
+got an unexpected keyword argument 'data'` ("Good morning, we are not
+able to access the purchase receipt from yesterday night, please
+check"). Mutate the passed dict if provided; fetch base only as a
+local-test fallback.
 """
 
 from erpnext.stock.doctype.purchase_receipt.purchase_receipt_dashboard import (
@@ -13,8 +22,9 @@ from erpnext.stock.doctype.purchase_receipt.purchase_receipt_dashboard import (
 )
 
 
-def get_data():
-    data = _base_get_data()
+def get_data(data=None):
+    if data is None:
+        data = _base_get_data()
 
     nsfn = data.get("non_standard_fieldnames") or {}
     if "Landed Cost Voucher" in nsfn:

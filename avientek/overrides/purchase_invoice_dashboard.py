@@ -21,6 +21,16 @@ to `internal_links`, where Frappe's resolver walks the child table and
 matches the field there (see notifications.py:326-332). After that, the
 counter correctly walks LCV.purchase_receipts.receipt_document and
 finds the PI.
+
+Rahul 2026-05-22: prior signature was `def get_data():` (no kwargs).
+Frappe v15 meta.py:672 calls every override_doctype_dashboards hook
+as `frappe.get_attr(hook)(data=data)` — passing the previously-resolved
+base data as a keyword arg so overrides can extend rather than replace.
+The kwarg-less signature crashed every Purchase Invoice form load with
+`TypeError: get_data() got an unexpected keyword argument 'data'`.
+Fix: accept `data=None` and either mutate the passed dict (normal hook
+call path) or fall back to fetching the ERPNext base when called
+standalone (e.g. local unit smoke tests).
 """
 
 from erpnext.accounts.doctype.purchase_invoice.purchase_invoice_dashboard import (
@@ -28,8 +38,9 @@ from erpnext.accounts.doctype.purchase_invoice.purchase_invoice_dashboard import
 )
 
 
-def get_data():
-    data = _base_get_data()
+def get_data(data=None):
+    if data is None:
+        data = _base_get_data()
 
     # Move LCV out of non_standard_fieldnames (which queries the parent
     # table) and into internal_links (which walks the child table).
