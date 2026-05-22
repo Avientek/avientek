@@ -978,13 +978,47 @@ frappe.ui.form.on('Payment Request Form', {
 
         // "Get Invoices From" button removed - users can add rows manually
         if (frm.doc.docstatus === 1 && frm.doc.workflow_state === 'Released') {
-            // Create Payment Entry button under 'Create'
+            // Rahul 2026-05-22: Create → Payment Entry no longer uses
+            // frappe.model.open_mapped_doc / create_payment_entry mapper.
+            // The mapper's server-side target_doc.references survived
+            // frappe.model.sync but ERPNext's party-change cascade in
+            // erpnext/.../payment_entry.js:560 (frm.clear_table("references")
+            // inside an async get_party_details callback) wiped them
+            // mid-render regardless of mapper field_map ordering.
+            //
+            // New flow: open a fresh empty PE via frappe.new_doc, then
+            // set payment_request_form on the new form. That triggers
+            // the payment_request_form field-change handler on PE
+            // (avientek/public/js/payment_entry.js) which calls the
+            // same _apply_prfs_via_server used by the PE-side picker.
+            // The header set_value("party", X) IS a real change here
+            // (PE was empty) so the cascade DOES fire — but
+            // _apply_prfs_via_server populates refs in a 400 ms
+            // setTimeout, after the cascade's clear_table has run.
             frm.add_custom_button(
                 __("Payment Entry"),
                 function () {
-                    frappe.model.open_mapped_doc({
-                        method: "avientek.avientek.doctype.payment_request_form.payment_request_form.create_payment_entry",
-                        frm: frm
+                    const source_prf = frm.doc.name;
+                    frappe.new_doc("Payment Entry").then(function () {
+                        const t0 = Date.now();
+                        const wait = setInterval(function () {
+                            if (
+                                cur_frm &&
+                                cur_frm.doc &&
+                                cur_frm.doc.doctype === "Payment Entry" &&
+                                cur_frm.is_new()
+                            ) {
+                                clearInterval(wait);
+                                cur_frm.set_value("payment_request_form", source_prf);
+                            } else if (Date.now() - t0 > 5000) {
+                                clearInterval(wait);
+                                frappe.msgprint({
+                                    title: __("Could not open Payment Entry"),
+                                    message: __("Timed out waiting for the new Payment Entry form."),
+                                    indicator: "red",
+                                });
+                            }
+                        }, 100);
                     });
                 },
                 __("Create") // Group under 'Create'
