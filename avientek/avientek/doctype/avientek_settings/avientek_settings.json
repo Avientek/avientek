@@ -19,6 +19,8 @@
   "quote_high_prob_restricted_roles",
   "signature_images_section",
   "signature_images",
+  "prf_section",
+  "issued_bank_edit_roles",
   "notifications_section",
   "enable_quotation_notifications",
   "enable_workflow_state_notifications",
@@ -116,6 +118,19 @@
    "fieldtype": "Table",
    "label": "Signature Images",
    "options": "Avientek Signature Image"
+  },
+  {
+   "fieldname": "prf_section",
+   "fieldtype": "Section Break",
+   "label": "Payment Request Form",
+   "description": "Avientek-specific behaviour overrides for Payment Request Form."
+  },
+  {
+   "fieldname": "issued_bank_edit_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quote Role",
+   "label": "Issued Bank Edit Roles",
+   "description": "Any user with ANY of these roles can edit the Issued Bank (and Payment Mode) on a Payment Request Form in ANY pre-Released state — Draft, Authorised, Pending L1, Approved L1, Pending L2, Approved L2. Once the PRF transitions to Released the field locks for everyone. The workflow allow_edit rows are regenerated for these roles every time the after_migrate workflow seeder runs, so add a role and run `bench migrate` to apply. Defaults to Finance Controller + System Manager when empty."
   },
   {
    "fieldname": "notifications_section",

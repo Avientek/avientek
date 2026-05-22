@@ -106,10 +106,61 @@ def execute():
 	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "Director"})
 	wf.append("states", {"state": "Released", "doc_status": "1", "allow_edit": "Finance Controller"})
 	wf.append("states", {"state": "Rejected", "doc_status": "0", "allow_edit": "Accounts Manager"})
-	# Jithin 2026-05-12: Finance Controller can edit on Approved L1/L2
-	# (constrained at field-level in JS — only issued_bank + payment_mode).
-	wf.append("states", {"state": "Approved Level 1", "doc_status": "0", "allow_edit": "Finance Controller"})
-	wf.append("states", {"state": "Approved Level 2", "doc_status": "1", "allow_edit": "Finance Controller"})
+	# Rahul 2026-05-22 (AVLTD-01517): Issued Bank + Payment Mode edit
+	# is now role-driven — read the role pool from Avientek Settings
+	# (`issued_bank_edit_roles` table) and grant allow_edit to each role
+	# on EVERY pre-Released state. Once the PRF transitions to Released,
+	# only the existing Finance Controller allow_edit row above applies
+	# (per-field lock enforced by JS apply_fc_field_unlock — restricts
+	# the editable surface to issued_bank + payment_mode only).
+	# Defaults to ["Finance Controller", "System Manager"] when the
+	# settings table is empty.
+	# Only states this base seeder defines above. Other pre-Released
+	# states (Pending For Approval / Sent For Approval / Pending L1 /
+	# Pending L2) are added by separate after_migrate patches and
+	# inherit their own allow_edit rows when those patches run — see
+	# avientek/patches/prf_internal_party_skip_l2.py etc.
+	_pre_released_states_for_issued_bank_edit = [
+		# state name, doc_status
+		("Draft", "0"),
+		("Authorised", "0"),
+		("Approved Level 1", "0"),
+		("Approved Level 2", "1"),
+	]
+	# Rahul 2026-05-22: read EXACTLY what's in the table — empty list
+	# is a deliberate "no extra roles" admin choice. The base seeder
+	# already covers Finance Manager (Authorised + Approved L1), GM
+	# / Director (Approved L2), and Finance Controller (Released), so
+	# emptying the table doesn't lock out the standard workflow.
+	try:
+		_issued_bank_edit_roles = frappe.get_all(
+			"Avientek Quote Role",
+			filters={
+				"parent": "Avientek Settings",
+				"parenttype": "Avientek Settings",
+				"parentfield": "issued_bank_edit_roles",
+			},
+			fields=["role"],
+			pluck="role",
+		) or []
+	except Exception:
+		_issued_bank_edit_roles = []
+	# Dedup against any allow_edit rows already appended above for the
+	# same (state, role) pair so MariaDB doesn't trip on duplicates.
+	_already_added = {
+		(s.state, s.allow_edit)
+		for s in wf.get("states") or []
+	}
+	for _state, _docstatus in _pre_released_states_for_issued_bank_edit:
+		for _role in _issued_bank_edit_roles:
+			if not _role or (_state, _role) in _already_added:
+				continue
+			wf.append("states", {
+				"state": _state,
+				"doc_status": _docstatus,
+				"allow_edit": _role,
+			})
+			_already_added.add((_state, _role))
 	wf.append("states", {"state": "Cancelled", "doc_status": "2", "allow_edit": "Finance Controller"})
 
 	# Transitions

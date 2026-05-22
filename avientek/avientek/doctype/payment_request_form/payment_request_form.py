@@ -218,12 +218,31 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 	# values: Active/Inactive/Suspended/Left). Jithin 2026-05-19:
 	# crashed with `Unknown column 'tabEmployee.disabled'` when
 	# selecting an Employee party because we always wrote `disabled=0`.
+	#
+	# Rahul 2026-05-22 (FZCO Supplier picker leak): the previous
+	# internal_clause was `OR is_internal_supplier=1` with NO company
+	# scope, which surfaced EVERY internal-party record in EVERY
+	# company's picker — including ones with empty `represents_company`
+	# or representing the PRF.company itself (self-pay nonsense). Now
+	# tightened to require: (a) the internal flag is set, (b) the
+	# `represents_company` field is non-empty, and (c) it represents
+	# a DIFFERENT Avientek entity than the PRF.company (so FZCO sees
+	# inter-co counterparties LLC/KSA/W.L.L but never an internal
+	# record that points back at FZCO).
 	if party_type == "Supplier":
-		internal_clause = "OR `tabSupplier`.is_internal_supplier = 1"
+		internal_clause = (
+			"OR (`tabSupplier`.is_internal_supplier = 1 "
+			"    AND IFNULL(`tabSupplier`.represents_company, '') != '' "
+			"    AND `tabSupplier`.represents_company != %(company)s)"
+		)
 		table = "Supplier"
 		active_clause = "`tabSupplier`.disabled = 0"
 	elif party_type == "Customer":
-		internal_clause = "OR `tabCustomer`.is_internal_customer = 1"
+		internal_clause = (
+			"OR (`tabCustomer`.is_internal_customer = 1 "
+			"    AND IFNULL(`tabCustomer`.represents_company, '') != '' "
+			"    AND `tabCustomer`.represents_company != %(company)s)"
+		)
 		table = "Customer"
 		active_clause = "`tabCustomer`.disabled = 0"
 	elif party_type == "Employee":
@@ -332,6 +351,41 @@ def bank_account_query_with_internal(doctype, txt, searchfield, start, page_len,
 		as_list=True,
 	)
 	return [(r[0], r[1] or "") for r in rows]
+
+
+@frappe.whitelist()
+@frappe.read_only()
+def get_issued_bank_edit_roles():
+	"""Return the list of role names authorised to edit Issued Bank
+	(and Payment Mode) on a PRF in any pre-Released workflow state.
+
+	Reads `Avientek Settings.issued_bank_edit_roles` (child table of
+	`Avientek Quote Role`). Returns the list EXACTLY as configured —
+	empty list when the table is empty (and the admin has explicitly
+	said "nobody other than System Manager / state owners can edit").
+
+	System Manager always retains full edit (handled by the JS unlock
+	bypass), so even when this returns [] no one is locked out of the
+	module entirely.
+
+	Rahul Avientek 2026-05-22: original draft fell back to
+	["Finance Controller", "System Manager"] when the table was empty,
+	which masked the admin's intent. Emptying the table is now a clean
+	"lock everyone out except SM / state owners" toggle.
+	"""
+	try:
+		rows = frappe.get_all(
+			"Avientek Quote Role",
+			filters={
+				"parent": "Avientek Settings",
+				"parenttype": "Avientek Settings",
+				"parentfield": "issued_bank_edit_roles",
+			},
+			fields=["role"],
+		)
+		return [r["role"] for r in rows if r.get("role")]
+	except Exception:
+		return []
 
 
 @frappe.whitelist()

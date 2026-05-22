@@ -421,33 +421,83 @@ frappe.ui.form.on('Payment Request Form', {
     },
 
     /**
-     * Jithin 2026-05-12: Finance Controller-only field unlock on
-     * Approved L1 / L2. Workflow allow_edit is widened (FC added on
-     * both states) so FC can Save the doc; this JS narrows the actual
-     * editable surface to just `issued_bank` and `payment_mode` so FC
-     * cannot stray into other fields. Higher-privilege users (FM/GM/
-     * Director/System Manager) are unaffected — their workflow rights
+     * Jithin 2026-05-12 / Rahul 2026-05-22 (AVLTD-01517):
+     * Role-based field unlock for Issued Bank + Payment Mode in ALL
+     * pre-Released workflow states. Workflow allow_edit grants Save
+     * access; this JS narrows the actual editable surface to just
+     * `issued_bank` and `payment_mode` so authorised roles can't
+     * stray into other fields. Higher-privilege users (workflow state
+     * owners / System Manager) are unaffected — their workflow rights
      * give them full edit anyway.
+     *
+     * The authorised role list is configurable via Avientek Settings
+     * → "Issued Bank Edit Roles" table. Reads roles via the
+     * `get_issued_bank_edit_roles` server method (defaults to
+     * Finance Controller + System Manager when the table is empty).
+     *
+     * Active states (all pre-Released):
+     *   Draft / Pending For Approval / Sent For Approval / Authorised
+     *   / Pending L1 Approval / Approved Level 1 / Pending L2 Approval
+     *   / Approved Level 2
+     * Terminal/locked states (no unlock — once Released the field is
+     * permanently locked):
+     *   Released / Processed / Partially Processed / Cancellation
+     *   Requested / Cancellation L2 Pending / Cancelled / Rejected
      */
     apply_fc_field_unlock: function(frm) {
         try {
             const ws = frm.doc.workflow_state || "";
-            if (ws !== "Approved Level 1" && ws !== "Approved Level 2") return;
+
+            // Set of pre-Released states where the unlock applies.
+            // Anything not in this set keeps the field locked.
+            const PRE_RELEASED_STATES = new Set([
+                "Draft",
+                "Pending For Approval",
+                "Sent For Approval",
+                "Authorised",
+                "Pending L1 Approval",
+                "Approved Level 1",
+                "Pending L2 Approval",
+                "Approved Level 2",
+            ]);
+            if (!PRE_RELEASED_STATES.has(ws)) return;
 
             const roles = (frappe.user_roles || []);
-            const has_fc = roles.indexOf("Finance Controller") >= 0;
-            if (!has_fc) return;
+            // System Manager always gets full edit — never lock down.
+            if (roles.indexOf("System Manager") >= 0) return;
+
+            // Authorised role list (cached on the form across refreshes).
+            const has_authorised_role = (allowed) => {
+                if (!allowed || !allowed.length) return false;
+                return allowed.some(r => roles.indexOf(r) >= 0);
+            };
+            if (!frm._issued_bank_edit_roles) {
+                frappe.call({
+                    method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_issued_bank_edit_roles",
+                    async: false,
+                    callback: (r) => {
+                        frm._issued_bank_edit_roles = (r && r.message) || [
+                            "Finance Controller", "System Manager",
+                        ];
+                    },
+                });
+            }
+            if (!has_authorised_role(frm._issued_bank_edit_roles)) return;
 
             // If the user ALSO has a workflow-state owner role for this
             // state, give them full edit (don't lock them down).
             const owner_roles = {
+                "Draft": ["Sales User", "Purchase User", "Stock User"],
+                "Pending For Approval": ["Sales User", "Purchase User", "Stock User"],
+                "Sent For Approval": ["Sales User", "Purchase User", "Stock User"],
+                "Authorised": ["Finance Manager", "Accounts Manager"],
+                "Pending L1 Approval": ["Finance Manager"],
                 "Approved Level 1": ["Finance Manager"],
+                "Pending L2 Approval": ["General Manager", "Director"],
                 "Approved Level 2": ["General Manager", "Director"],
             };
             const has_other = (owner_roles[ws] || []).some(r => roles.indexOf(r) >= 0);
             if (has_other) return;
-            // System Manager always gets full edit.
-            if (roles.indexOf("System Manager") >= 0) return;
 
             const EDITABLE = ["issued_bank", "payment_mode"];
 
@@ -495,7 +545,7 @@ frappe.ui.form.on('Payment Request Form', {
                     const el = document.createElement("div");
                     el.className = "prf-fc-edit-banner";
                     el.style.cssText = "margin:8px 0; padding:10px 14px; background:#fff3cd; border-left:4px solid #d39e00; border-radius:4px; font-size:12px;";
-                    el.innerHTML = __("As Finance Controller, you can update <b>Issued Bank</b> and <b>Payment Mode</b> on this approved PRF. All other fields are locked.");
+                    el.innerHTML = __("You are authorised to update <b>Issued Bank</b> and <b>Payment Mode</b> on this PRF until it is Released. All other fields are locked.");
                     $(mount).prepend(el);
                     frm._fc_edit_banner_el = el;
                 }
