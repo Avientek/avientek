@@ -506,15 +506,18 @@ def _build_brand_summary_html(quotation_name):
 
 	totals_html = ""
 	if totals:
-		# Render totals as 2-column key/value pairs in a compact table.
+		# Render totals as 2-column key/value pairs in a table matched to
+		# the brand-rows table width (100%) so the Voucher print looks
+		# tidy. Label column ~35% (same as the .tbl .lbl style on the
+		# rest of the voucher), value column fills the rest.
 		totals_html = (
-			'<table style="margin-top:8px;border-collapse:collapse;width:auto;">'
+			'<table style="margin-top:8px;border-collapse:collapse;width:100%;">'
 		)
 		for t in totals:
 			val_str = _fmt(t["value"], t["fieldtype"])
 			totals_html += (
 				'<tr>'
-				f'<td style="border:1px solid #000;padding:3px 8px;background:#f5f5f5;font-weight:500;font-size:8.5pt;">'
+				f'<td style="border:1px solid #000;padding:3px 8px;background:#f5f5f5;font-weight:500;font-size:8.5pt;width:35%;">'
 				f'{frappe.utils.escape_html(t["label"])}</td>'
 				f'<td style="border:1px solid #000;padding:3px 8px;font-size:8.5pt;text-align:right;">'
 				f'{val_str}</td>'
