@@ -919,18 +919,60 @@ def get_prf_apply_data(prf_names):
 		return {"valid": False, "error": _("Selected PRFs belong to different Companies: {0}").format(", ".join(sorted(companies)))}
 
 	first = docs[0]
+
+	# Rahul 2026-05-22: PRF payment_type "Advance Pay" doesn't exist on
+	# Payment Entry's Select options — PE only supports Pay / Receive /
+	# Internal Transfer. Map "Advance Pay" → "Pay" + flag is_advance so
+	# ERPNext treats it as a supplier advance (no invoice link required).
+	pe_payment_type = first.payment_type or ""
+	pe_is_advance = 0
+	if pe_payment_type == "Advance Pay":
+		pe_payment_type = "Pay"
+		pe_is_advance = 1
+
+	# Pre-compute paid_to from the party's default payable / receivable
+	# account using ERPNext's standard helper. Without this, the field
+	# stays empty when we bypass the change-handler cascade on the
+	# client (the cascade is what normally fetches this).
+	paid_to_acct = first.receiving_account or ""
+	paid_to_currency = first.receiving_currency or ""
+	if not paid_to_acct and first.party_type and first.party and first.company:
+		try:
+			from erpnext.accounts.party import get_party_account
+			result = get_party_account(
+				first.party_type, first.party, first.company,
+				include_advance=(pe_is_advance == 1),
+			)
+			# When include_advance=True ERPNext returns
+			# [regular_account, advance_account]; for an Advance Pay
+			# we want the advance account.
+			if isinstance(result, (list, tuple)):
+				if pe_is_advance and len(result) >= 2 and result[1]:
+					paid_to_acct = result[1]
+				elif len(result) >= 1 and result[0]:
+					paid_to_acct = result[0]
+			else:
+				paid_to_acct = result or ""
+			if paid_to_acct and not paid_to_currency:
+				paid_to_currency = frappe.db.get_value(
+					"Account", paid_to_acct, "account_currency"
+				) or ""
+		except Exception as e:
+			frappe.log_error(f"get_prf_apply_data: get_party_account failed: {e}")
+
 	header = {
 		"company": first.company,
-		"payment_type": first.payment_type,
+		"payment_type": pe_payment_type,
+		"is_advance": pe_is_advance,
 		"party_type": first.party_type,
 		"party": first.party,
 		"mode_of_payment": first.payment_mode,
 		"bank_account": first.issued_bank,
 		"party_bank_account": first.supplier_bank_account,
 		"paid_from": first.account,
-		"paid_to": first.receiving_account,
+		"paid_to": paid_to_acct,
 		"paid_from_account_currency": first.issued_currency,
-		"paid_to_account_currency": first.receiving_currency,
+		"paid_to_account_currency": paid_to_currency,
 	}
 
 	REF_MAP = {
