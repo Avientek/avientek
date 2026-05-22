@@ -452,7 +452,15 @@ doc_events = {
         "on_cancel": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
     },
     "Purchase Order": {
-        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
+        "before_validate": [
+            "avientek.events.utils.fill_missing_item_defaults",
+            # Rahul 2026-05-22 (POLTD26-27-00015): suppress
+            # india_compliance's "Items not covered under GST cannot be
+            # clubbed" error on PO. PO is a commercial agreement, not
+            # the tax point — clubbing rule is enforced at Purchase
+            # Invoice. Same patch shared with Quotation / SO / DN / PR.
+            "avientek.overrides.india_gst_quotation.install_patch",
+        ],
         "before_update_after_submit": "avientek.events.purchase_order.po_validate",
         "validate": [
             "avientek.events.purchase_order.check_exchange_rate",
@@ -470,6 +478,10 @@ doc_events = {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
             "avientek.events.utils.normalize_gst_treatment_from_template",
+            # Symmetry with Quotation / PO / DN / PR (2026-05-22):
+            # SO is a commercial agreement, not the tax point — the
+            # india_compliance clubbing rule belongs at Sales Invoice.
+            "avientek.overrides.india_gst_quotation.install_patch",
         ],
         "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
         "validate": [
@@ -530,7 +542,14 @@ doc_events = {
         ],
     },
     "Purchase Receipt": {
-        "before_validate": "avientek.events.utils.fill_missing_item_defaults",
+        "before_validate": [
+            "avientek.events.utils.fill_missing_item_defaults",
+            # Rahul 2026-05-22 (POLTD26-27-00015 → PR): PR is a goods
+            # receipt event, not the tax point — the india_compliance
+            # clubbing rule belongs at Purchase Invoice. Same patch
+            # shared with Quotation / SO / DN / PO.
+            "avientek.overrides.india_gst_quotation.install_patch",
+        ],
         "validate": [
             "avientek.events.purchase_receipt.validate_supplier_company",
             "avientek.events.purchase_receipt.validate_item_tax_template",
@@ -567,6 +586,10 @@ doc_events = {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
             "avientek.events.utils.normalize_gst_treatment_from_template",
+            # Symmetry with Quotation / SO / PO / PR (2026-05-22): DN
+            # is a goods movement event, not the tax point — the
+            # india_compliance clubbing rule belongs at Sales Invoice.
+            "avientek.overrides.india_gst_quotation.install_patch",
         ],
         "validate": "avientek.events.delivery_note.validate_item_tax_template",
         "on_submit": "avientek.events.warranty.on_delivery_note_submit",
