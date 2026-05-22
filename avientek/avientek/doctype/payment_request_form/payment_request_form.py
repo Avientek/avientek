@@ -2100,13 +2100,53 @@ def fetch_party_name(party_type, party):
 
 @frappe.whitelist()
 def create_payment_entry(source_name, target_doc=None, args=None):
-    # def set_single_reference(source, target):
-    #     target.append("references", {
-    #         "reference_doctype": "Payment Request Form",
-    #         "reference_name": source.name
-    #         # "total_amount": source.payment_amount,
-    #         # "outstanding_amount": source.outstanding_amount,
-    #     })
+    # Rahul 2026-05-22: previously this mapper only copied header
+    # fields and left the PE references table empty, so the accountant
+    # had to manually re-add every invoice row already listed on the
+    # PRF. Now we populate target.references from the SAME consolidated
+    # payload used by the Payment Entry-side picker (get_prf_apply_data),
+    # so Create → Payment Entry behaves identically to the picker:
+    # each PRF row's Net Payment becomes the PE row's allocated_amount,
+    # and the sum drives the PE's paid_amount / received_amount.
+
+    def set_references_from_prf(source, target):
+        try:
+            payload = get_prf_apply_data([source.name])
+        except Exception as e:
+            frappe.log_error(f"create_payment_entry: get_prf_apply_data failed: {e}")
+            return
+        if not payload or not payload.get("valid"):
+            return
+
+        # Header — set_missing_values style. Don't clobber values the
+        # mapper already filled from field_map, but if the mapper left
+        # a slot empty (e.g. party_type isn't in the field_map) fill
+        # it from the consolidated payload.
+        header = payload.get("header") or {}
+        for fn, val in header.items():
+            if not val:
+                continue
+            if not target.get(fn):
+                target.set(fn, val)
+
+        # References — clear whatever the mapper might have inserted
+        # then re-append from the canonical payload.
+        target.set("references", [])
+        for ref in (payload.get("references") or []):
+            target.append("references", {
+                "reference_doctype": ref.get("reference_doctype"),
+                "reference_name": ref.get("reference_name"),
+                "allocated_amount": ref.get("allocated_amount"),
+                "total_amount": ref.get("total_amount") or ref.get("allocated_amount"),
+                "due_date": ref.get("due_date"),
+                "exchange_rate": ref.get("exchange_rate") or 1.0,
+                "bill_no": ref.get("bill_no") or "",
+            })
+
+        total = flt(payload.get("total_allocated"))
+        if total:
+            target.paid_amount = total
+            target.received_amount = total
 
     target_doc = get_mapped_doc(
         "Payment Request Form",
@@ -2131,10 +2171,10 @@ def create_payment_entry(source_name, target_doc=None, args=None):
             }
         },
         target_doc,
-        # postprocess=set_single_reference
+        set_references_from_prf,
     )
 
-    return target_doc 
+    return target_doc
 
 
 @frappe.whitelist()
