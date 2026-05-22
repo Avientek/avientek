@@ -544,16 +544,20 @@ frappe.ui.form.on('Payment Request Form', {
         }
         // Auto-pick naming series for new docs
         _apply_naming_series_by_company(frm);
-		// Jithin 2026-05-17: switch from a static `is_company_account=1
-		// AND company=PRF.company` filter to a server-side query that
-		// ALSO returns Bank Accounts linked to Internal Customers /
-		// Internal Suppliers (whose `company` is the OTHER group
-		// entity). Mirrors the party_query_with_internal pattern. The
-		// matching auto-tick on Bank Account.validate keeps the
-		// `is_company_account` flag in sync server-side.
+		// Rahul Avientek 2026-05-22 (AVLTD-01521): split into TWO
+		// distinct query backends. The previous shared
+		// `bank_account_query_with_internal` had an OR clause that
+		// returned ANY internal-party bank regardless of which Avientek
+		// group entity it represented — so a FZCO PRF saw LLC + KSA
+		// banks in the Issued Bank dropdown. Issued Bank must always
+		// be Avientek's own money source for PRF.company; Receiving
+		// Bank (Internal Transfer) legitimately crosses group
+		// companies. Two queries, two responsibilities:
+		//   issued_bank_query     → is_company_account=1 AND ba.company=PRF.company
+		//   receiving_bank_query  → is_company_account=1 (no company filter)
 		frm.set_query("issued_bank", function() {
             return {
-                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.bank_account_query_with_internal",
+                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.issued_bank_query",
                 filters: {
                     company: frm.doc.company
                 }
@@ -561,10 +565,7 @@ frappe.ui.form.on('Payment Request Form', {
         });
         frm.set_query("receiving_bank", function() {
             return {
-                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.bank_account_query_with_internal",
-                filters: {
-                    company: frm.doc.company
-                }
+                query: "avientek.avientek.doctype.payment_request_form.payment_request_form.receiving_bank_query",
             };
         });
         // Sammish 2026-05-16 (Jithin): the previous company-only filter

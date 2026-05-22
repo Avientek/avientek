@@ -336,6 +336,93 @@ def bank_account_query_with_internal(doctype, txt, searchfield, start, page_len,
 
 @frappe.whitelist()
 @frappe.read_only()
+def issued_bank_query(doctype, txt, searchfield, start, page_len, filters):
+	"""Frappe set_query backend for the PRF `issued_bank` picker (only).
+
+	Rahul Avientek 2026-05-22 (AVLTD-01521): the previous picker used
+	`bank_account_query_with_internal`, which had an OR clause that
+	returned ANY Bank Account linked to an Internal Customer or
+	Internal Supplier — regardless of which Avientek group company
+	that internal party represented. Result: a PRF on company FZCO
+	saw KSA-ALM-SAR (Avientek Trading LLC) and MSRQ-LLC-AED (LLC entity)
+	in the Issued Bank dropdown — leak.
+
+	Issued Bank is ALWAYS Avientek's own money source for the company
+	on the PRF. It is never an internal-party bank record (those map to
+	the supplier_bank_account picker, not here). So the strict rule:
+	    is_company_account = 1 AND ba.company = PRF.company
+	with no internal-party OR clause.
+
+	The companion `receiving_bank_query` (used by Internal Transfer
+	receiving_bank only) keeps a broader scope, since IT legitimately
+	crosses Avientek group companies.
+	"""
+	company = (filters or {}).get("company") or ""
+	txt_like = f"%{(txt or '').strip()}%"
+	start = int(start or 0)
+	page_len = int(page_len or 20)
+
+	rows = frappe.db.sql(
+		"""
+		SELECT name, account_name
+		FROM `tabBank Account`
+		WHERE IFNULL(disabled, 0) = 0
+		  AND IFNULL(is_company_account, 0) = 1
+		  AND company = %(company)s
+		  AND (name LIKE %(txt)s OR account_name LIKE %(txt)s)
+		ORDER BY name ASC
+		LIMIT %(start)s, %(page_len)s
+		""",
+		{
+			"txt": txt_like,
+			"company": company,
+			"start": start,
+			"page_len": page_len,
+		},
+		as_list=True,
+	)
+	return [(r[0], r[1] or "") for r in rows]
+
+
+@frappe.whitelist()
+@frappe.read_only()
+def receiving_bank_query(doctype, txt, searchfield, start, page_len, filters):
+	"""Frappe set_query backend for the PRF `receiving_bank` picker
+	(Internal Transfer only).
+
+	Receiving Bank IS allowed to be another Avientek group company's
+	own bank — that's the whole point of Internal Transfer (e.g. FZCO
+	transfers funds to LLC). So this query relaxes the company filter
+	but keeps the `is_company_account=1` guard so external-party
+	banks never appear. The result set is every enabled Bank Account
+	flagged as a company account, across ALL Avientek group entities.
+	"""
+	txt_like = f"%{(txt or '').strip()}%"
+	start = int(start or 0)
+	page_len = int(page_len or 20)
+
+	rows = frappe.db.sql(
+		"""
+		SELECT name, account_name
+		FROM `tabBank Account`
+		WHERE IFNULL(disabled, 0) = 0
+		  AND IFNULL(is_company_account, 0) = 1
+		  AND (name LIKE %(txt)s OR account_name LIKE %(txt)s)
+		ORDER BY name ASC
+		LIMIT %(start)s, %(page_len)s
+		""",
+		{
+			"txt": txt_like,
+			"start": start,
+			"page_len": page_len,
+		},
+		as_list=True,
+	)
+	return [(r[0], r[1] or "") for r in rows]
+
+
+@frappe.whitelist()
+@frappe.read_only()
 def supplier_bank_account_query(doctype, txt, searchfield, start, page_len, filters):
 	"""Frappe set_query backend for the PRF supplier_bank_account picker.
 
