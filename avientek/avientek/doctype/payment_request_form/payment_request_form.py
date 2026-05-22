@@ -854,6 +854,143 @@ def get_outstanding_payment_request_forms(party_type=None, party=None, company=N
 	return rows
 
 
+# Rahul 2026-05-22 — PE picker multi-select: when one or more PRFs are
+# picked, populate the PE's `references` child table from each PRF's
+# `payment_references` rows. The sum of allocated amounts becomes the
+# Paid Amount. Single source of truth on the server so the single-row
+# fast path and the multi-select Add path go through the same code.
+@frappe.whitelist()
+def get_prf_apply_data(prf_names):
+	"""Aggregate one-or-more PRFs into a payload that the Payment
+	Entry can apply atomically.
+
+	Returns:
+	    {
+	        "valid": bool,
+	        "error": str (when invalid),
+	        "header": {company, payment_type, party_type, party,
+	                   mode_of_payment, bank_account, party_bank_account,
+	                   paid_from, paid_to, paid_from_account_currency,
+	                   paid_to_account_currency},
+	        "references": [
+	            {reference_doctype, reference_name, allocated_amount,
+	             bill_no, due_date, total_amount, exchange_rate, account},
+	        ],
+	        "total_allocated": float,
+	        "first_prf": str,
+	        "prf_count": int,
+	        "prf_names": [str],
+	        "skipped_rows": [{prf, idx, reason}],   # for transparency
+	    }
+
+	Rules:
+	  * Multi-select: all PRFs must share Party + Currency + Company.
+	  * "Manual" PRF rows have no Frappe doc → skipped.
+	  * "Debit Note" → "Purchase Invoice" (Frappe stores DNs as PI with
+	    is_return=1). Same for "Credit Note" → "Sales Invoice".
+	  * Rows whose canonical document no longer exists are skipped.
+	  * `allocated_amount` is the PRF row's Net Payment
+	    (`outstanding_amount` field on Payment Request Reference).
+	"""
+	import json
+	if isinstance(prf_names, str):
+		try:
+			prf_names = json.loads(prf_names)
+		except Exception:
+			prf_names = [prf_names]
+	prf_names = [n for n in (prf_names or []) if n]
+	if not prf_names:
+		return {"valid": False, "error": _("No Payment Request Forms selected.")}
+
+	docs = []
+	for n in prf_names:
+		if not frappe.db.exists("Payment Request Form", n):
+			return {"valid": False, "error": _("Payment Request Form {0} not found.").format(n)}
+		docs.append(frappe.get_doc("Payment Request Form", n))
+
+	parties = {(d.party or "") for d in docs}
+	currencies = {(d.currency or "") for d in docs}
+	companies = {(d.company or "") for d in docs}
+	if len(parties) > 1:
+		return {"valid": False, "error": _("Selected PRFs have different Parties: {0}").format(", ".join(sorted(parties)))}
+	if len(currencies) > 1:
+		return {"valid": False, "error": _("Selected PRFs have different Currencies: {0}").format(", ".join(sorted(currencies)))}
+	if len(companies) > 1:
+		return {"valid": False, "error": _("Selected PRFs belong to different Companies: {0}").format(", ".join(sorted(companies)))}
+
+	first = docs[0]
+	header = {
+		"company": first.company,
+		"payment_type": first.payment_type,
+		"party_type": first.party_type,
+		"party": first.party,
+		"mode_of_payment": first.payment_mode,
+		"bank_account": first.issued_bank,
+		"party_bank_account": first.supplier_bank_account,
+		"paid_from": first.account,
+		"paid_to": first.receiving_account,
+		"paid_from_account_currency": first.issued_currency,
+		"paid_to_account_currency": first.receiving_currency,
+	}
+
+	REF_MAP = {
+		"Debit Note": "Purchase Invoice",
+		"Credit Note": "Sales Invoice",
+	}
+	# These reference types can't be paid against on a Payment Entry's
+	# references table (they're already payment vehicles or have no
+	# outstanding model). Skip them with a clear reason.
+	NON_PAYABLE = {"Manual", "Payment Entry"}
+
+	references = []
+	skipped = []
+	total = 0.0
+	for doc in docs:
+		for row in (doc.payment_references or []):
+			row_id = f"{doc.name} row {row.idx}"
+			ref_dt_raw = row.reference_doctype or ""
+			if not ref_dt_raw:
+				skipped.append({"prf": doc.name, "idx": row.idx, "reason": "no reference doctype"})
+				continue
+			if ref_dt_raw in NON_PAYABLE:
+				skipped.append({"prf": doc.name, "idx": row.idx, "reason": f"{ref_dt_raw} not payable on PE references"})
+				continue
+			ref_dt = REF_MAP.get(ref_dt_raw, ref_dt_raw)
+			ref_name = row.document_reference or row.reference_name
+			if not ref_name:
+				skipped.append({"prf": doc.name, "idx": row.idx, "reason": "no reference name"})
+				continue
+			if not frappe.db.exists(ref_dt, ref_name):
+				skipped.append({"prf": doc.name, "idx": row.idx, "reason": f"{ref_dt} {ref_name} not found"})
+				continue
+			amt = flt(row.outstanding_amount)
+			if amt <= 0:
+				skipped.append({"prf": doc.name, "idx": row.idx, "reason": "zero net payment"})
+				continue
+			references.append({
+				"reference_doctype": ref_dt,
+				"reference_name": ref_name,
+				"allocated_amount": amt,
+				"bill_no": row.bill_no or "",
+				"due_date": str(row.due_date) if row.due_date else None,
+				"total_amount": flt(row.grand_total) or amt,
+				"exchange_rate": flt(row.exchange_rate) or 1.0,
+			})
+			total += amt
+
+	return {
+		"valid": True,
+		"header": header,
+		"references": references,
+		"total_allocated": total,
+		"first_prf": first.name,
+		"prf_count": len(docs),
+		"prf_names": prf_names,
+		"skipped_rows": skipped,
+		"currency": first.currency,
+	}
+
+
 def _get_workflow_signers(doc):
 	"""For #10 — build a dict of workflow_state → {full_name, user, date}
 	by walking the Version history. Only the FIRST time each state was

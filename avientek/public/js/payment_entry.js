@@ -187,93 +187,93 @@ function _collect_checked_prfs(dlg) {
 }
 
 function _apply_prfs_to_payment_entry(frm, prf_names, all_rows) {
-    // Multi-PRF apply: validate consistency (party / currency /
-    // company), sum outstanding into paid_amount, link to FIRST PRF
-    // (Payment Entry has only ONE payment_request_form field), and
-    // surface the consolidated PRFs in the remarks for audit.
-    if (!prf_names || !prf_names.length) return;
-    if (prf_names.length === 1) {
-        _apply_prf_to_payment_entry(frm, prf_names[0]);
-        return;
-    }
+    // Multi-select path. Delegates to the shared server method which
+    // also handles the single-select fast path.
+    _apply_prfs_via_server(frm, prf_names);
+}
 
-    const selected = prf_names.map(function(n) {
-        return all_rows.find(function(r) { return r.name === n; });
-    }).filter(Boolean);
-
-    const parties = [...new Set(selected.map(function(r) { return r.party || ""; }))];
-    const currencies = [...new Set(selected.map(function(r) { return r.currency || ""; }))];
-    const companies = [...new Set(selected.map(function(r) { return r.company || ""; }))];
-    if (parties.length > 1) {
-        frappe.msgprint({
-            title: __("Cannot combine — different parties"),
-            message: __("Selected PRFs have different Parties: {0}. Pick PRFs from one party only.",
-                [parties.join(", ")]),
-            indicator: "red",
-        });
-        return;
-    }
-    if (currencies.length > 1) {
-        frappe.msgprint({
-            title: __("Cannot combine — different currencies"),
-            message: __("Selected PRFs have different Currencies: {0}. Pick PRFs in one currency only.",
-                [currencies.join(", ")]),
-            indicator: "red",
-        });
-        return;
-    }
-    if (companies.length > 1) {
-        frappe.msgprint({
-            title: __("Cannot combine — different companies"),
-            message: __("Selected PRFs belong to different Companies: {0}.",
-                [companies.join(", ")]),
-            indicator: "red",
-        });
-        return;
-    }
-
-    const total_outstanding = selected.reduce(function(s, r) {
-        return s + (r.outstanding_balance || 0);
-    }, 0);
-    const first = selected[0];
-
+function _apply_prfs_via_server(frm, prf_names) {
+    // Rahul 2026-05-22: server returns a complete payload — header
+    // fields + the list of references rolled up from every selected
+    // PRF's payment_references child rows. The sum of each row's
+    // allocated_amount becomes the Paid Amount.
     frappe.call({
-        method: "frappe.client.get",
-        args: { doctype: "Payment Request Form", name: first.name },
+        method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_prf_apply_data",
+        args: { prf_names: JSON.stringify(prf_names) },
+        freeze: true,
+        freeze_message: __("Building payment references…"),
         callback: function(r) {
-            const prf = r && r.message;
-            if (!prf) return;
-            frm.set_value("payment_request_form", prf.name);
-            frm.set_value("company", prf.company);
-            if (prf.payment_type) frm.set_value("payment_type", prf.payment_type);
-            if (prf.party_type) frm.set_value("party_type", prf.party_type);
-            if (prf.party) frm.set_value("party", prf.party);
-            if (prf.payment_mode) frm.set_value("mode_of_payment", prf.payment_mode);
-            if (prf.issued_bank) frm.set_value("bank_account", prf.issued_bank);
-            if (prf.supplier_bank_account) frm.set_value("party_bank_account", prf.supplier_bank_account);
-            if (prf.account) frm.set_value("paid_from", prf.account);
-            if (prf.receiving_account) frm.set_value("paid_to", prf.receiving_account);
-            if (prf.issued_currency) frm.set_value("paid_from_account_currency", prf.issued_currency);
-            if (prf.receiving_currency) frm.set_value("paid_to_account_currency", prf.receiving_currency);
-            frm.set_value("paid_amount", total_outstanding);
-            frm.set_value("received_amount", total_outstanding);
+            const data = r && r.message;
+            if (!data || !data.valid) {
+                frappe.msgprint({
+                    title: __("Cannot apply PRF"),
+                    message: (data && data.error) || __("Unknown error from server."),
+                    indicator: "red",
+                });
+                return;
+            }
 
-            // Audit trail in remarks — accountant can see which PRFs
-            // were rolled into this PE.
-            const prf_list = prf_names.join(", ");
-            const note = __("Consolidated payment for {0} PRFs: {1}.",
-                [prf_names.length, prf_list]);
-            const existing = frm.doc.remarks || "";
-            frm.set_value("remarks", existing ? (existing + "\n\n" + note) : note);
+            // 1. Header fields (company / party / bank / accounts /
+            // currencies / payment_type / mode). Set payment_request_form
+            // FIRST so any onchange handlers tied to it see the rest of
+            // the data already populated below.
+            frm.set_value("payment_request_form", data.first_prf);
+            Object.keys(data.header).forEach(function(k) {
+                const v = data.header[k];
+                if (v) frm.set_value(k, v);
+            });
 
-            frappe.show_alert({
-                message: __("{0} PRFs combined. Linked to {1}, Paid Amount = {2}.", [
-                    prf_names.length,
-                    first.name,
-                    format_currency(total_outstanding, first.currency || ""),
-                ]),
-                indicator: "green",
-            }, 10);
+            // 2. References child table — clear existing rows, then
+            // add one per consolidated PRF reference row. allocated_amount
+            // is the PRF row's Net Payment.
+            frm.clear_table("references");
+            (data.references || []).forEach(function(ref) {
+                const child = frm.add_child("references");
+                child.reference_doctype = ref.reference_doctype;
+                child.reference_name = ref.reference_name;
+                child.allocated_amount = ref.allocated_amount;
+                if (ref.total_amount) child.total_amount = ref.total_amount;
+                if (ref.due_date) child.due_date = ref.due_date;
+                if (ref.exchange_rate) child.exchange_rate = ref.exchange_rate;
+                if (ref.bill_no) child.bill_no = ref.bill_no;
+            });
+            frm.refresh_field("references");
+
+            // 3. Paid + received amount = sum of allocations.
+            frm.set_value("paid_amount", data.total_allocated);
+            frm.set_value("received_amount", data.total_allocated);
+
+            // 4. Audit trail for multi-PRF consolidations.
+            if (data.prf_count > 1) {
+                const note = __("Consolidated payment for {0} PRFs: {1}.",
+                    [data.prf_count, data.prf_names.join(", ")]);
+                const existing = frm.doc.remarks || "";
+                frm.set_value("remarks", existing ? (existing + "\n\n" + note) : note);
+            }
+
+            // 5. Skipped rows warning — let the accountant know if any
+            // PRF rows were not pulled (Manual, missing canonical doc).
+            if (data.skipped_rows && data.skipped_rows.length) {
+                const sample = data.skipped_rows.slice(0, 5).map(function(s) {
+                    return `${s.prf} #${s.idx}: ${s.reason}`;
+                }).join("<br>");
+                const more = data.skipped_rows.length > 5
+                    ? __("<br>…and {0} more.", [data.skipped_rows.length - 5])
+                    : "";
+                frappe.msgprint({
+                    title: __("Some PRF rows were not included"),
+                    message: sample + more,
+                    indicator: "orange",
+                });
+            }
+
+            const total_fmt = format_currency(data.total_allocated, data.currency || "");
+            const msg = data.prf_count === 1
+                ? __("PRF {0} linked with {1} reference rows. Paid Amount = {2}.",
+                    [data.first_prf, data.references.length, total_fmt])
+                : __("{0} PRFs combined — {1} reference rows added. Paid Amount = {2}.",
+                    [data.prf_count, data.references.length, total_fmt]);
+            frappe.show_alert({ message: msg, indicator: "green" }, 10);
         },
     });
 }
@@ -427,51 +427,7 @@ function _picker_styles() {
 }
 
 function _apply_prf_to_payment_entry(frm, prf_name) {
-    frappe.call({
-        method: "frappe.client.get",
-        args: { doctype: "Payment Request Form", name: prf_name },
-        callback: function(r) {
-            const prf = r && r.message;
-            if (!prf) return;
-
-            // Use the same Paid-amount as the remaining outstanding so
-            // accountants can adjust down for a partial pay or accept
-            // the suggested value for a full pay.
-            frappe.call({
-                method: "avientek.avientek.doctype.payment_request_form.payment_request_form.get_outstanding_payment_request_forms",
-                args: {
-                    party_type: prf.party_type || null,
-                    party: prf.party || null,
-                    company: prf.company || null,
-                },
-                callback: function(rr) {
-                    const match = ((rr && rr.message) || []).find(x => x.name === prf_name);
-                    const outstanding = match ? match.outstanding_balance : (prf.total_outstanding_amount || 0);
-
-                    frm.set_value("payment_request_form", prf.name);
-                    frm.set_value("company", prf.company);
-                    if (prf.payment_type) frm.set_value("payment_type", prf.payment_type);
-                    if (prf.party_type) frm.set_value("party_type", prf.party_type);
-                    if (prf.party) frm.set_value("party", prf.party);
-                    if (prf.payment_mode) frm.set_value("mode_of_payment", prf.payment_mode);
-                    if (prf.issued_bank) frm.set_value("bank_account", prf.issued_bank);
-                    if (prf.supplier_bank_account) frm.set_value("party_bank_account", prf.supplier_bank_account);
-                    if (prf.account) frm.set_value("paid_from", prf.account);
-                    if (prf.receiving_account) frm.set_value("paid_to", prf.receiving_account);
-                    if (prf.issued_currency) frm.set_value("paid_from_account_currency", prf.issued_currency);
-                    if (prf.receiving_currency) frm.set_value("paid_to_account_currency", prf.receiving_currency);
-                    frm.set_value("paid_amount", outstanding);
-                    frm.set_value("received_amount", outstanding);
-
-                    frappe.show_alert({
-                        message: __("PRF {0} linked. Suggested Paid Amount = {1}.", [
-                            prf.name,
-                            format_currency(outstanding, prf.currency || "")
-                        ]),
-                        indicator: "green"
-                    }, 8);
-                }
-            });
-        }
-    });
+    // Single-PRF fast path. Same code path as multi-select so the
+    // references table is populated identically.
+    _apply_prfs_via_server(frm, [prf_name]);
 }
