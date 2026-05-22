@@ -563,19 +563,40 @@ frappe.ui.form.on('Payment Request Form', {
         // doctype field. Frappe's standard read-only-on-submit handles
         // every OTHER field; this clamp covers the 3 allow_on_submit
         // exceptions and the payment_references child grid.
+        //
+        // Rahul 2026-05-22: Workflow Revise from Rejected → Draft used
+        // to leave grid.cannot_add_rows/delete_rows = true sticky on the
+        // grid object (set during the Rejected refresh, never cleared
+        // by the early-return), so Add Row only re-appeared after a
+        // full page reload. Reset grid + field locks unconditionally at
+        // the start, THEN re-apply only when state is terminal.
         try {
             const ws = frm.doc.workflow_state || "";
             const TERMINAL = ["Released", "Partially Processed", "Processed", "Cancelled", "Rejected"];
-            if (TERMINAL.indexOf(ws) < 0) return;
 
+            const grid = frm.fields_dict.payment_references && frm.fields_dict.payment_references.grid;
+            if (grid) {
+                grid.cannot_add_rows = false;
+                grid.cannot_delete_rows = false;
+            }
             const TO_LOCK = ["supplier_bank_account", "additional_documents", "supplier_balance"];
+            TO_LOCK.forEach(function (fn) {
+                if (frm.fields_dict[fn]) {
+                    frm.set_df_property(fn, "read_only", 0);
+                }
+            });
+
+            if (TERMINAL.indexOf(ws) < 0) {
+                if (grid && typeof grid.refresh === "function") grid.refresh();
+                return;
+            }
+
             TO_LOCK.forEach(function (fn) {
                 if (frm.fields_dict[fn]) {
                     frm.set_df_property(fn, "read_only", 1);
                 }
             });
 
-            const grid = frm.fields_dict.payment_references && frm.fields_dict.payment_references.grid;
             if (grid) {
                 grid.cannot_add_rows = true;
                 grid.cannot_delete_rows = true;
