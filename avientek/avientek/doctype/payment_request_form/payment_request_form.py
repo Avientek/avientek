@@ -353,6 +353,252 @@ def bank_account_query_with_internal(doctype, txt, searchfield, start, page_len,
 	return [(r[0], r[1] or "") for r in rows]
 
 
+def _get_quotation_brand_summary(quotation_name):
+	"""Fetch the Brand Summary child rows + parent totals from a
+	Quotation, dynamically — column names are NOT hardcoded.
+
+	Returns:
+	    {
+	        "rows": [ {field: value, ...}, ... ],   # child rows
+	        "columns": [ {fieldname, label, fieldtype}, ... ],
+	        "totals": [ {fieldname, label, value, fieldtype}, ... ],
+	        "currency": "<currency>",
+	    }
+
+	Returns None when the Quotation has no Brand Summary populated
+	(both `custom_brand_summary` and `custom_quotation_brand_summary`
+	parent fields are empty) — caller skips the render in that case.
+	"""
+	if not quotation_name or not frappe.db.exists("Quotation", quotation_name):
+		return None
+	try:
+		qdoc = frappe.get_doc("Quotation", quotation_name)
+	except Exception:
+		return None
+
+	# Pick whichever parent field actually has rows. Two custom field
+	# variants exist on Quotation (`custom_brand_summary` and
+	# `custom_quotation_brand_summary`); both point to the same child
+	# doctype "Quotation Brand Summary".
+	rows = []
+	for parent_fieldname in ("custom_brand_summary", "custom_quotation_brand_summary"):
+		val = qdoc.get(parent_fieldname) or []
+		if val:
+			rows = val
+			break
+	if not rows:
+		return None
+
+	# Dynamic column resolution — walk the child doctype meta.
+	# Include data-bearing fields (Currency / Float / Percent / Data /
+	# Int / Link / Select). Skip layout (Section/Column Break) and
+	# Long Text / HTML to keep the rendered table tight.
+	include_fieldtypes = {
+		"Currency", "Float", "Percent", "Int", "Data", "Link", "Select",
+		"Read Only", "Small Text",
+	}
+	try:
+		child_meta = frappe.get_meta("Quotation Brand Summary")
+	except Exception:
+		return None
+	columns = []
+	for df in child_meta.fields:
+		if not df.fieldname or df.fieldtype not in include_fieldtypes:
+			continue
+		columns.append({
+			"fieldname": df.fieldname,
+			"label": df.label or df.fieldname,
+			"fieldtype": df.fieldtype,
+			"options": df.options or "",
+		})
+
+	currency = qdoc.get("currency") or frappe.db.get_value(
+		"Company", qdoc.get("company"), "default_currency"
+	) or "AED"
+
+	# Build the row dict list — only include fields we declared in
+	# `columns` so the template stays consistent.
+	rows_out = []
+	for r in rows:
+		row_dict = {}
+		for col in columns:
+			row_dict[col["fieldname"]] = r.get(col["fieldname"])
+		rows_out.append(row_dict)
+
+	# Parent-level totals — dynamic discovery: any field on Quotation
+	# starting with `custom_total_` (covers shipping / customs / finance /
+	# processing / reward / incentive / margin / margin_percent / cost /
+	# selling / buying_price).
+	totals = []
+	try:
+		parent_meta = frappe.get_meta("Quotation")
+	except Exception:
+		parent_meta = None
+	if parent_meta:
+		for df in parent_meta.fields:
+			fn = df.fieldname or ""
+			if not fn.startswith("custom_total_"):
+				continue
+			if df.fieldtype not in ("Currency", "Float", "Percent", "Int"):
+				continue
+			val = qdoc.get(fn)
+			if val is None:
+				continue
+			totals.append({
+				"fieldname": fn,
+				"label": df.label or fn,
+				"value": val,
+				"fieldtype": df.fieldtype,
+			})
+
+	return {
+		"rows": rows_out,
+		"columns": columns,
+		"totals": totals,
+		"currency": currency,
+	}
+
+
+def _build_brand_summary_html(quotation_name):
+	"""Render the Quotation Brand Summary as a compact HTML block
+	suitable for inline embedding in the PRF Voucher print + Combined
+	PDF. Returns "" when there's no data (caller will skip rendering
+	the section entirely).
+	"""
+	data = _get_quotation_brand_summary(quotation_name)
+	if not data or not data["rows"]:
+		return ""
+
+	from frappe.utils import fmt_money, flt
+	currency = data["currency"]
+	columns = data["columns"]
+	rows = data["rows"]
+	totals = data["totals"]
+
+	def _fmt(value, fieldtype, col_currency=None):
+		if value is None or value == "":
+			return ""
+		if fieldtype == "Currency":
+			return fmt_money(flt(value), currency=col_currency or currency)
+		if fieldtype == "Percent":
+			return f"{flt(value):.2f}%"
+		if fieldtype == "Float":
+			return f"{flt(value):.2f}"
+		return frappe.utils.escape_html(str(value))
+
+	thead_html = "".join(
+		f'<th style="background:#c9daf8;padding:4px 6px;border:1px solid #000;font-size:8.5pt;">'
+		f'{frappe.utils.escape_html(c["label"])}</th>'
+		for c in columns
+	)
+	tbody_rows = []
+	for r in rows:
+		tds = []
+		for c in columns:
+			ft = c["fieldtype"]
+			align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
+			tds.append(
+				f'<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:{align};">'
+				f'{_fmt(r.get(c["fieldname"]), ft, c.get("options"))}</td>'
+			)
+		tbody_rows.append(f'<tr>{"".join(tds)}</tr>')
+	tbody_html = "".join(tbody_rows)
+
+	totals_html = ""
+	if totals:
+		# Render totals as 2-column key/value pairs in a compact table.
+		totals_html = (
+			'<table style="margin-top:8px;border-collapse:collapse;width:auto;">'
+		)
+		for t in totals:
+			val_str = _fmt(t["value"], t["fieldtype"])
+			totals_html += (
+				'<tr>'
+				f'<td style="border:1px solid #000;padding:3px 8px;background:#f5f5f5;font-weight:500;font-size:8.5pt;">'
+				f'{frappe.utils.escape_html(t["label"])}</td>'
+				f'<td style="border:1px solid #000;padding:3px 8px;font-size:8.5pt;text-align:right;">'
+				f'{val_str}</td>'
+				'</tr>'
+			)
+		totals_html += "</table>"
+
+	return (
+		f'<div class="quotation-brand-summary">'
+		f'<table style="border-collapse:collapse;width:100%;">'
+		f'<thead><tr>{thead_html}</tr></thead>'
+		f'<tbody>{tbody_html}</tbody>'
+		f'</table>'
+		f'{totals_html}'
+		f'</div>'
+	)
+
+
+def _resolve_quotation_print_format():
+	"""Return the first available Quotation print format from the
+	Avientek priority chain. Avoids the "Print Format not found"
+	msgprint that some Frappe rendering helpers queue when the
+	requested format doesn't exist on a site.
+
+	Priority:
+	  1. "Quotation New"      — canonical Avientek format on prod
+	                            (new-quote-module costing layout)
+	  2. "Avientek Quotation" — older Avientek variant; usually on
+	                            dev sites that haven't been upgraded
+	  3. None                 — no Avientek-flavoured quotation
+	                            format on this site; caller should
+	                            skip the render
+	"""
+	for pf in ("Quotation New", "Avientek Quotation"):
+		if frappe.db.exists("Print Format", pf):
+			return pf
+	return None
+
+
+def _get_quotation_for_po(po_name):
+	"""Trace a Purchase Order back to its originating Sales Quotation.
+
+	Chain: PO.items[0].sales_order → Sales Order.items[0].prevdoc_docname
+	→ Quotation (the standard ERPNext sales-side prev-doc chain used
+	on every Avientek Pay flow that originates from a customer
+	Quotation).
+
+	Returns the Quotation name, or None if any link in the chain is
+	missing. Safe to call with empty/None input.
+
+	Rahul Avientek 2026-05-22: surfaces the Sales Quotation's
+	new-quote-module costing block on the Payment Voucher's row
+	attachment section + the row View popup — replacing the manual
+	costing_sheet_attachment when a Quotation is in the chain, OR
+	rendered alongside the manual sheet (Q1=(c) policy).
+	"""
+	if not po_name:
+		return None
+	try:
+		so = frappe.db.get_value(
+			"Purchase Order Item",
+			{"parent": po_name},
+			"sales_order",
+			order_by="idx asc",
+		)
+		if not so:
+			return None
+		qn = frappe.db.get_value(
+			"Sales Order Item",
+			{"parent": so},
+			"prevdoc_docname",
+			order_by="idx asc",
+		)
+		if not qn:
+			return None
+		# Sanity check — make sure the linked Quotation still exists
+		# (deleted/cancelled docs return a name but no record).
+		if not frappe.db.exists("Quotation", qn):
+			return None
+		return qn
+	except Exception:
+		return None
+
+
 @frappe.whitelist()
 @frappe.read_only()
 def get_issued_bank_edit_roles():
@@ -2666,7 +2912,22 @@ def get_voucher_print_data(docname):
     }
     row_attachments = []
     for row in doc.payment_references:
-        row_data = {"ref_images": [], "po_images": [], "costing_images": [], "ref_label": "", "ref_name": "", "linked_po": ""}
+        # Rahul 2026-05-22 (AVFZC-02162) — Quotation Brand Summary
+        # replaces the manual costing sheet IF AND ONLY IF:
+        #   1. Row's PO chain traces back to a Sales Quotation
+        #      (PO → SO → Quotation), AND
+        #   2. The row has NO manual `costing_sheet_attachment`
+        #      uploaded.
+        # When a manual sheet IS attached the Brand Summary is
+        # silently skipped — manual upload wins. This is the
+        # focused summary view (not the full Quotation print).
+        row_data = {
+            "ref_images": [], "po_images": [],
+            "costing_images": [],
+            "quotation_brand_summary_html": "",
+            "linked_quotation": "",
+            "ref_label": "", "ref_name": "", "linked_po": "",
+        }
         if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
             row_data["ref_label"] = ref_label_map.get(row.reference_doctype, row.reference_doctype)
             row_data["ref_name"] = row.reference_name
@@ -2679,9 +2940,28 @@ def get_voucher_print_data(docname):
                     row_data["linked_po"] = linked_po
                     row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
 
-                # Costing sheet
+                # Manual costing sheet
                 if row.costing_sheet_attachment:
                     row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
+
+        # Brand Summary block — only when manual costing is NOT
+        # attached AND a Quotation is in the chain.
+        if not row.costing_sheet_attachment:
+            _po_for_quote_chain = ""
+            if row.reference_doctype == "Purchase Order" and row.document_reference:
+                _po_for_quote_chain = row.document_reference
+            elif row_data.get("linked_po"):
+                _po_for_quote_chain = row_data["linked_po"]
+            if _po_for_quote_chain:
+                _qn = _get_quotation_for_po(_po_for_quote_chain)
+                if _qn:
+                    row_data["linked_quotation"] = _qn
+                    try:
+                        row_data["quotation_brand_summary_html"] = (
+                            _build_brand_summary_html(_qn) or ""
+                        )
+                    except Exception:
+                        row_data["quotation_brand_summary_html"] = ""
 
         row_attachments.append(row_data)
 
@@ -3580,7 +3860,23 @@ def get_payment_voucher_context(docname):
 
     row_attachments = []
     for row in (doc.payment_references or []):
-        row_data = {"ref_images": [], "po_images": [], "costing_images": [], "ref_label": "", "ref_name": "", "linked_po": ""}
+        # Rahul 2026-05-22 (AVFZC-02162) — Quotation Brand Summary
+        # replaces the manual costing sheet IF AND ONLY IF:
+        #   1. Row's PO chain traces back to a Sales Quotation
+        #      (PO → SO → Quotation), AND
+        #   2. The row has NO manual `costing_sheet_attachment`
+        #      uploaded.
+        # When a manual sheet IS attached the Brand Summary is
+        # silently skipped — manual upload wins. This mirrors the
+        # logic in get_voucher_print_data so the active Voucher
+        # template path renders the same focused summary.
+        row_data = {
+            "ref_images": [], "po_images": [],
+            "costing_images": [],
+            "quotation_brand_summary_html": "",
+            "linked_quotation": "",
+            "ref_label": "", "ref_name": "", "linked_po": "",
+        }
         tgt_dt, tgt_name = _resolve_canonical(row)
         if tgt_dt and tgt_name:
             row_data["ref_label"] = ref_label_map.get(row.reference_doctype, row.reference_doctype)
@@ -3599,9 +3895,31 @@ def get_payment_voucher_context(docname):
                     row_data["linked_po"] = linked_po
                     row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
 
-                # Costing sheet
+                # Manual costing sheet
                 if row.costing_sheet_attachment:
                     row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
+
+        # Brand Summary block — only when manual costing is NOT
+        # attached AND a Quotation is in the chain.
+        # PO source priority:
+        #   (a) tgt_dt='Purchase Order' (canonical_doctype is PO).
+        #   (b) row_data['linked_po'] (resolved above for PI / DN rows).
+        if not row.costing_sheet_attachment:
+            _po_for_quote_chain = ""
+            if tgt_dt == "Purchase Order" and tgt_name:
+                _po_for_quote_chain = tgt_name
+            elif row_data.get("linked_po"):
+                _po_for_quote_chain = row_data["linked_po"]
+            if _po_for_quote_chain:
+                _qn = _get_quotation_for_po(_po_for_quote_chain)
+                if _qn:
+                    row_data["linked_quotation"] = _qn
+                    try:
+                        row_data["quotation_brand_summary_html"] = (
+                            _build_brand_summary_html(_qn) or ""
+                        )
+                    except Exception:
+                        row_data["quotation_brand_summary_html"] = ""
 
         row_attachments.append(row_data)
 
@@ -4246,6 +4564,21 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         except Exception:
             pass
 
+    # Rahul 2026-05-22 — surface a `linked_quotation` reference (just
+    # the name, NOT the rendered HTML) so the popup can show a small
+    # "View Quotation" link. Full inline HTML render was removed per
+    # request; users open the Quotation in a new tab via the link.
+    linked_quotation = ""
+    _po_for_quote_chain = ""
+    if actual_doctype == "Purchase Order":
+        _po_for_quote_chain = reference_name
+    elif po_name:
+        _po_for_quote_chain = po_name
+    if _po_for_quote_chain:
+        _qn = _get_quotation_for_po(_po_for_quote_chain)
+        if _qn:
+            linked_quotation = _qn
+
     return {
         "attachment_images": att_images,
         "file_list": file_list,
@@ -4254,6 +4587,7 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         "po_name": po_name,
         "costing_images": costing_images,
         "costing_url": costing_url,
+        "linked_quotation": linked_quotation,
         "resolved_doctype": actual_doctype or "",
         "resolved_exists": resolved_exists,
         "stated_doctype": reference_doctype or "",
