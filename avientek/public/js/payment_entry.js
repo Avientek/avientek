@@ -26,6 +26,21 @@ frappe.ui.form.on('Payment Entry', {
                 frappe.set_route("Form", "Payment Request Form", frm.doc.payment_request_form);
             }, __("View"));
         }
+
+        // Rahul 2026-05-22: defensive auto-populate. The PRF Create →
+        // Payment Entry button (server-side mapper) returns a PE with
+        // references populated from PRF.payment_references — but
+        // ERPNext's standard party-set cascade clears the references
+        // table during the sync→open flow, so the user sees an empty
+        // refs table. Detect this state on refresh and re-pull via
+        // the canonical server payload (same code path as the picker).
+        // _prf_refs_auto_populated guards against re-firing in a loop.
+        if (frm.is_new() && frm.doc.payment_request_form
+                && !(frm.doc.references || []).length
+                && !frm._prf_refs_auto_populated) {
+            frm._prf_refs_auto_populated = true;
+            _apply_prfs_via_server(frm, [frm.doc.payment_request_form]);
+        }
     },
 
     setup: function(frm) {
