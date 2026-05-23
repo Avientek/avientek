@@ -464,6 +464,28 @@ def _build_brand_summary_html(quotation_name):
 	suitable for inline embedding in the PRF Voucher print + Combined
 	PDF. Returns "" when there's no data (caller will skip rendering
 	the section entirely).
+
+	Jithin 2026-05-23 (AVKSA-00378-1): two formatting fixes from
+	user feedback on the QN-KSA-26-00023 preview —
+
+	(1) Currency cells printed the literal word "currency" before each
+	    amount (e.g. "currency 24,864.05"). Root cause: the Currency
+	    fields on the child doctype have `options="currency"` which is
+	    a *fieldname reference* (look up parent.currency), but we were
+	    passing it directly to fmt_money as a currency code. fmt_money
+	    then treated "currency" as the code and prefixed it to the
+	    number. Fix: ignore `col_currency`, always use the resolved
+	    Quotation top-level currency. Quotations are single-currency
+	    documents, so this is correct.
+
+	(2) Totals were rendered as a separate vertical 2-column table
+	    below the brand rows. Jithin asked for totals at the BOTTOM
+	    of each column, aligned under the matching header. Fix: build
+	    a `totals_by_column` map (custom_total_X[_new] → column X)
+	    and emit one footer row inside the same brand-rows table with
+	    each value aligned under its column. Totals that don't match
+	    any brand-row column (e.g. Total Qty, Total Company Currency)
+	    fall back to a compact key/value table below the main table.
 	"""
 	data = _get_quotation_brand_summary(quotation_name)
 	if not data or not data["rows"]:
@@ -475,16 +497,50 @@ def _build_brand_summary_html(quotation_name):
 	rows = data["rows"]
 	totals = data["totals"]
 
-	def _fmt(value, fieldtype, col_currency=None):
+	def _fmt(value, fieldtype):
 		if value is None or value == "":
 			return ""
 		if fieldtype == "Currency":
-			return fmt_money(flt(value), currency=col_currency or currency)
+			return fmt_money(flt(value), currency=currency)
 		if fieldtype == "Percent":
 			return f"{flt(value):.2f}%"
 		if fieldtype == "Float":
 			return f"{flt(value):.2f}"
 		return frappe.utils.escape_html(str(value))
+
+	# Build a map from column.fieldname → total record so the footer
+	# row can place each total under its matching column. The Quotation
+	# stores totals as `custom_total_<X>` or `custom_total_<X>_new`
+	# (Avientek added _new variants when refactoring the costing
+	# pipeline). Strip both prefix and suffix to find the column key.
+	column_fieldnames = {c["fieldname"] for c in columns}
+	totals_by_column = {}
+	standalone_totals = []
+	for t in totals:
+		fn = t["fieldname"] or ""
+		col_key = fn.replace("custom_total_", "", 1) if fn.startswith("custom_total_") else fn
+		if col_key.endswith("_new"):
+			col_key = col_key[:-4]
+		# Direct match (e.g. shipping, finance, margin, margin_percent)
+		if col_key in column_fieldnames:
+			totals_by_column[col_key] = t
+			continue
+		# A few common aliases for parent totals vs child column names.
+		# Avientek's costing pipeline renamed some fields between parent
+		# and child (e.g. parent has `custom_total_transport_new` but
+		# child column is `processing`) — bridge those mismatches.
+		ALIAS = {
+			"cost": "total_cost",
+			"selling": "total_selling",
+			"buying_price": "buying_price",
+			"transport": "processing",
+		}
+		mapped = ALIAS.get(col_key)
+		if mapped and mapped in column_fieldnames:
+			totals_by_column[mapped] = t
+			continue
+		# No matching column → render as standalone key/value pair below
+		standalone_totals.append(t)
 
 	thead_html = "".join(
 		f'<th style="background:#c9daf8;padding:4px 6px;border:1px solid #000;font-size:8.5pt;">'
@@ -499,39 +555,65 @@ def _build_brand_summary_html(quotation_name):
 			align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
 			tds.append(
 				f'<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:{align};">'
-				f'{_fmt(r.get(c["fieldname"]), ft, c.get("options"))}</td>'
+				f'{_fmt(r.get(c["fieldname"]), ft)}</td>'
 			)
 		tbody_rows.append(f'<tr>{"".join(tds)}</tr>')
 	tbody_html = "".join(tbody_rows)
 
-	totals_html = ""
-	if totals:
-		# Render totals as 2-column key/value pairs in a table matched to
-		# the brand-rows table width (100%) so the Voucher print looks
-		# tidy. Label column ~35% (same as the .tbl .lbl style on the
-		# rest of the voucher), value column fills the rest.
-		totals_html = (
-			'<table style="margin-top:8px;border-collapse:collapse;width:100%;">'
+	# Footer row — column-aligned totals. First column gets a "TOTAL"
+	# label; remaining columns either render the matched total or stay
+	# blank. Background tinted so the row reads as a totals strip.
+	footer_tds = []
+	for i, c in enumerate(columns):
+		fn = c["fieldname"]
+		ft = c["fieldtype"]
+		align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
+		base_style = (
+			"border:1px solid #000;padding:3px 6px;font-size:8.5pt;"
+			"background:#e8e8e8;font-weight:600;"
 		)
-		for t in totals:
+		if i == 0:
+			footer_tds.append(
+				f'<td style="{base_style}text-align:left;">{frappe.utils.escape_html(_("TOTAL"))}</td>'
+			)
+		elif fn in totals_by_column:
+			t = totals_by_column[fn]
 			val_str = _fmt(t["value"], t["fieldtype"])
-			totals_html += (
+			footer_tds.append(
+				f'<td style="{base_style}text-align:{align};">{val_str}</td>'
+			)
+		else:
+			footer_tds.append(f'<td style="{base_style}"></td>')
+	footer_row = f'<tr>{"".join(footer_tds)}</tr>'
+
+	# Standalone totals (Total Qty, Total Company Currency, etc.) that
+	# don't map to any brand-row column. Compact 2-column table below
+	# the main one — most Quotations have 0-2 of these.
+	standalone_html = ""
+	if standalone_totals:
+		standalone_html = (
+			'<table style="margin-top:8px;border-collapse:collapse;width:auto;">'
+		)
+		for t in standalone_totals:
+			val_str = _fmt(t["value"], t["fieldtype"])
+			standalone_html += (
 				'<tr>'
-				f'<td style="border:1px solid #000;padding:3px 8px;background:#f5f5f5;font-weight:500;font-size:8.5pt;width:35%;">'
+				f'<td style="border:1px solid #000;padding:3px 8px;background:#f5f5f5;'
+				f'font-weight:500;font-size:8.5pt;">'
 				f'{frappe.utils.escape_html(t["label"])}</td>'
-				f'<td style="border:1px solid #000;padding:3px 8px;font-size:8.5pt;text-align:right;">'
-				f'{val_str}</td>'
+				f'<td style="border:1px solid #000;padding:3px 8px;font-size:8.5pt;'
+				f'text-align:right;min-width:120px;">{val_str}</td>'
 				'</tr>'
 			)
-		totals_html += "</table>"
+		standalone_html += "</table>"
 
 	return (
 		f'<div class="quotation-brand-summary">'
 		f'<table style="border-collapse:collapse;width:100%;">'
 		f'<thead><tr>{thead_html}</tr></thead>'
-		f'<tbody>{tbody_html}</tbody>'
+		f'<tbody>{tbody_html}{footer_row}</tbody>'
 		f'</table>'
-		f'{totals_html}'
+		f'{standalone_html}'
 		f'</div>'
 	)
 
