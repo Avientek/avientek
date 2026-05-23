@@ -41,32 +41,32 @@ def _columns():
     return [
         {"label": _("ID"), "fieldname": "name", "fieldtype": "Link",
          "options": "Payment Request Form", "width": 160},
-        {"label": _("Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 95},
+        {"label": _("Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 120},
         {"label": _("Status"), "fieldname": "workflow_state", "fieldtype": "Data", "width": 140},
-        {"label": _("Payment Type"), "fieldname": "payment_type", "fieldtype": "Data", "width": 120},
+        {"label": _("Payment Type"), "fieldname": "payment_type", "fieldtype": "Data", "width": 130},
         {"label": _("Party Type"), "fieldname": "party_type", "fieldtype": "Link",
          "options": "DocType", "width": 100},
         {"label": _("Party"), "fieldname": "party", "fieldtype": "Dynamic Link",
          "options": "party_type", "width": 160},
-        {"label": _("Party Name"), "fieldname": "party_name", "fieldtype": "Data", "width": 200},
+        {"label": _("Party Name"), "fieldname": "party_name", "fieldtype": "Data", "width": 400},
         # Renamed columns per Jithin 2026-05-23 template:
         {"label": _("PRF Amount"), "fieldname": "net_amount", "fieldtype": "Currency",
          "options": "currency_code", "width": 140},
         {"label": _("PRF-Amount Company Currency"), "fieldname": "base_net_amount",
-         "fieldtype": "Currency", "options": "base_currency_code", "width": 170},
+         "fieldtype": "Currency", "options": "base_currency_code", "width": 250},
         # NEW: Amount = receiving_amount for IT rows (destination side).
         {"label": _("Amount"), "fieldname": "receiving_amount", "fieldtype": "Currency",
          "options": "receiving_currency", "width": 140},
         {"label": _("PRF-Currency"), "fieldname": "currency_code", "fieldtype": "Link",
-         "options": "Currency", "width": 100},
+         "options": "Currency", "width": 130},
         # NEW: Receiving Currency shown right next to Amount so the IT
         # destination leg is unambiguous in cross-currency transfers.
         {"label": _("Receiving Currency"), "fieldname": "receiving_currency",
-         "fieldtype": "Link", "options": "Currency", "width": 100},
+         "fieldtype": "Link", "options": "Currency", "width": 120},
         {"label": _("Base Currency"), "fieldname": "base_currency_code",
          "fieldtype": "Link", "options": "Currency", "width": 90},
         {"label": _("Company"), "fieldname": "company", "fieldtype": "Link",
-         "options": "Company", "width": 180},
+         "options": "Company", "width": 300},
         {"label": _("Department"), "fieldname": "department", "fieldtype": "Link",
          "options": "Department", "width": 140},
         {"label": _("Payment Mode"), "fieldname": "payment_mode", "fieldtype": "Link",
@@ -76,7 +76,7 @@ def _columns():
         {"label": _("Beneficiary Name"), "fieldname": "beneficiary_name",
          "fieldtype": "Data", "width": 180},
         {"label": _("Created By"), "fieldname": "owner", "fieldtype": "Link",
-         "options": "User", "width": 160},
+         "options": "User", "width": 250},
     ]
 
 
