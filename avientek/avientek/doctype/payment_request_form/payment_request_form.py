@@ -2485,13 +2485,26 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         for a in (doc.additional_documents or [])
         if a.attachment
     }
-    sidebar_pdfs = [
-        f for f in _sidebar_files_all
-        if not _is_combined_self(f.file_name)
-        and (f.file_url or "").lower().endswith(".pdf")
-        and (f.file_url or "").strip() != _bank_letter_url
-        and (f.file_url or "").strip() not in _addl_doc_urls
-    ]
+    # Jithin 2026-05-23 (AVKSA-00378-1 amended PRF): amend can leave
+    # multiple File records pointing at the same file_url linked to the
+    # amended doc, which made the same PDF append twice in the Combined
+    # PDF. Dedup by file_url so each unique attachment is bundled once.
+    sidebar_pdfs = []
+    _sidebar_seen_urls = set()
+    for f in _sidebar_files_all:
+        if _is_combined_self(f.file_name):
+            continue
+        furl = (f.file_url or "").strip()
+        if not furl.lower().endswith(".pdf"):
+            continue
+        if furl == _bank_letter_url:
+            continue
+        if furl in _addl_doc_urls:
+            continue
+        if furl in _sidebar_seen_urls:
+            continue
+        _sidebar_seen_urls.add(furl)
+        sidebar_pdfs.append(f)
     sidebar_count = len(sidebar_pdfs)
 
     total_stages = 1 + (3 * ref_count) + bank_letter_count + addl_count + sidebar_count
@@ -2838,9 +2851,17 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         _step(_("Supplier bank letter"))
 
     # 4. Additional documents (Additional Documents child table)
+    # Jithin 2026-05-23 (AVKSA-00378-1 amended PRF): amend can duplicate
+    # child rows referencing the same attachment URL. Track URLs already
+    # appended so each unique attachment merges once.
+    _addl_appended_urls = set()
     for addl in (doc.additional_documents or []):
         if not addl.attachment:
             continue
+        attach_url = (addl.attachment or "").strip()
+        if attach_url in _addl_appended_urls:
+            continue
+        _addl_appended_urls.add(attach_url)
         pdf_bytes = _read_local_pdf(addl.attachment)
         if pdf_bytes:
             merger.append(io.BytesIO(pdf_bytes))
@@ -4276,6 +4297,17 @@ def get_payment_voucher_context(docname):
             for a in (doc.additional_documents or [])
             if a.attachment
         }
+        # Jithin 2026-05-23 (AVKSA-00378-1 amended PRF): when a
+        # submitted PRF is cancelled + amended, Frappe sometimes leaves
+        # multiple File records pointing at the same file_url linked to
+        # the amended doc (some are auto-copied from the original
+        # cancelled doc during amend, some re-uploaded by the user).
+        # The previous logic walked the raw sidebar_files list and
+        # appended a render section per row, so the same PDF/image
+        # appeared 2-3× in the print. Dedup by URL first (fall back to
+        # file_name if URL is empty) so each unique attachment renders
+        # exactly once.
+        _seen_keys = set()
         for f in sidebar_files:
             fname = (f.file_name or "").strip()
             furl = (f.file_url or "").strip()
@@ -4286,6 +4318,10 @@ def get_payment_voucher_context(docname):
                 continue
             if furl and furl in _print_addl_urls:
                 continue
+            dedup_key = furl or fname_lc
+            if dedup_key in _seen_keys:
+                continue
+            _seen_keys.add(dedup_key)
             ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
             if ext == "pdf":
                 # Render PDF pages as images so they embed in the print
@@ -4330,10 +4366,17 @@ def get_payment_voucher_context(docname):
     additional_documents_print = []
     try:
         if doc.get("additional_documents"):
+            # Jithin 2026-05-23 (AVKSA-00378-1 amended PRF): amend can
+            # duplicate child rows referencing the same attachment URL.
+            # Dedup by URL so each unique attachment renders once.
+            _addl_seen_urls = set()
             for addl in (doc.additional_documents or []):
                 attach_url = (addl.attachment or "").strip()
                 if not attach_url:
                     continue
+                if attach_url in _addl_seen_urls:
+                    continue
+                _addl_seen_urls.add(attach_url)
                 fname = frappe.db.get_value("File", {"file_url": attach_url}, "file_name") or attach_url.rsplit("/", 1)[-1]
                 ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
                 images = []
