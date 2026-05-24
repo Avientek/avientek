@@ -47,6 +47,13 @@ def execute():
 		# Finance Controller can cancel a Released / Approved L2 doc
 		# (Frappe forbids doc_status 1->0).
 		{"name": "Cancelled", "style": "Danger"},
+		# Jithin 2026-05-23 (AVLTD-01528): user wants the ability to
+		# Cancel a Rejected PRF (doc_status=0). Frappe forbids workflow
+		# transitions from doc_status=0 to doc_status=2 directly, so we
+		# need a separate state at doc_status=0 for this flow. Keeping
+		# the word "Cancelled" in the name so filter/search "Cancelled"
+		# finds both this and the post-submit Cancelled state.
+		{"name": "Cancelled (Rejected)", "style": "Danger"},
 	]
 	for s in required_states:
 		if not frappe.db.exists("Workflow State", s["name"]):
@@ -162,6 +169,9 @@ def execute():
 			})
 			_already_added.add((_state, _role))
 	wf.append("states", {"state": "Cancelled", "doc_status": "2", "allow_edit": "Finance Controller"})
+	# Jithin 2026-05-23 (AVLTD-01528): doc_status=0 "Cancelled" sibling
+	# for the Rejected → Cancel path.
+	wf.append("states", {"state": "Cancelled (Rejected)", "doc_status": "0", "allow_edit": "Finance Controller"})
 
 	# Transitions
 	# Authorise — Accounts User, Accounts Manager, plus Dept Head (Jithin 2026-05-12)
@@ -220,6 +230,18 @@ def execute():
 			"state": from_state, "action": "Cancel", "next_state": "Cancelled",
 			"allowed": "Finance Controller", "allow_self_approval": 1,
 		})
+	# Jithin 2026-05-23 (AVLTD-01528): cancelling a Rejected PRF used to
+	# leave the state as "Rejected" because no transition existed from
+	# Rejected. Adding Rejected → Cancel → "Cancelled (Rejected)" —
+	# routes to the doc_status=0 sibling because Frappe's workflow
+	# engine forbids 0→2 directly (Workflow.validate_docstatus throws
+	# "Cannot cancel before submitting"). Visible label still contains
+	# "Cancelled" so list/report filters searching for "Cancelled"
+	# catch both this and the post-submit Cancelled state.
+	wf.append("transitions", {
+		"state": "Rejected", "action": "Cancel", "next_state": "Cancelled (Rejected)",
+		"allowed": "Finance Controller", "allow_self_approval": 1,
+	})
 
 	wf.insert(ignore_permissions=True)
 	frappe.db.commit()
