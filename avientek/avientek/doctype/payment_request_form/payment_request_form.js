@@ -1054,6 +1054,30 @@ frappe.ui.form.on('Payment Request Form', {
 
     },
 	party: function(frm) {
+		// Jithin 2026-05-24 (AVWLL-00353): when the user clears the
+		// Party field, the cascade of party-derived fields (party_name,
+		// supplier_address, bank details, balance, etc.) was left behind
+		// on both form + print + Combined PDF. fetch_supplier_details
+		// returns early at `!frm.doc.party`, so the OLD party's data
+		// stuck. Mirror that branch with an explicit reset path.
+		if (!frm.doc.party) {
+			const PARTY_DERIVED_FIELDS = [
+				"party_name",
+				"supplier_address", "address_display",
+				"supplier_bank_account", "account_number", "iban",
+				"bank", "swift_code",
+				"bank_letter",
+				"supplier_balance",
+				"email", "telephone",
+			];
+			PARTY_DERIVED_FIELDS.forEach(function (fn) {
+				if (frm.fields_dict[fn] && (frm.doc[fn] !== "" && frm.doc[fn] != null)) {
+					set_if_changed(frm, fn, "");
+				}
+			});
+			return;
+		}
+
 		fetch_supplier_details(frm, true);  // force_update=true when user changes party
 		if (frm.doc.party_type && frm.doc.party) {
         frappe.call({
