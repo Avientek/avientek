@@ -634,6 +634,7 @@
    "label": "Bill of Entry"
   },
   {
+   "allow_on_submit": 1,
    "default": "0",
    "fieldname": "is_tr_lc_payment",
    "fieldtype": "Check",
