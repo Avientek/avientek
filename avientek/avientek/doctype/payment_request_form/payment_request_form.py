@@ -3249,18 +3249,18 @@ def get_voucher_print_data(docname):
         if row.reference_doctype and row.reference_doctype != "Manual" and row.reference_name:
             row_data["ref_label"] = ref_label_map.get(row.reference_doctype, row.reference_doctype)
             row_data["ref_name"] = row.reference_name
-            row_data["ref_images"] = get_reference_attachment_images(row.reference_doctype, row.reference_name, max_pages=3) or []
+            row_data["ref_images"] = get_reference_attachment_images(row.reference_doctype, row.reference_name, max_pages=10) or []
 
             # Linked PO (supplier only)
             if doc.party_type == "Supplier" and row.reference_doctype in ("Purchase Invoice", "Debit Note"):
                 linked_po = get_linked_po_for_invoice(row.reference_name)
                 if linked_po:
                     row_data["linked_po"] = linked_po
-                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
+                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=10) or []
 
                 # Manual costing sheet
                 if row.costing_sheet_attachment:
-                    row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
+                    row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=10) or []
 
         # Brand Summary block — only when manual costing is NOT
         # attached AND a Quotation is in the chain.
@@ -4203,7 +4203,7 @@ def get_payment_voucher_context(docname):
             # supplier proforma is still shown in the Supplier Invoice
             # No column above.
             row_data["ref_name"] = tgt_name
-            row_data["ref_images"] = get_reference_attachment_images(tgt_dt, tgt_name, max_pages=3) or []
+            row_data["ref_images"] = get_reference_attachment_images(tgt_dt, tgt_name, max_pages=10) or []
 
             # Linked PO (supplier only). For PI rows, derive the PO from
             # the resolved canonical PI name (not from the freetext bill_no).
@@ -4211,11 +4211,11 @@ def get_payment_voucher_context(docname):
                 linked_po = get_linked_po_for_invoice(tgt_name)
                 if linked_po:
                     row_data["linked_po"] = linked_po
-                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=3) or []
+                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=10) or []
 
                 # Manual costing sheet
                 if row.costing_sheet_attachment:
-                    row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=3) or []
+                    row_data["costing_images"] = get_attachment_as_images(row.costing_sheet_attachment, max_pages=10) or []
 
         # Brand Summary block — only when manual costing is NOT
         # attached AND a Quotation is in the chain.
