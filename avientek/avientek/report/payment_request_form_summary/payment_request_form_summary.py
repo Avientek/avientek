@@ -3,21 +3,29 @@
 #
 # Payment Request Form Summary — consolidated view of every PRF.
 #
-# Column structure (Jithin's 2026-05-23 template applied):
-#   PRF Amount                 — document currency value (issued side
-#                                for IT; sum of child outstanding
-#                                amounts for Pay/Receive/Advance Pay)
+# Column structure (Jithin's 2026-05-23 template + same-day clarification):
+#   PRF Amount                 — for IT: RECEIVING side (destination
+#                                bank's deposit amount); for non-IT:
+#                                sum of child outstanding amounts.
 #   PRF-Amount Company Currency — base/company-currency equivalent
 #                                (always shown, no opt-in toggle)
-#   Amount                     — receiving_amount for IT rows; blank
-#                                for non-IT (no destination side)
-#   PRF-Currency               — issued/document currency code
+#   Amount                     — for IT: ISSUED/SOURCE side (the
+#                                other leg of the transfer); for
+#                                non-IT: blank.
+#   PRF-Currency               — for IT: receiving_currency; for
+#                                non-IT: document currency code.
+#   Issued Currency            — for IT: issued_currency (source of
+#                                the 'Amount' column); blank otherwise.
 #
-# IT base_net_amount fallback ladder:
-#   1. receiving_currency = company_default → receiving_amount
-#   2. issued_currency    = company_default → issued_amount
-#   3. cross-currency (neither side matches) → issued_amount × FX
-#      via frappe.utils.get_exchange_rate(issued_currency, company_default, posting_date)
+# Rationale (Jithin's WhatsApp 2026-05-23 PM): the actual cash that
+# arrives in the bank account is what finance reviews — that's the
+# receiving side. The issued side is supplementary (shown in the
+# Amount + Issued Currency pair for cross-currency clarity).
+#
+# IT base_net_amount fallback:
+#   1. receiving_currency = company_default → receiving_amount (direct)
+#   2. else → receiving_amount × FX(receiving_currency → company_default)
+#      via erpnext.setup.utils.get_exchange_rate (Python post-pass).
 #
 # Pay/Receive/Advance Pay base_net_amount:
 #   sum of Payment Request Reference.base_outstanding_amount (already
@@ -54,14 +62,16 @@ def _columns():
          "options": "currency_code", "width": 140},
         {"label": _("PRF-Amount Company Currency"), "fieldname": "base_net_amount",
          "fieldtype": "Currency", "options": "base_currency_code", "width": 250},
-        # NEW: Amount = receiving_amount for IT rows (destination side).
-        {"label": _("Amount"), "fieldname": "receiving_amount", "fieldtype": "Currency",
-         "options": "receiving_currency", "width": 140},
+        # Jithin 2026-05-23 follow-up: for IT rows, PRF Amount must be
+        # the RECEIVING side (destination = what arrives in the bank).
+        # The 'Amount' column now shows the ISSUED side (source =
+        # what was sent). Paired "Issued Currency" column makes the
+        # source leg's currency explicit for cross-currency transfers.
+        {"label": _("Amount"), "fieldname": "other_amount", "fieldtype": "Currency",
+         "options": "other_currency", "width": 140},
         {"label": _("PRF-Currency"), "fieldname": "currency_code", "fieldtype": "Link",
          "options": "Currency", "width": 130},
-        # NEW: Receiving Currency shown right next to Amount so the IT
-        # destination leg is unambiguous in cross-currency transfers.
-        {"label": _("Receiving Currency"), "fieldname": "receiving_currency",
+        {"label": _("Issued Currency"), "fieldname": "other_currency",
          "fieldtype": "Link", "options": "Currency", "width": 120},
         {"label": _("Base Currency"), "fieldname": "base_currency_code",
          "fieldtype": "Link", "options": "Currency", "width": 90},
@@ -97,10 +107,11 @@ def _data(filters):
             prf.issued_bank,
             prf.owner,
 
-            /* PRF Amount — document currency value.
-               IT uses issued_amount; others sum child.outstanding_amount. */
+            /* PRF Amount — Jithin 2026-05-23: for IT this is the
+               RECEIVING side (destination bank's deposit amount); for
+               non-IT it sums the child outstanding amounts. */
             CASE
-                WHEN prf.payment_type = 'Internal Transfer' THEN prf.issued_amount
+                WHEN prf.payment_type = 'Internal Transfer' THEN prf.receiving_amount
                 ELSE IFNULL((
                     SELECT SUM(pr.outstanding_amount)
                     FROM `tabPayment Request Reference` pr
@@ -108,11 +119,10 @@ def _data(filters):
                 ), 0)
             END AS net_amount,
 
-            /* PRF-Currency — document currency code.
-               IT uses issued_currency; others pick MAX(child.currency) for
-               single-currency PRFs (the common case). */
+            /* PRF-Currency — for IT, the RECEIVING currency; for non-IT
+               pick MAX(child.currency) for single-currency PRFs. */
             CASE
-                WHEN prf.payment_type = 'Internal Transfer' THEN prf.issued_currency
+                WHEN prf.payment_type = 'Internal Transfer' THEN prf.receiving_currency
                 ELSE IFNULL((
                     SELECT MAX(pr.currency)
                     FROM `tabPayment Request Reference` pr
@@ -122,33 +132,32 @@ def _data(filters):
                 ), prf.currency)
             END AS currency_code,
 
-            /* Amount — receiving_amount for IT, NULL for non-IT.
-               Non-IT rows have no destination leg. */
+            /* Amount + Issued Currency — for IT, the SOURCE/ISSUED side
+               (the other leg of the transfer). NULL for non-IT (no source
+               leg distinct from the invoice rows). */
             CASE
                 WHEN prf.payment_type = 'Internal Transfer'
-                    THEN prf.receiving_amount
+                    THEN prf.issued_amount
                 ELSE NULL
-            END AS receiving_amount,
+            END AS other_amount,
             CASE
                 WHEN prf.payment_type = 'Internal Transfer'
-                    THEN prf.receiving_currency
+                    THEN prf.issued_currency
                 ELSE NULL
-            END AS receiving_currency,
+            END AS other_currency,
 
             /* PRF-Amount Company Currency — base/company-currency value.
-               IT ladder: receiving matches → receiving_amount;
-                          issued matches    → issued_amount;
-                          neither matches   → NULL (filled in Python
-                          via get_exchange_rate). */
+               Now sourced from the RECEIVING side (matches the new PRF
+               Amount semantics):
+                 IT ladder: receiving_currency matches base → receiving_amount;
+                            else NULL (filled in Python via FX lookup on
+                            receiving_amount). */
             CASE
                 WHEN prf.payment_type = 'Internal Transfer' THEN
                     CASE
                         WHEN prf.receiving_currency =
                             (SELECT default_currency FROM `tabCompany` WHERE name = prf.company)
                             THEN prf.receiving_amount
-                        WHEN prf.issued_currency =
-                            (SELECT default_currency FROM `tabCompany` WHERE name = prf.company)
-                            THEN prf.issued_amount
                         ELSE NULL
                     END
                 ELSE IFNULL((
@@ -178,30 +187,31 @@ def _data(filters):
 
 
 def _backfill_cross_currency_base(rows):
-    """Post-SQL: for Internal Transfer rows where neither issued nor
-    receiving currency matches the company default, compute the base
-    equivalent via frappe.utils.get_exchange_rate(issued, base, date).
+    """Post-SQL: for Internal Transfer rows where the receiving currency
+    doesn't match the company default, compute the base equivalent via
+    get_exchange_rate(receiving_currency, base, date).
 
-    Done in Python (not SQL) because Currency Exchange lookups span
-    multiple tables and Frappe has utility helpers that fall back to
-    Exchange Rate Settings + 1.0 sensibly when no rate row exists.
+    Jithin 2026-05-23: PRF Amount = receiving side, so the company-
+    currency conversion is from the receiving side. SQL already
+    populated base_net_amount when receiving_currency = company base
+    (no conversion needed). Everything else lands here.
     """
     for r in rows:
         if r.get("payment_type") != "Internal Transfer":
             continue
         if r.get("base_net_amount") is not None:
-            continue   # SQL already handled (one side matched company default)
-        issued_amount = flt(r.get("net_amount"))      # = issued_amount for IT
-        issued_currency = r.get("currency_code")      # = issued_currency for IT
+            continue   # SQL handled it (receiving matched company base)
+        receiving_amount = flt(r.get("net_amount"))   # PRF Amount = receiving
+        receiving_currency = r.get("currency_code")   # PRF-Currency = receiving
         base_currency = r.get("base_currency_code")
-        if not (issued_amount and issued_currency and base_currency):
+        if not (receiving_amount and receiving_currency and base_currency):
             r["base_net_amount"] = 0
             continue
         try:
             rate = get_exchange_rate(
-                issued_currency, base_currency, r.get("posting_date"),
+                receiving_currency, base_currency, r.get("posting_date"),
             ) or 0
-            r["base_net_amount"] = flt(issued_amount * rate, 2)
+            r["base_net_amount"] = flt(receiving_amount * rate, 2)
         except Exception as e:
             frappe.log_error(
                 f"PRF Summary cross-currency rate lookup failed for {r['name']}: {e}",
