@@ -2610,6 +2610,16 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         "Purchase Order":   "Purchase Order",
         "Sales Order":      "Sales Order",
         "Delivery Note":    "Delivery Note",
+        # Jithin 2026-05-26 (AVFZC-02146 → HR-EXP-2026-00051): Expense
+        # Claim and Employee Advance rows weren't bundled in the
+        # Combined PDF because they were absent from this map. The
+        # row resolver returned an empty file_urls list and the
+        # merger skipped them. Bills attached to the EC's sidebar
+        # (e.g. "31.pdf", "BILLSCLM Nidheesh 031.pdf") now flow into
+        # the Combined PDF as Step (a) attachments alongside the
+        # voucher.
+        "Expense Claim":    "Expense Claim",
+        "Employee Advance": "Employee Advance",
     }
 
     def _resolve_ref(row):
@@ -4179,6 +4189,15 @@ def get_payment_voucher_context(docname):
         "Purchase Order":   "Purchase Order",
         "Sales Order":      "Sales Order",
         "Delivery Note":    "Delivery Note",
+        # Jithin 2026-05-26 (AVFZC-02146 → HR-EXP-2026-00051): mirrors
+        # the addition in REFERENCE_TARGET_DOCTYPE above. Without these
+        # rows, _resolve_canonical returns (None, None) for EC / EA
+        # references and the row_attachments loop never calls
+        # get_reference_attachment_images for them — so the EC's
+        # supporting bills don't render in the on-screen Voucher Fast
+        # print either.
+        "Expense Claim":    "Expense Claim",
+        "Employee Advance": "Employee Advance",
     }
 
     def _resolve_canonical(row):
