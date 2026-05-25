@@ -30,22 +30,38 @@ WHERE clause.
 """
 import frappe
 from frappe.utils import flt
-from erpnext.stock.doctype.batch.batch import get_batch_qty
 
 
-def _total_batch_qty(batch_no, item_code):
-	"""get_batch_qty returns a list of {warehouse, qty, ...} dicts when
-	called without a specific warehouse. Sum the qty across all
-	warehouses for the total batch quantity. Returns 0 when no rows
-	exist or any error happens (caller logs separately).
+def _total_batch_qty(batch_no, item_code=None):
+	"""Sum Batch quantity directly from Serial and Batch Entry rows
+	(active, submitted SBBs only).
+
+	Sridhar 2026-05-25 (BN15146 doubling): the first version of this
+	patch used erpnext.stock.doctype.batch.batch.get_batch_qty which
+	internally calls get_auto_batch_nos. That helper double-counts
+	when an SLE has BOTH `batch_no` set AND a `serial_and_batch_bundle`
+	link — which is exactly the state THIS patch leaves every healed
+	SLE in. Result: Batch.batch_qty was stored at 2x the real qty
+	(BN15146 net was 20, patch wrote 40).
+
+	Fix: bypass the SLE.batch_no path entirely. SBB is the source of
+	truth in v15 — query Serial and Batch Entry rows directly, joined
+	to non-cancelled SBBs. This avoids the double-count regardless of
+	whether SLE.batch_no is populated.
 	"""
-	rows = get_batch_qty(batch_no=batch_no, item_code=item_code)
-	if not rows:
-		return 0
-	if isinstance(rows, list):
-		return sum(flt(r.get("qty")) for r in rows)
-	# Defensive: some callers pass warehouse and get a scalar back.
-	return flt(rows)
+	row = frappe.db.sql(
+		"""
+		SELECT IFNULL(SUM(sbe.qty), 0) AS qty
+		FROM `tabSerial and Batch Entry` sbe
+		INNER JOIN `tabSerial and Batch Bundle` sbb
+		  ON sbb.name = sbe.parent
+		WHERE sbe.batch_no = %s
+		  AND sbb.docstatus = 1
+		  AND sbb.is_cancelled = 0
+		""",
+		batch_no,
+	)
+	return flt(row[0][0]) if row else 0
 
 
 def execute():

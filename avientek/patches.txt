@@ -229,6 +229,14 @@ avientek.patches.heal_prf_rows_from_create_buttons
 # Idempotent — re-running drops to zero rows healed once the database
 # is clean.
 avientek.patches.heal_sle_batch_no_from_sbb
+# Sridhar 2026-05-25 (BN15146 doubling): heal_sle_batch_no_from_sbb's
+# original recompute used erpnext.get_batch_qty which double-counts
+# when SLE.batch_no AND SBB are both set. Stored Batch.batch_qty at 2x
+# real for the 15,536 batches the heal touched (BN15146 net was 20,
+# wrote 40). Recompute correctly here using SBB rows directly. Forces
+# a fresh run on every site even where heal_sle_batch_no_from_sbb has
+# already executed.
+avientek.patches.recompute_batch_qty_from_sbb_correct
 # Sridhar 2026-05-24 (Quote Enhancement BRD §2.1): Avientek Settings →
 # Restricted Roles (Read-only on Approved+100%) was empty on prod, so
 # Dispatch / Procurement / Supply Chain / Logistics teams could see
