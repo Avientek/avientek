@@ -15,6 +15,12 @@ def _apply_patches():
 	except Exception:
 		pass
 
+	try:
+		from avientek.overrides.serial_batch_patch import install as _install_sb_patch
+		_install_sb_patch()
+	except Exception:
+		pass
+
 
 def _patch_has_user_permission():
 	"""Monkey-patch frappe.permissions.has_user_permission to skip child-row
