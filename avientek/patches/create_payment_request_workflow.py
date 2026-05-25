@@ -230,17 +230,28 @@ def execute():
 			"state": from_state, "action": "Cancel", "next_state": "Cancelled",
 			"allowed": "Finance Controller", "allow_self_approval": 1,
 		})
-	# Jithin 2026-05-23 (AVLTD-01528): cancelling a Rejected PRF used to
-	# leave the state as "Rejected" because no transition existed from
-	# Rejected. Adding Rejected → Cancel → "Cancelled (Rejected)" —
-	# routes to the doc_status=0 sibling because Frappe's workflow
-	# engine forbids 0→2 directly (Workflow.validate_docstatus throws
-	# "Cannot cancel before submitting"). Visible label still contains
-	# "Cancelled" so list/report filters searching for "Cancelled"
-	# catch both this and the post-submit Cancelled state.
+	# Jithin 2026-05-23 (AVLTD-01528) + 2026-05-26 (still not visible):
+	# cancelling a Rejected PRF used to leave the state as "Rejected"
+	# because no transition existed from Rejected. Adding Rejected →
+	# Cancel → "Cancelled (Rejected)" — routes to the doc_status=0
+	# sibling because Frappe's workflow engine forbids 0→2 directly
+	# (Workflow.validate_docstatus throws "Cannot cancel before
+	# submitting"). Visible label still contains "Cancelled" so
+	# list/report filters searching for "Cancelled" catch both this
+	# and the post-submit Cancelled state.
+	#
+	# Role widened to "All" (matches the Rejected → Revise transition
+	# above). Reasoning: this Cancel is a doc_status 0 → 0 transition
+	# — pure label cleanup with NO GL/SLE impact. The other Cancel
+	# transitions stay Finance Controller-only because they touch
+	# submitted docs (1 → 2) and reverse posting. Jithin first reported
+	# the button missing as "jc@avientek.com" (Sales Support L2, no FC
+	# role), so restricting to FC effectively hid the button from
+	# every creator. "All" lets any role that can already see the
+	# rejected PRF mark it as Cancelled (Rejected).
 	wf.append("transitions", {
 		"state": "Rejected", "action": "Cancel", "next_state": "Cancelled (Rejected)",
-		"allowed": "Finance Controller", "allow_self_approval": 1,
+		"allowed": "All", "allow_self_approval": 1,
 	})
 
 	wf.insert(ignore_permissions=True)
