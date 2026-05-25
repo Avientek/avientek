@@ -487,6 +487,10 @@ doc_events = {
         "validate": [
             "avientek.events.sales_order.validate_customer_company",
             "avientek.events.sales_order.validate_exchange_rate_v2",
+            # Sridhar 2026-05-24: server-side belt-and-braces with the
+            # JS button-strip in quotation.js refresh. Blocks SO creation
+            # from a Quotation whose V3 workflow_state isn't yet Approved.
+            "avientek.events.sales_order.validate_quotation_approved",
         ],
         "before_save": [
             "avientek.events.sales_order.strip_quotation_optional_items",

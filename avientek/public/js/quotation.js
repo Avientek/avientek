@@ -42,6 +42,26 @@ function _user_is_whitelisted_for_high_prob() {
     return _HIGH_PROB_WHITELIST.some(r => roles.indexOf(r) !== -1);
 }
 
+function _strip_create_buttons_unless_approved(frm) {
+    // Sridhar 2026-05-24: hide Create→Sales Order + Create→Sales
+    // Invoice buttons unless the V3 workflow has landed the quote in
+    // Approved or Approved for Update. Frappe adds these on every
+    // refresh based purely on docstatus=1, so we have to strip on
+    // every refresh too. System Manager bypass keeps admin escape
+    // hatch open.
+    if (frm.is_new() || frm.doc.docstatus !== 1) { return; }
+    if ((frappe.user_roles || []).indexOf("System Manager") >= 0) { return; }
+    const APPROVED_STATES = new Set(["Approved", "Approved for Update"]);
+    if (APPROVED_STATES.has(frm.doc.workflow_state || "")) { return; }
+    try {
+        frm.remove_custom_button(__("Sales Order"), __("Create"));
+    } catch (e) {}
+    try {
+        frm.remove_custom_button(__("Sales Invoice"), __("Create"));
+    } catch (e) {}
+}
+
+
 function _apply_high_probability_lock(frm) {
     if (frm.is_new()) { return; }
     const prob = parseFloat(frm.doc.probability || 0);
@@ -80,6 +100,15 @@ frappe.ui.form.on('Quotation', {
         _load_high_prob_role_config().then(() => {
             _apply_high_probability_lock(frm);
         });
+        // Sridhar 2026-05-24: block "Create → Sales Order" + "Create → Sales
+        // Invoice" until the V3 workflow lands the doc in Approved /
+        // Approved for Update. Frappe adds those buttons on docstatus=1
+        // regardless of workflow_state, so a quote in Submitted /
+        // Pending For Approval / Pending L2 Approval would otherwise
+        // let the creator skip the audit chain. ERPNext re-adds the
+        // buttons on every refresh, so we strip them on every refresh
+        // when state is not in the approved set.
+        _strip_create_buttons_unless_approved(frm);
     },
 
     probability(frm) {

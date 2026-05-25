@@ -229,3 +229,9 @@ avientek.patches.heal_prf_rows_from_create_buttons
 # Idempotent — re-running drops to zero rows healed once the database
 # is clean.
 avientek.patches.heal_sle_batch_no_from_sbb
+# Sridhar 2026-05-24 (Quote Enhancement BRD §2.1): Avientek Settings →
+# Restricted Roles (Read-only on Approved+100%) was empty on prod, so
+# Dispatch / Procurement / Supply Chain / Logistics teams could see
+# unfinalized quotes. Seed defaults if not already present. Idempotent
+# — re-running is a no-op once the table has all 4 roles.
+avientek.patches.seed_quotation_restricted_roles

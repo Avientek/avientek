@@ -45,6 +45,13 @@ STATES = [
     ("Cancellation Requested", "1", "Danger"),
     ("Cancellation L2 Pending","1", "Danger"),
     ("Cancelled",              "2", "Danger"),
+    # Sridhar 2026-05-24: terminal Reject state. Existing 'Sent for
+    # Revision' is reachable via the new 'Request Revision' action for
+    # soft-rejects (where the approver wants the creator to fix and
+    # resubmit). Direct Reject from L1/L2 now lands here — no return
+    # path, audit closure. doc_status=1 keeps the doc visible in
+    # reports but read-only (model handles via standard submitted lock).
+    ("Rejected",               "1", "Danger"),
     # Sridhar 2026-05-10: bridge legacy V2 states so quotes that were
     # mid-V2-flow at deploy time (e.g. Pending Level 2 Approval) become
     # actionable in V3. Without these, Frappe shows NO transitions for
@@ -167,11 +174,22 @@ def _build_transitions(creators, approvers, l2_approvers=None):
 
         # BRD 2026-05-14: Pending For Approval is the L1 stage of the
         # amend chain. L1 approves -> Pending L2 Approval. L2 approves
-        # -> Approved. Either stage can Reject -> Sent for Revision.
+        # -> Approved.
+        #
+        # Sridhar 2026-05-24: split the previous single 'Reject' action
+        # into two:
+        #   - 'Request Revision' -> Sent for Revision (soft, creator
+        #     can fix and resubmit via 'Send for Approval')
+        #   - 'Reject'           -> Rejected          (hard, terminal,
+        #     audit closure with no return path)
+        # Both L1 and L2 approvers see all three buttons (Approve /
+        # Request Revision / Reject) on their respective queue states.
         ("Pending For Approval",   "Approve Level 1",       "Pending L2 Approval",    "l1_approver", 0, ""),
-        ("Pending For Approval",   "Reject",                "Sent for Revision",      "l1_approver", 0, ""),
+        ("Pending For Approval",   "Request Revision",      "Sent for Revision",      "l1_approver", 0, ""),
+        ("Pending For Approval",   "Reject",                "Rejected",               "l1_approver", 0, ""),
         ("Pending L2 Approval",    "Approve Level 2",       "Approved",               "l2_approver", 0, ""),
-        ("Pending L2 Approval",    "Reject",                "Sent for Revision",      "l2_approver", 0, ""),
+        ("Pending L2 Approval",    "Request Revision",      "Sent for Revision",      "l2_approver", 0, ""),
+        ("Pending L2 Approval",    "Reject",                "Rejected",               "l2_approver", 0, ""),
 
         # Sent for Revision -- user can save freely (handled by validator state-allow)
         # then re-submit for approval (re-enters the L1 stage).

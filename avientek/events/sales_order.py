@@ -215,6 +215,58 @@ def validate_exchange_rate_v2(doc, method=None):
 #     ... (see server_client_scripts_backup.json for full logic)
 
 
+def validate_quotation_approved(doc, method=None):
+	"""Block Sales Order creation from a Quotation that hasn't yet
+	cleared the V3 workflow Approved gate.
+
+	Sridhar 2026-05-24: Frappe v15 shows the Create→Sales Order button
+	on a Quotation as soon as docstatus=1, regardless of workflow_state.
+	That let creators submit a quote (margin auto-OK fast-forward) and
+	convert it to SO without ever hitting the Pending For Approval →
+	L1 → L2 → Approved chain. The JS button-strip in quotation.js
+	refresh hides the button for non-admins; this server-side check
+	catches API / direct-create / bench-console bypass.
+
+	Allowed source states: 'Approved' and 'Approved for Update' (the
+	post-amend approved state). System Manager bypasses entirely
+	(matches the JS escape hatch). Only fires on doc CREATION (the
+	`__islocal` flag) — once an SO is saved, re-validating the source
+	quote's state on every edit would lock the SO unhelpfully if the
+	source quote later moves back to Sent for Revision.
+	"""
+	# Only enforce on new SO creation, not on subsequent edits.
+	if not doc.get("__islocal"):
+		return
+	if "System Manager" in (frappe.get_roles() or []):
+		return
+	# Walk distinct source quotations referenced by item rows.
+	quotation_names = set()
+	for it in (doc.items or []):
+		if it.get("prevdoc_docname"):
+			quotation_names.add(it.prevdoc_docname)
+	# Some flows put the source on the parent as `quotation`/source field
+	# (depends on Frappe version + custom field). Cover both.
+	for fld in ("quotation", "source"):
+		val = doc.get(fld)
+		if val and isinstance(val, str):
+			quotation_names.add(val)
+	if not quotation_names:
+		return
+	APPROVED_STATES = {"Approved", "Approved for Update"}
+	for qn in quotation_names:
+		ws = frappe.db.get_value("Quotation", qn, "workflow_state")
+		if ws and ws not in APPROVED_STATES:
+			frappe.throw(
+				frappe._(
+					"Source Quotation <b>{0}</b> is in <b>{1}</b> state — "
+					"Sales Order can only be created after the quote reaches "
+					"<b>Approved</b>. Please complete the workflow approval "
+					"(Pending For Approval → Level 1 → Level 2) first."
+				).format(qn, ws),
+				title=frappe._("Quotation Not Yet Approved"),
+			)
+
+
 @frappe.whitelist()
 def create_proforma_invoice(source_name, target_doc=None, args=None):
 	target_doc = get_mapped_doc(
