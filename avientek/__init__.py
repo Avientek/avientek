@@ -128,6 +128,122 @@ def _patch_qb_get_query():
 	qb_utils.get_query = _patched_get_query
 
 
+def _patch_get_stock_ledgers_batches():
+	"""Exclude SBB-linked SLEs from the legacy batch_no qty path.
+
+	Sridhar 2026-05-25 (AETPL auto-FIFO failure on I030009 / BN14450):
+	`get_auto_batch_nos` (the auto-FIFO entry point at DN submit) does:
+
+	    available = get_available_batches(kwargs)        # SBB-aware (SBE.qty)
+	    stock_ledgers = get_stock_ledgers_batches(kwargs)# legacy SLE.batch_no
+	    update_available_batches(available, stock_ledgers, ...)
+	    # for each batch already in available, batch.qty += stock_ledgers.qty
+	    # — DOUBLE-COUNT when an SLE has BOTH batch_no AND a non-empty SBB.
+
+	After the 2026-05-25 revert_multi_batch_sle_batch_no patch NULLed
+	SLE.batch_no on every multi-batch SBB SLE, the legacy path under-
+	counts outflows (it only sees the single-batch SLEs). The remaining
+	single-batch SLE rows still have BOTH batch_no AND SBB set — so
+	get_stock_ledgers_batches counts each of them once, and
+	get_available_batches counts them AGAIN via SBE.qty. Result: every
+	batch with single-batch SLEs that also has multi-batch outflows
+	elsewhere shows phantom positive qty in the auto-picker. AETPL
+	auto-FIFO on I030009 picked BN14450 (real qty 0) and submit failed.
+
+	Fix: filter the legacy query to only consider SLEs WITHOUT an SBB
+	link. Those are the pre-v15 / direct-batch-field rows that the SBB
+	path cannot see. Modern v15 rows are exclusively in the SBB path.
+
+	Idempotent — replaces the function once at app load.
+	"""
+	from erpnext.stock.doctype.serial_and_batch_bundle import serial_and_batch_bundle as sbb_mod
+
+	_original = sbb_mod.get_stock_ledgers_batches
+
+	def _patched_get_stock_ledgers_batches(kwargs):
+		import frappe
+		from frappe.utils import today, nowtime
+		from erpnext.stock.utils import get_combine_datetime
+
+		sle = frappe.qb.DocType("Stock Ledger Entry")
+		batch = frappe.qb.DocType("Batch")
+		from frappe.query_builder.functions import Sum
+
+		query = (
+			frappe.qb.from_(sle)
+			.inner_join(batch)
+			.on(sle.batch_no == batch.name)
+			.select(
+				sle.warehouse,
+				sle.item_code,
+				Sum(sle.actual_qty).as_("qty"),
+				sle.batch_no,
+				batch.expiry_date,
+			)
+			.where(
+				(sle.is_cancelled == 0)
+				& (sle.batch_no.isnotnull())
+				& ((sle.serial_and_batch_bundle.isnull()) | (sle.serial_and_batch_bundle == ""))
+			)
+			.groupby(sle.batch_no, sle.warehouse)
+		)
+
+		for field in ["warehouse", "item_code", "batch_no"]:
+			if not kwargs.get(field):
+				continue
+			if isinstance(kwargs.get(field), list):
+				query = query.where(sle[field].isin(kwargs.get(field)))
+			else:
+				query = query.where(sle[field] == kwargs.get(field))
+
+		if not kwargs.get("for_stock_levels"):
+			query = query.where((batch.expiry_date >= today()) | (batch.expiry_date.isnull()))
+
+		if kwargs.get("posting_date"):
+			if kwargs.get("posting_time") is None:
+				kwargs.posting_time = nowtime()
+
+			ts_cond = sle.posting_datetime <= get_combine_datetime(
+				kwargs.posting_date, kwargs.posting_time
+			)
+			if kwargs.get("creation"):
+				ts_cond = sle.posting_datetime < get_combine_datetime(
+					kwargs.posting_date, kwargs.posting_time
+				)
+				ts_cond |= (
+					sle.posting_datetime == get_combine_datetime(
+						kwargs.posting_date, kwargs.posting_time
+					)
+				) & (sle.creation < kwargs.creation)
+			query = query.where(ts_cond)
+
+		if kwargs.get("ignore_voucher_nos"):
+			query = query.where(sle.voucher_no.notin(kwargs.get("ignore_voucher_nos")))
+
+		if kwargs.get("based_on") == "LIFO":
+			query = query.orderby(batch.creation, order=frappe.qb.desc)
+		elif kwargs.get("based_on") == "Expiry":
+			query = query.orderby(batch.expiry_date)
+		else:
+			query = query.orderby(batch.creation)
+
+		data = query.run(as_dict=True)
+		batches = {}
+		for d in data:
+			key = (d.batch_no, d.warehouse)
+			if key not in batches:
+				batches[key] = d
+			else:
+				batches[key].qty += d.qty
+		return batches
+
+	sbb_mod.get_stock_ledgers_batches = _patched_get_stock_ledgers_batches
+
+
 _apply_patches()
 _patch_qb_get_query()
+try:
+	_patch_get_stock_ledgers_batches()
+except Exception:
+	pass
 
