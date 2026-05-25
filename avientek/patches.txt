@@ -253,3 +253,10 @@ avientek.patches.revert_multi_batch_sle_batch_no
 # unfinalized quotes. Seed defaults if not already present. Idempotent
 # — re-running is a no-op once the table has all 4 roles.
 avientek.patches.seed_quotation_restricted_roles
+# Jithin 2026-05-25 (AVLTD-01528): Rejected PRF showed only Revise in
+# Actions menu, no Cancel — because create_payment_request_workflow is
+# registered in patches.txt and runs ONCE per site, so the recent edits
+# adding Cancelled (Rejected) state + Rejected->Cancel transition never
+# re-execute on existing sites. Bridge patch ensures the state +
+# transition exist on the live workflow. Idempotent.
+avientek.patches.ensure_prf_rejected_cancel_transition
