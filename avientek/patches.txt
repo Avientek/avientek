@@ -237,6 +237,16 @@ avientek.patches.heal_sle_batch_no_from_sbb
 # a fresh run on every site even where heal_sle_batch_no_from_sbb has
 # already executed.
 avientek.patches.recompute_batch_qty_from_sbb_correct
+# Sridhar 2026-05-25 (I017933 phantom negatives across companies):
+# heal_sle_batch_no_from_sbb's inner SELECT picks the FIRST batch
+# entry from the SBB and stamps it onto the SLE — fine for single-
+# batch SBBs but for multi-batch SBBs it attributes the whole line
+# qty to the first batch in idx order. Result: phantom negatives on
+# the first batch and phantom positives on others, across every multi-
+# batch GRN/DN line. NULL-out SLE.batch_no on every SLE whose linked
+# SBB has more than one distinct batch_no, then recompute
+# Batch.batch_qty from SBB rows directly.
+avientek.patches.revert_multi_batch_sle_batch_no
 # Sridhar 2026-05-24 (Quote Enhancement BRD §2.1): Avientek Settings →
 # Restricted Roles (Read-only on Approved+100%) was empty on prod, so
 # Dispatch / Procurement / Supply Chain / Logistics teams could see
