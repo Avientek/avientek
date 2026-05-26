@@ -240,10 +240,108 @@ def _patch_get_stock_ledgers_batches():
 	sbb_mod.get_stock_ledgers_batches = _patched_get_stock_ledgers_batches
 
 
+def _patch_batch_wise_balance_history_legacy_query():
+	"""Exclude SBB-linked SLEs from the Batch-Wise Balance History report's legacy query.
+
+	Sridhar 2026-05-26 — the report at
+	erpnext.stock.report.batch_wise_balance_history runs TWO queries and
+	UNIONs the results:
+
+	    1. get_stock_ledger_entries_for_batch_no — SUM(SLE.actual_qty)
+	                                                WHERE batch_no != ""
+	    2. get_stock_ledger_entries_for_batch_bundle — SUM(SBE.qty) via
+	                                                   JOIN to SBB entries
+
+	Pre-yesterday-morning, SBB-linked SLEs had batch_no = NULL (v15
+	default), so the two paths were disjoint. After heal_sle_batch_no_from_sbb
+	set batch_no on every SBB-linked SLE (single-batch ones got their
+	correct batch; multi-batch ones got the first batch in idx order),
+	the legacy query started matching single-batch SBB SLEs that are
+	ALSO matched by the bundle query → every single-batch SBB
+	transaction was counted TWICE in the report's running balance.
+
+	After revert_multi_batch_sle_batch_no NULLed batch_no on multi-batch
+	SBB SLEs, multi-batch lines dropped out of the legacy query but
+	single-batch SBB SLEs (correctly kept by the heal) still have
+	batch_no set. They remain double-counted by this report — surfaces
+	as thousands of phantom negatives where the multi-batch inflow side
+	can only show up via the bundle path but the single-batch outflow
+	side shows up in both. BN09337 reported -89 at FZCO-7SEAS but
+	Batch.batch_qty master = 0.
+
+	Fix: legacy query additionally excludes SLEs that have a non-empty
+	serial_and_batch_bundle. Modern v15 SBB-linked rows are exclusively
+	in the bundle query. Pre-v15 orphan SLEs (no SBB) still flow through
+	the legacy query.
+
+	Idempotent — replaces the function once at app load.
+	"""
+	from erpnext.stock.report.batch_wise_balance_history import (
+		batch_wise_balance_history as bwbh,
+	)
+	import frappe
+	from frappe import _
+	from frappe.utils import add_to_date, get_datetime
+	from pypika import functions as fn
+
+	def _patched_for_batch_no(filters):
+		if not filters.get("from_date"):
+			frappe.throw(_("'From Date' is required"))
+		if not filters.get("to_date"):
+			frappe.throw(_("'To Date' is required"))
+
+		posting_datetime = get_datetime(add_to_date(filters["to_date"], days=1))
+		sle = frappe.qb.DocType("Stock Ledger Entry")
+		query = (
+			frappe.qb.from_(sle)
+			.select(
+				sle.item_code,
+				sle.warehouse,
+				sle.batch_no,
+				sle.posting_date,
+				fn.Sum(sle.actual_qty).as_("actual_qty"),
+				fn.Sum(sle.stock_value_difference).as_("stock_value_difference"),
+			)
+			.where(
+				(sle.docstatus < 2)
+				& (sle.is_cancelled == 0)
+				& (sle.batch_no != "")
+				& (sle.posting_datetime < posting_datetime)
+				& ((sle.serial_and_batch_bundle.isnull()) | (sle.serial_and_batch_bundle == ""))
+			)
+			.groupby(sle.voucher_no, sle.batch_no, sle.item_code, sle.warehouse)
+		)
+
+		# replicate apply_warehouse_filter inline (avoids extra import cycles)
+		from erpnext.stock.doctype.warehouse.warehouse import apply_warehouse_filter
+		query = apply_warehouse_filter(query, sle, filters)
+
+		if filters.get("warehouse_type") and not filters.get("warehouse"):
+			warehouses = frappe.get_all(
+				"Warehouse",
+				filters={"warehouse_type": filters.warehouse_type, "is_group": 0},
+				pluck="name",
+			)
+			if warehouses:
+				query = query.where(sle.warehouse.isin(warehouses))
+
+		for field in ["item_code", "batch_no", "company"]:
+			if filters.get(field):
+				query = query.where(sle[field] == filters.get(field))
+
+		return query.run(as_dict=True) or []
+
+	bwbh.get_stock_ledger_entries_for_batch_no = _patched_for_batch_no
+
+
 _apply_patches()
 _patch_qb_get_query()
 try:
 	_patch_get_stock_ledgers_batches()
+except Exception:
+	pass
+try:
+	_patch_batch_wise_balance_history_legacy_query()
 except Exception:
 	pass
 
