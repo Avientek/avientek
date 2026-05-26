@@ -557,6 +557,11 @@ doc_events = {
         "validate": [
             "avientek.events.purchase_receipt.validate_supplier_company",
             "avientek.events.purchase_receipt.validate_item_tax_template",
+            # Rahul 2026-05-26 — symmetric fix to preserve_pr_rate on PI.
+            # Lock PR rate to the source PO row to prevent ERPNext's
+            # set_missing_values from recomputing rate at the current
+            # PLE when PO→PR conversion happens days/weeks later.
+            "avientek.events.purchase_receipt.preserve_po_rate",
         ],
         "before_submit": [
             "avientek.events.purchase_receipt.validate_po_workflow_state",

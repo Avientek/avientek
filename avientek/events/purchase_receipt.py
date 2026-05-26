@@ -36,6 +36,62 @@ def validate_item_tax_template(doc, method=None):
 #                 )
 
 
+# Rahul 2026-05-26 — symmetric fix to preserve_pr_rate on Purchase Invoice.
+# ERPNext's make_purchase_receipt (PO → PR) copies rate via get_mapped_doc
+# then set_missing_values re-fetches price_list_rate from Item Price master
+# and re-applies the current plc_conversion_rate. Manual rate overrides
+# entered on the PO are silently lost on PR creation, worst on foreign-
+# currency POs where PLE drifts between PO and PR dates.
+#
+# Fix: on PR validate, for any row that has purchase_order_item set,
+# force pricing fields back to the source PO row's values. Idempotent.
+def preserve_po_rate(doc, method=None):
+    """Lock PR item rate (and pricing fields) to the source PO row.
+
+    Prevents ERPNext's set_missing_values from recalculating rates
+    when PLE drifts between PO and PR dates, especially for foreign-
+    currency transactions.
+
+    Skips returns (is_return=1) — those have separate flows.
+    """
+    if doc.is_return:
+        return
+
+    pricing_fields = [
+        "rate",
+        "price_list_rate",
+        "discount_percentage",
+        "discount_amount",
+        "margin_type",
+        "margin_rate_or_amount",
+        "rate_with_margin",
+        "base_rate",
+        "base_price_list_rate",
+        "base_rate_with_margin",
+        "net_rate",
+        "base_net_rate",
+    ]
+
+    for item in (doc.items or []):
+        # On Purchase Receipt the field that links back to PO is
+        # `purchase_order_item` (the PO Item row name).
+        po_item_name = item.get("purchase_order_item")
+        if not po_item_name:
+            continue
+        po_row = frappe.db.get_value(
+            "Purchase Order Item", po_item_name,
+            pricing_fields, as_dict=True,
+        )
+        if not po_row:
+            continue
+        for k, v in po_row.items():
+            if v is None:
+                continue
+            current = item.get(k)
+            if current != v:
+                item.set(k, v)
+
+
 # ── Server Script: "ADD BATCH BUNDLE PR" ──
 # DocType Event: Purchase Receipt, Before Submit
 def add_batch_bundle_from_intercompany_dn(doc, method=None):
