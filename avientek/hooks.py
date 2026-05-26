@@ -577,6 +577,12 @@ doc_events = {
         "validate": [
             "avientek.events.purchase_invoice.validate_supplier_company",
             "avientek.events.purchase_invoice.validate_item_tax_template",
+            # Rahul 2026-05-26 (GRN-LTD-26-00725): ERPNext's PR→PI
+            # conversion silently re-computes rate from Item Price master
+            # at the current PLE, losing manual rate overrides on the PR.
+            # Worst on foreign-currency PRs where PLE drifts between PR
+            # and PI dates. Lock the PI row's rate to the source PR row.
+            "avientek.events.purchase_invoice.preserve_pr_rate",
         ],
     },
     "Sales Invoice": {

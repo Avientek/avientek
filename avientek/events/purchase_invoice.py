@@ -25,6 +25,64 @@ def validate_item_tax_template(doc, method=None):
     autofill_item_tax_template(doc, required_company=required)
 
 
+# Rahul 2026-05-26 (GRN-LTD-26-00725 / I003892): PR submitted in USD
+# with item rate $60.16 (manual override from buyer-negotiated rate).
+# When PI was generated via "Create > Purchase Invoice" from PR, the
+# item rate flipped to $64.66 and PLE rate changed from 88.7 to 93.
+# Root cause: make_purchase_invoice in ERPNext copies the rate via
+# get_mapped_doc, then set_missing_values runs on the new PI which
+# re-fetches price_list_rate from Item Price master and re-applies the
+# current plc_conversion_rate (PLE). Any manual override on the PR is
+# silently lost — buyer's negotiated rate replaced by master rate
+# recomputed at current PLE.
+#
+# Fix: on PI validate, for any row that has pr_detail set, force the
+# rate and pricing fields back to what the source PR row has stored.
+# Idempotent — re-running yields the same values.
+def preserve_pr_rate(doc, method=None):
+    """Lock PI item rate (and pricing fields) to the source PR row.
+
+    Prevents ERPNext's set_missing_values from recalculating rates
+    when the PLE drifts between PR and PI dates, especially for
+    foreign-currency transactions.
+
+    Skips returns (Debit Notes) — those have separate flows.
+    """
+    if doc.is_return:
+        return
+
+    pricing_fields = [
+        "rate",
+        "price_list_rate",
+        "discount_percentage",
+        "discount_amount",
+        "margin_type",
+        "margin_rate_or_amount",
+        "rate_with_margin",
+        "base_rate",
+        "base_price_list_rate",
+        "base_rate_with_margin",
+        "net_rate",
+        "base_net_rate",
+    ]
+
+    for item in (doc.items or []):
+        if not item.get("pr_detail"):
+            continue
+        pr_row = frappe.db.get_value(
+            "Purchase Receipt Item", item.pr_detail,
+            pricing_fields, as_dict=True,
+        )
+        if not pr_row:
+            continue
+        for k, v in pr_row.items():
+            if v is None:
+                continue
+            current = item.get(k)
+            if current != v:
+                item.set(k, v)
+
+
 @frappe.whitelist()
 def create_payment_request(source_name, target_doc=None, args=None):
     def set_single_reference(source, target):
