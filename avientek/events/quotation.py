@@ -1486,6 +1486,68 @@ def _probability_change_requires_level_2(doc):
     return None
 
 
+def validate_probability_change_approval(doc, method=None):
+    """Sridhar 2026-05-27 (Probability BRD, Jithin/FM approved):
+    enforce that a probability downgrade on a submitted Quotation
+    captures a mandatory reason. The reason is set by the JS popup
+    in public/js/quotation.js BEFORE saving. If the user bypasses
+    the UI (direct API call, server script, etc.) and saves without
+    setting probability_change_reason, this throws.
+
+    Trigger condition is reused from _probability_change_requires_level_2:
+        - new probability < 75% AND it changed from before, OR
+        - probability still at 75% but Expected Closing Date month moved.
+
+    On a triggering save WITH reason set: writes an audit Comment
+    capturing old → new + reason + user, then clears the reason field
+    so the NEXT change requires a fresh reason (the field is a one-shot
+    capture, not a permanent journal).
+    """
+    if doc.is_new() or doc.docstatus != 1:
+        return
+
+    trigger_reason = _probability_change_requires_level_2(doc)
+    if not trigger_reason:
+        return
+
+    change_reason = (doc.get("probability_change_reason") or "").strip()
+    if not change_reason:
+        frappe.throw(
+            _(
+                "Lowering probability requires management approval. "
+                "Please use the popup that appears when you change the "
+                "Probability field — fill in 'Reason for Change' and "
+                "click 'Send for Approval'. ({0})"
+            ).format(trigger_reason),
+            title=_("Reason Required"),
+        )
+
+    # Reason set — record the audit Comment and clear the field for
+    # next time. db_set bypasses the validate cycle so we don't recurse.
+    from frappe.utils import now_datetime, escape_html
+
+    frappe.get_doc({
+        "doctype": "Comment",
+        "comment_type": "Info",
+        "reference_doctype": "Quotation",
+        "reference_name": doc.name,
+        "content": _(
+            "<b>Probability change request</b> by {0} at {1}.<br>"
+            "<b>Change:</b> {2}<br>"
+            "<b>Reason:</b> {3}"
+        ).format(
+            frappe.session.user,
+            now_datetime().strftime("%Y-%m-%d %H:%M"),
+            escape_html(trigger_reason),
+            escape_html(change_reason).replace("\n", "<br>"),
+        ),
+    }).insert(ignore_permissions=True)
+
+    # One-shot reason: clear after capture so next change requires fresh input.
+    # Use direct attribute set so it's persisted via the current save.
+    doc.probability_change_reason = ""
+
+
 @frappe.whitelist()
 def update_special_price(quotation_name, items):
     """Update Special Price on a submitted Quotation.

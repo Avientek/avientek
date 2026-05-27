@@ -267,3 +267,20 @@ avientek.patches.ensure_prf_rejected_cancel_transition
 # Also creates Custom Field revise_reason + Workflow Action Master.
 # Idempotent — re-running drops stale Revise transitions and re-seeds.
 avientek.patches.add_prf_revise_action
+# Sridhar 2026-05-27: Custom Field Quotation-custom_quote_project keeps
+# reappearing after live updates (module=None, not from our app's code
+# or fixtures). One-shot delete here; recurring purge in after_migrate
+# (_purge_custom_quote_project_field) keeps it gone on every migrate.
+avientek.patches.purge_custom_quote_project_field
+# Sridhar 2026-05-27 (Probability BRD, Jithin/FM approved): reverses
+# the earlier lock_quotation_probability_after_submit patch so sales
+# can edit probability on submitted Quotations. Approval gate enforced
+# in avientek.events.quotation.validate_probability_change_approval —
+# downgrades from ≥75% to <75% require a "Reason for Change" captured
+# by the JS popup (public/js/quotation.js).
+avientek.patches.unlock_quotation_probability_after_submit
+# Sridhar 2026-05-27: companion Custom Field for the unlock above —
+# probability_change_reason (Long Text, allow_on_submit=1, read-only).
+# Set by the JS popup, consumed by the server validator which writes
+# an audit Comment and clears the field after capture.
+avientek.patches.add_probability_change_reason_field

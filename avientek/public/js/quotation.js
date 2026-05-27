@@ -2327,3 +2327,100 @@ function show_update_special_price_dialog(frm) {
     // Widen dialog beyond extra-large default for better table readability
     d.$wrapper.find(".modal-dialog").css("max-width", "1100px");
 }
+
+
+// Sridhar 2026-05-27 (Probability BRD, Jithin/FM approved): on a submitted
+// Quotation, when sales lowers `probabilities` from >=75% to <75%, pop a
+// dialog for a mandatory "Reason for Change". Reason is written to the
+// Custom Field probability_change_reason; on save the server validator
+// reads it, writes an audit Comment, and clears the field.
+//
+// If user cancels the popup, the probabilities field is visually reverted
+// to its pre-change value so it matches the persisted state.
+frappe.ui.form.on('Quotation', {
+    probabilities(frm) {
+        // Only intercept on submitted docs
+        if (frm.doc.docstatus !== 1) return;
+
+        const oldRaw = frm.__last_probabilities_snapshot || '';
+        const newRaw = (frm.doc.probabilities || '');
+
+        const pct = (v) => {
+            const n = parseInt(String(v || '').replace('%', '').trim(), 10);
+            return isNaN(n) ? 0 : n;
+        };
+        const oldPct = pct(oldRaw);
+        const newPct = pct(newRaw);
+
+        // Trigger condition: old >= 75 AND new < 75 AND value actually changed
+        if (!(oldPct >= 75 && newPct < 75 && oldRaw !== newRaw)) {
+            frm.__last_probabilities_snapshot = newRaw;
+            return;
+        }
+
+        // Guard against re-triggering during the dialog flow
+        if (frm.__probability_popup_open) return;
+        frm.__probability_popup_open = true;
+
+        const d = new frappe.ui.Dialog({
+            title: __('Probability Downgrade Approval'),
+            fields: [
+                {
+                    fieldname: 'banner',
+                    fieldtype: 'HTML',
+                    options: `<div style="padding:10px 14px;margin-bottom:12px;
+                                 background:#fff3cd;border:1px solid #ffe69c;
+                                 border-radius:6px;color:#664d03;">
+                        <b>${__('Approval required')}</b><br>
+                        ${__('Downgrading probability from')} <b>${frappe.utils.escape_html(oldRaw)}</b>
+                        ${__('to')} <b>${frappe.utils.escape_html(newRaw)}</b>
+                        ${__('on a submitted Quotation requires management approval. Please enter a reason — it will be logged on the Quotation and shown to the approver.')}
+                      </div>`,
+                },
+                {
+                    fieldname: 'reason',
+                    fieldtype: 'Small Text',
+                    label: __('Reason for Change'),
+                    reqd: 1,
+                    description: __('Be specific so the approver understands why the deal probability dropped.'),
+                },
+            ],
+            primary_action_label: __('Send for Approval'),
+            primary_action(values) {
+                const reason = (values.reason || '').trim();
+                if (!reason) {
+                    frappe.throw(__('Reason is required'));
+                    return;
+                }
+                frm.doc.probability_change_reason = reason;
+                frm.refresh_field('probability_change_reason');
+                frm.dirty();
+                frm.__last_probabilities_snapshot = newRaw;
+                d.hide();
+                frm.__probability_popup_open = false;
+                frappe.show_alert({
+                    message: __('Reason captured. Click Save to submit the change for approval.'),
+                    indicator: 'orange',
+                });
+            },
+            secondary_action_label: __('Cancel'),
+            secondary_action() {
+                // Revert the field visually so it matches the persisted state
+                frm.doc.probabilities = oldRaw;
+                frm.refresh_field('probabilities');
+                frm.__last_probabilities_snapshot = oldRaw;
+                d.hide();
+                frm.__probability_popup_open = false;
+            },
+        });
+        d.show();
+    },
+
+    refresh(frm) {
+        // Capture baseline once on load so the change handler can detect
+        // downgrades from the submitted snapshot.
+        if (frm.doc.docstatus === 1 && frm.__last_probabilities_snapshot === undefined) {
+            frm.__last_probabilities_snapshot = frm.doc.probabilities || '';
+        }
+    },
+});

@@ -517,6 +517,11 @@ doc_events = {
             # V3 workflow condition restored in
             # restore_quotation_margin_gate_on_v3_workflow.
             "avientek.events.quotation.validate_margin_approval_required",
+            # Sridhar 2026-05-27 (Probability BRD, Jithin/FM approved):
+            # downgrade of probability on submitted Quotation requires
+            # a mandatory reason captured by the JS popup. Server-side
+            # enforcement catches API / direct-save bypass.
+            "avientek.events.quotation.validate_probability_change_approval",
         ],
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",

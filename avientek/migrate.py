@@ -32,6 +32,22 @@ def after_migrate():
 	# allowed so single-role flows work. The helper + patch file remain in
 	# the repo as historical reference but are no longer auto-invoked.
 	_seed_quotation_approval_v3_workflow()
+	_purge_custom_quote_project_field()
+
+
+def _purge_custom_quote_project_field():
+	"""Sridhar 2026-05-27: Custom Field Quotation-custom_quote_project keeps
+	reappearing after live updates (module=None, not from our app's code or
+	fixtures — likely re-added via Customize Form UI by someone). Deleted once
+	via patch; this after_migrate hook ensures it stays gone on every bench
+	migrate regardless of what re-creates it.
+	"""
+	field = "Quotation-custom_quote_project"
+	if frappe.db.exists("Custom Field", field):
+		frappe.delete_doc("Custom Field", field, ignore_permissions=True, force=True)
+		frappe.db.commit()
+		frappe.clear_cache(doctype="Quotation")
+		print(f"[after_migrate] Purged stale Custom Field {field}")
 
 
 def _sync_payment_voucher_formats():
