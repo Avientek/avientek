@@ -1,4 +1,5 @@
 import frappe
+from frappe import _
 from frappe.utils import flt
 
 
@@ -46,6 +47,64 @@ def after_insert(doc, method=None):
 	_link_addresses_from_lead(doc, lead_name)
 	_link_contacts_from_lead(doc, lead_name)
 	_copy_contact_details_from_lead(doc, lead_name)
+	_link_historical_quotations_from_lead(doc, lead_name)
+
+
+def _link_historical_quotations_from_lead(doc, lead_name):
+	"""Map historical Lead-stage Quotations to the newly created Customer.
+
+	Sridhar 2026-05-27 (Lead Enhancement BRD): when a Lead is converted to
+	a Customer, all Quotations that were originally raised against the
+	Lead must show up on the Customer dashboard. ERPNext stores
+	Quotation.party_name as the Lead ID with quotation_to='Lead'; just
+	flipping these to point at the Customer makes the standard
+	Connections panel surface them on the Customer master.
+
+	Skips cancelled Quotations (docstatus=2). Updates party_name +
+	customer_name + quotation_to. Records an audit Comment on each
+	migrated row so finance can trace why a Quotation's party shifted
+	mid-life.
+
+	Uses frappe.db.set_value with update_modified=False so the Quotation's
+	modified timestamp doesn't change — the Comment is the audit trail.
+	"""
+	historical = frappe.get_all(
+		"Quotation",
+		filters={
+			"quotation_to": "Lead",
+			"party_name": lead_name,
+			"docstatus": ["<", 2],
+		},
+		pluck="name",
+	)
+	if not historical:
+		return
+
+	for q in historical:
+		frappe.db.set_value("Quotation", q, {
+			"quotation_to": "Customer",
+			"party_name": doc.name,
+			"customer_name": doc.customer_name,
+		}, update_modified=False)
+
+		frappe.get_doc({
+			"doctype": "Comment",
+			"comment_type": "Info",
+			"reference_doctype": "Quotation",
+			"reference_name": q,
+			"content": (
+				f"Auto-migrated from Lead {lead_name} on Customer creation "
+				f"({doc.name}). Original party_name was the Lead ID."
+			),
+		}).insert(ignore_permissions=True)
+
+	frappe.msgprint(
+		msg=_(
+			"Linked {0} historical Quotation(s) from Lead {1} to this Customer."
+		).format(len(historical), lead_name),
+		title=_("Historical Quotes Mapped"),
+		indicator="green",
+	)
 
 
 def _link_addresses_from_lead(doc, lead_name):
