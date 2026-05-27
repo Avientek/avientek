@@ -3192,3 +3192,73 @@ frappe.ui.form.on('Payment Request Reference', {
         frm.events.apply_debit_note_styling(frm);
     }
 });
+
+
+// Sridhar 2026-05-27: 'Revise' workflow action on Authorised state.
+// When the approver clicks Revise, intercept the workflow action,
+// pop a dialog for a mandatory reason, persist the reason +
+// audit Comment + notify creator via server, then let the standard
+// workflow apply (Authorised -> Draft).
+frappe.ui.form.on('Payment Request Form', {
+    before_workflow_action(frm) {
+        if (frm.selected_workflow_action !== 'Revise') return;
+
+        return new Promise((resolve, reject) => {
+            const d = new frappe.ui.Dialog({
+                title: __('Send back for Revision'),
+                fields: [
+                    {
+                        fieldname: 'banner',
+                        fieldtype: 'HTML',
+                        options: `<div style="padding:8px 12px;margin-bottom:10px;
+                                     background:#fff3cd;border:1px solid #ffe69c;
+                                     border-radius:4px;color:#664d03;">
+                            <b>${__('Sending this PRF back for revision')}</b><br>
+                            ${__('The creator will be notified with your reason. The document returns to Draft.')}
+                          </div>`,
+                    },
+                    {
+                        fieldname: 'reason',
+                        fieldtype: 'Small Text',
+                        label: __('Reason for Revise'),
+                        reqd: 1,
+                        description: __('Be specific so the creator knows exactly what to fix.'),
+                    },
+                ],
+                primary_action_label: __('Send for Revise'),
+                primary_action(values) {
+                    const reason = (values.reason || '').trim();
+                    if (!reason) {
+                        frappe.throw(__('Reason for Revise is required'));
+                        return;
+                    }
+                    frappe.call({
+                        method: 'avientek.events.prf_revise.send_for_revise',
+                        args: { prf_name: frm.doc.name, reason: reason },
+                        freeze: true,
+                        freeze_message: __('Sending back for revision...'),
+                        callback(r) {
+                            if (r && r.message && r.message.ok) {
+                                d.hide();
+                                resolve();
+                            } else {
+                                d.hide();
+                                reject();
+                            }
+                        },
+                        error() {
+                            d.hide();
+                            reject();
+                        },
+                    });
+                },
+                secondary_action_label: __('Cancel'),
+                secondary_action() {
+                    d.hide();
+                    reject();
+                },
+            });
+            d.show();
+        });
+    },
+});

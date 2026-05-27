@@ -260,3 +260,10 @@ avientek.patches.seed_quotation_restricted_roles
 # re-execute on existing sites. Bridge patch ensures the state +
 # transition exist on the live workflow. Idempotent.
 avientek.patches.ensure_prf_rejected_cancel_transition
+# Sridhar 2026-05-27: Approver on PRF 'Authorised' state had only
+# Approve / Reject / Cancel — no way to send back for corrections.
+# Adds 'Revise' workflow action (Authorised → Draft), driven by a new
+# Avientek Settings table 'prf_revise_roles' (defaults to FM/GM/Director).
+# Also creates Custom Field revise_reason + Workflow Action Master.
+# Idempotent — re-running drops stale Revise transitions and re-seeds.
+avientek.patches.add_prf_revise_action

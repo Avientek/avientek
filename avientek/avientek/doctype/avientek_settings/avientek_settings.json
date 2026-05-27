@@ -21,6 +21,7 @@
   "signature_images",
   "prf_section",
   "issued_bank_edit_roles",
+  "prf_revise_roles",
   "notifications_section",
   "enable_quotation_notifications",
   "enable_workflow_state_notifications",
@@ -131,6 +132,13 @@
    "options": "Avientek Quote Role",
    "label": "Issued Bank Edit Roles",
    "description": "Any user with ANY of these roles can edit the Issued Bank (and Payment Mode) on a Payment Request Form in ANY pre-Released state — Draft, Authorised, Pending L1, Approved L1, Pending L2, Approved L2. Once the PRF transitions to Released the field locks for everyone. The workflow allow_edit rows are regenerated for these roles every time the after_migrate workflow seeder runs, so add a role and run `bench migrate` to apply. Defaults to Finance Controller + System Manager when empty."
+  },
+  {
+   "fieldname": "prf_revise_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quote Role",
+   "label": "PRF Revise Roles",
+   "description": "Any user with ANY of these roles sees the 'Revise' workflow action on a PRF in 'Authorised' state — clicking it routes the document back to 'Draft' for corrections (instead of forcing a Reject). User is prompted for a mandatory reason; creator gets notified. Defaults to Finance Manager + General Manager + Director when empty."
   },
   {
    "fieldname": "notifications_section",
