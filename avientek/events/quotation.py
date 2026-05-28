@@ -1486,29 +1486,85 @@ def _probability_change_requires_level_2(doc):
     return None
 
 
+def _pct_int(v):
+    """Parse '75%' / '75' / None into int."""
+    try:
+        return int(str(v or "").rstrip("%").strip() or 0)
+    except (ValueError, TypeError):
+        return 0
+
+
+def capture_submitted_probability(doc, method=None):
+    """Sridhar 2026-05-28: freeze the probability value at submit time
+    into `submitted_probability` so the post-submit approval popup has
+    a stable baseline for the entire life of the doc — not just the
+    last saved value (which drifts after each downgrade).
+
+    Runs on Quotation.on_submit. Idempotent — only writes if currently
+    empty (re-submits from Cancel+Amend will be handled by the new
+    amendment's own on_submit).
+    """
+    if doc.get("submitted_probability"):
+        return
+    current = doc.get("probabilities") or ""
+    if not current:
+        return
+    doc.db_set("submitted_probability", current, update_modified=False)
+
+
 def validate_probability_change_approval(doc, method=None):
-    """Sridhar 2026-05-27 (Probability BRD, Jithin/FM approved):
+    """Sridhar 2026-05-27/28 (Probability BRD, Jithin/FM approved):
     enforce that a probability downgrade on a submitted Quotation
     captures a mandatory reason. The reason is set by the JS popup
     in public/js/quotation.js BEFORE saving. If the user bypasses
     the UI (direct API call, server script, etc.) and saves without
     setting probability_change_reason, this throws.
 
-    Trigger condition is reused from _probability_change_requires_level_2:
-        - new probability < 75% AND it changed from before, OR
-        - probability still at 75% but Expected Closing Date month moved.
+    Trigger uses the FROZEN `submitted_probability` as baseline
+    (per BRD: "original probability at the time of submission" is
+    the eternal baseline). Sridhar 2026-05-28 bug fix: previous
+    version compared against last-saved value which let post-refresh
+    edits slip through after the first downgrade.
+
+        - If submitted_probability >= 75% AND new value < 75% AND
+          value actually changed → require reason.
+        - If submitted_probability < 75% → all post-submit edits free.
 
     On a triggering save WITH reason set: writes an audit Comment
     capturing old → new + reason + user, then clears the reason field
-    so the NEXT change requires a fresh reason (the field is a one-shot
-    capture, not a permanent journal).
+    so the NEXT change requires a fresh reason.
     """
     if doc.is_new() or doc.docstatus != 1:
         return
 
-    trigger_reason = _probability_change_requires_level_2(doc)
-    if not trigger_reason:
-        return
+    submitted = doc.get("submitted_probability") or ""
+    if not submitted:
+        # Legacy doc with no captured submission value — fall back to
+        # the per-save delta logic (won't catch refresh-then-edit cases
+        # but preserves existing behaviour for old data).
+        trigger_reason = _probability_change_requires_level_2(doc)
+        if not trigger_reason:
+            return
+    else:
+        submitted_pct = _pct_int(submitted)
+        if submitted_pct < 75:
+            # Originally low-prob deal — all edits are free per BRD.
+            return
+        new_pct = _pct_int(doc.get("probabilities") or "")
+        if new_pct >= 75:
+            # New value still in high range — also free per BRD.
+            return
+        # Check value actually changed from current saved (cheap dirty check)
+        try:
+            before = doc.get_doc_before_save()
+        except Exception:
+            before = None
+        if before and (before.get("probabilities") or "") == (doc.get("probabilities") or ""):
+            # No change on this save (e.g., status-only update) — don't fire.
+            return
+        trigger_reason = _("Probability downgraded from submitted value {0} to {1}").format(
+            submitted, doc.get("probabilities") or ""
+        )
 
     change_reason = (doc.get("probability_change_reason") or "").strip()
     if not change_reason:
@@ -1522,8 +1578,6 @@ def validate_probability_change_approval(doc, method=None):
             title=_("Reason Required"),
         )
 
-    # Reason set — record the audit Comment and clear the field for
-    # next time. db_set bypasses the validate cycle so we don't recurse.
     from frappe.utils import now_datetime, escape_html
 
     frappe.get_doc({
@@ -1544,7 +1598,6 @@ def validate_probability_change_approval(doc, method=None):
     }).insert(ignore_permissions=True)
 
     # One-shot reason: clear after capture so next change requires fresh input.
-    # Use direct attribute set so it's persisted via the current save.
     doc.probability_change_reason = ""
 
 

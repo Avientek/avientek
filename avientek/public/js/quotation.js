@@ -2335,14 +2335,25 @@ function show_update_special_price_dialog(frm) {
 // Custom Field probability_change_reason; on save the server validator
 // reads it, writes an audit Comment, and clears the field.
 //
+// Sridhar 2026-05-28 (baseline bug fix): trigger now compares the new
+// value against `submitted_probability` (frozen at submit time) instead
+// of the last saved value. Previous version let post-refresh edits slip
+// through after the first downgrade because the new low value became
+// the baseline. Per BRD: "original probability at the time of submission"
+// is the eternal baseline.
+//
 // If user cancels the popup, the probabilities field is visually reverted
-// to its pre-change value so it matches the persisted state.
+// to the pre-change value so the form matches the persisted state.
 frappe.ui.form.on('Quotation', {
     probabilities(frm) {
         // Only intercept on submitted docs
         if (frm.doc.docstatus !== 1) return;
 
-        const oldRaw = frm.__last_probabilities_snapshot || '';
+        // BASELINE = the probability captured at submit time (never changes).
+        // Falls back to the last-saved snapshot for legacy docs that don't
+        // have submitted_probability backfilled yet.
+        const submitted = (frm.doc.submitted_probability || '').trim();
+        const oldRaw = submitted || frm.__last_probabilities_snapshot || '';
         const newRaw = (frm.doc.probabilities || '');
 
         const pct = (v) => {
@@ -2352,7 +2363,9 @@ frappe.ui.form.on('Quotation', {
         const oldPct = pct(oldRaw);
         const newPct = pct(newRaw);
 
-        // Trigger condition: old >= 75 AND new < 75 AND value actually changed
+        // Trigger condition: submitted >= 75% AND new < 75% AND value actually
+        // changed. Per BRD, originally-low quotes (submitted <75%) get all
+        // post-submit edits for free.
         if (!(oldPct >= 75 && newPct < 75 && oldRaw !== newRaw)) {
             frm.__last_probabilities_snapshot = newRaw;
             return;

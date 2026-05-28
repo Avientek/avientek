@@ -284,3 +284,16 @@ avientek.patches.unlock_quotation_probability_after_submit
 # Set by the JS popup, consumed by the server validator which writes
 # an audit Comment and clears the field after capture.
 avientek.patches.add_probability_change_reason_field
+# Sridhar 2026-05-28 (Probability popup baseline fix): JS popup was
+# comparing against the last saved value, so after the first downgrade
+# the new low value became the baseline and subsequent edits slipped
+# through. Adds frozen `submitted_probability` field set on on_submit
+# and used as the eternal baseline. Backfills existing submitted Quotes
+# with their current probabilities value.
+avientek.patches.add_submitted_probability_field
+# Sridhar 2026-05-28 (Number Card behaviour fixes): Cancellation
+# Requests was type=Custom (clicks went to bare doctype list). Switched
+# to Document Type with workflow_state filter so navigation lands on
+# the filtered list. Open Sales Orders had a Company dynamic filter
+# Sridhar didn't want. Removed it; status pipeline filter stays.
+avientek.patches.resync_avientek_number_cards

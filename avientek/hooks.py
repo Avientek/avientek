@@ -531,6 +531,12 @@ doc_events = {
         ],
         "before_cancel":
             "avientek.api.quotation_high_probability.before_cancel",
+        "on_submit": [
+            # Sridhar 2026-05-28 (Probability BRD popup baseline fix):
+            # freeze the value at submit time so post-submit edits compare
+            # against the ORIGINAL probability, not the last-saved value.
+            "avientek.events.quotation.capture_submitted_probability",
+        ],
         "on_update_after_submit": [
             "avientek.api.quotation_high_probability.on_update_after_submit",
             # Rahul/Sridhar 2026-05-08 — fire notification when probability
