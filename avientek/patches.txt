@@ -332,3 +332,8 @@ avientek.patches.hide_quotation_first_part_number_field
 # Adds 5 Custom Fields: pending_probability_value, _status, _reason,
 # _requested_by, _requested_at. All hidden=1, read_only=1, allow_on_submit=1.
 avientek.patches.add_pending_probability_fields
+# Sridhar 2026-05-29: revert custom_service_items label "Service Items"
+# back to original "Optional Items". The picker-collision UX reason for
+# the rename is now moot (report_hide + JS dedup handle the duplicates).
+# Fieldname stays unchanged — only the display label changes.
+avientek.patches.relabel_quotation_service_items_back_to_optional
