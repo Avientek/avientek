@@ -311,3 +311,11 @@ avientek.patches.resync_avientek_number_cards
 #      involved, no collision. Backfills existing rows.
 avientek.patches.relabel_quotation_service_items
 avientek.patches.add_quotation_first_part_number
+# Sridhar 2026-05-29 (Pick Columns cleanup): even after adding the
+# working Quotation-parent first_item_part_number field, users still
+# saw the two broken "Part Number (Quotation Item)" entries in the
+# Pick Columns dialog (one per child table — Items, Service Items).
+# report_hide=1 on Quotation Item.part_number removes both from
+# Report Builder / Pick Columns while keeping the form-level field
+# editable.
+avientek.patches.hide_quotation_item_part_number_from_picker
