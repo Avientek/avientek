@@ -87,27 +87,19 @@ function _toggle_create_button_visibility(frm) {
     const show = _so_button_conditions_met(frm);
     const _apply = function() {
         try {
-            // Scan the whole page wrapper, not just .page-actions —
-            // Frappe v15 puts the Create button in .standard-actions
-            // or .btn-secondary-group, NOT inside .page-actions
-            // (verified via Sridhar's DevTools diagnostic 2026-05-29).
-            const $candidates = $(frm.page.wrapper || document).find(
-                '.page-head button, .page-head a, ' +
-                '.standard-actions .btn-group, ' +
-                '.btn-secondary-group .btn-group, ' +
-                '.page-actions .btn-group'
-            );
-            $candidates.each(function() {
-                const $el = $(this);
-                const $btn = $el.is('button, a') ? $el : $el.children('button, a').first();
+            // Sridhar's DevTools diagnostic 2026-05-29 confirmed the
+            // Create button DOM path on Frappe v15 / ERPNext:
+            //   button.btn.ellipsis.btn-primary
+            //     parent  : .inner-group-button.show
+            //     grandparent: .custom-actions
+            // Hide the .inner-group-button container so the button
+            // AND its dropdown menu disappear together.
+            $(document).find('.custom-actions .inner-group-button').each(function() {
+                const $group = $(this);
+                const $btn = $group.children('button').first();
                 const txt = ($btn.text() || "").replace(/\s+/g, " ").trim();
                 if (/^Create($|\s|▾)/.test(txt)) {
-                    const $hide = $el.is('.btn-group') ? $el : $el.closest('.btn-group');
-                    if ($hide.length) {
-                        $hide.css('display', show ? '' : 'none');
-                    } else {
-                        $btn.css('display', show ? '' : 'none');
-                    }
+                    $group.css('display', show ? '' : 'none');
                 }
             });
         } catch (e) {}
