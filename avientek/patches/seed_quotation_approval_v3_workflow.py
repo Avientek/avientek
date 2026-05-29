@@ -157,8 +157,17 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         # Frappe's workflow safe_eval (frappe/utils/safe_exec.py
         # WHITELISTED_SAFE_EVAL_GLOBALS) only exposes int/float/round —
         # no flt/cint/max/min, no string methods on attributes.
-        ("Approved",               "Cancel",                "Cancelled",              "All",         1, CANCEL_COND),
-        ("Submitted",              "Cancel",                "Cancelled",              "All",         1, CANCEL_COND),
+        #
+        # Sridhar 2026-05-29: dropped CANCEL_COND on Approved + Submitted
+        # so Cancel is always available in the Actions menu (was hidden
+        # when probability >= 75%). After cancel, Frappe's standard
+        # Delete action works on docstatus=2 docs.
+        ("Approved",               "Cancel",                "Cancelled",              "All",         1, ""),
+        ("Submitted",              "Cancel",                "Cancelled",              "All",         1, ""),
+
+        # Sridhar 2026-05-29: Rejected state needs Cancel too — sales
+        # team wants to clear out rejected quotes by Cancel + Delete.
+        ("Rejected",               "Cancel",                "Cancelled",              "All",         1, ""),
 
         # L1 approver decides on the user's REQUEST FOR UPDATE — this
         # is just permission to edit, single-stage approval is enough
