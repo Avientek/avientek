@@ -87,14 +87,29 @@ function _toggle_create_button_visibility(frm) {
     const show = _so_button_conditions_met(frm);
     const _apply = function() {
         try {
-            $(frm.page.wrapper).find('.page-actions .btn-group, .page-actions .standard-actions .btn-group')
-                .filter(function() {
-                    const $btn = $(this).children('button, a').first();
-                    const txt = ($btn.text() || "").replace(/\s+/g, " ").trim();
-                    // Match "Create", "Create ▾", "+ Create" etc.
-                    return /(^| )Create( ▾)?$/i.test(txt) || txt === __("Create");
-                })
-                .css('display', show ? '' : 'none');
+            // Scan the whole page wrapper, not just .page-actions —
+            // Frappe v15 puts the Create button in .standard-actions
+            // or .btn-secondary-group, NOT inside .page-actions
+            // (verified via Sridhar's DevTools diagnostic 2026-05-29).
+            const $candidates = $(frm.page.wrapper || document).find(
+                '.page-head button, .page-head a, ' +
+                '.standard-actions .btn-group, ' +
+                '.btn-secondary-group .btn-group, ' +
+                '.page-actions .btn-group'
+            );
+            $candidates.each(function() {
+                const $el = $(this);
+                const $btn = $el.is('button, a') ? $el : $el.children('button, a').first();
+                const txt = ($btn.text() || "").replace(/\s+/g, " ").trim();
+                if (/^Create($|\s|▾)/.test(txt)) {
+                    const $hide = $el.is('.btn-group') ? $el : $el.closest('.btn-group');
+                    if ($hide.length) {
+                        $hide.css('display', show ? '' : 'none');
+                    } else {
+                        $btn.css('display', show ? '' : 'none');
+                    }
+                }
+            });
         } catch (e) {}
     };
     _apply();
