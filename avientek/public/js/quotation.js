@@ -69,14 +69,37 @@ function _strip_create_buttons_unless_approved(frm) {
     if (isApproved && is100) { return; }
 
     const _strip = function() {
+        // Try Frappe's API first
         try { frm.remove_custom_button(__("Sales Order"), __("Create")); } catch (e) {}
         try { frm.remove_custom_button(__("Sales Invoice"), __("Create")); } catch (e) {}
+        // Belt-and-braces: directly remove the dropdown li from the
+        // Create group if Frappe's API didn't catch them. Matches the
+        // anchor by exact label text.
+        try {
+            $(frm.page.btn_secondary_group || frm.page.inner_toolbar || document)
+                .find('.dropdown-menu li a, ul li a')
+                .filter(function() {
+                    const t = ($(this).text() || "").trim();
+                    return t === "Sales Order" || t === "Sales Invoice";
+                })
+                .closest("li").remove();
+        } catch (e) {}
+        // Page-wide fallback — covers any other dropdown rendering
+        try {
+            $('.frappe-form .dropdown-menu li a, .page-actions .dropdown-menu li a')
+                .filter(function() {
+                    const t = ($(this).text() || "").trim();
+                    return t === "Sales Order" || t === "Sales Invoice";
+                })
+                .closest("li").remove();
+        } catch (e) {}
     };
     _strip();
     // Delayed re-strip — covers races where Frappe finishes adding
     // standard buttons after our refresh handler runs.
     setTimeout(_strip, 250);
     setTimeout(_strip, 1200);
+    setTimeout(_strip, 2500);
 }
 
 
