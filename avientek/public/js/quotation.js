@@ -86,23 +86,24 @@ function _toggle_create_button_visibility(frm) {
     if (frm.is_new()) { return; }
     const show = _so_button_conditions_met(frm);
     const _apply = function() {
+        // Sridhar 2026-05-29 — exact snippet pattern that worked when
+        // pasted into DevTools (Hidden count: 1, Create button gone).
+        // Conditional show/hide based on `show` flag rather than the
+        // unconditional hide in the test snippet, but the selector +
+        // text matching are identical.
+        let hidden = 0;
         try {
-            // Sridhar's DevTools diagnostic 2026-05-29 confirmed the
-            // Create button DOM path on Frappe v15 / ERPNext:
-            //   button.btn.ellipsis.btn-primary
-            //     parent  : .inner-group-button.show
-            //     grandparent: .custom-actions
-            // Hide the .inner-group-button container so the button
-            // AND its dropdown menu disappear together.
-            $(document).find('.custom-actions .inner-group-button').each(function() {
-                const $group = $(this);
-                const $btn = $group.children('button').first();
+            $('.custom-actions .inner-group-button').each(function() {
+                const $g = $(this);
+                const $btn = $g.children('button').first();
                 const txt = ($btn.text() || "").replace(/\s+/g, " ").trim();
                 if (/^Create($|\s|▾)/.test(txt)) {
-                    $group.css('display', show ? '' : 'none');
+                    $g.css('display', show ? '' : 'none');
+                    if (!show) { hidden++; }
                 }
             });
         } catch (e) {}
+        return hidden;
     };
     _apply();
     setTimeout(_apply, 250);
