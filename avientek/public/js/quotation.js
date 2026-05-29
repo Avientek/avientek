@@ -108,6 +108,33 @@ function _toggle_create_button_visibility(frm) {
     _apply();
     setTimeout(_apply, 250);
     setTimeout(_apply, 1200);
+    setTimeout(_apply, 2500);
+    setTimeout(_apply, 5000);
+
+    // Sridhar 2026-05-29 round 7: setTimeouts catch most cases but
+    // can miss if Frappe adds the Create button after our 5s window
+    // (slow loads, deferred renders). Install a MutationObserver once
+    // per form that re-applies the hide whenever .custom-actions
+    // children change. Self-destructs after the form unloads.
+    if (!frm.__avk_create_observer) {
+        const target = document.querySelector('.custom-actions') || document.body;
+        try {
+            const obs = new MutationObserver(function() {
+                // Re-evaluate show flag in case workflow_state changed
+                const _show = _so_button_conditions_met(frm);
+                $('.custom-actions .inner-group-button').each(function() {
+                    const $g = $(this);
+                    const $btn = $g.children('button').first();
+                    const txt = ($btn.text() || "").replace(/\s+/g, " ").trim();
+                    if (/^Create($|\s|▾)/.test(txt)) {
+                        $g.css('display', _show ? '' : 'none');
+                    }
+                });
+            });
+            obs.observe(target, { childList: true, subtree: true });
+            frm.__avk_create_observer = obs;
+        } catch (e) {}
+    }
 }
 
 
