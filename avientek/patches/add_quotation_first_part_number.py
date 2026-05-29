@@ -40,6 +40,7 @@ def execute():
 		cf.allow_on_submit = 1
 		cf.in_list_view = 0
 		cf.in_standard_filter = 0
+		cf.hidden = 1  # Sridhar 2026-05-30: hide from form; Pick Columns still surfaces it
 		cf.insert_after = "title"
 		cf.description = (
 			"All items' part numbers comma-joined, copied automatically on save. "
@@ -63,6 +64,15 @@ def execute():
 				update_modified=False,
 			)
 			print(f"[add_quotation_first_part_number] Upgraded {FIELD} fieldtype Data → Small Text")
+
+		# Sridhar 2026-05-30: hide from form. Pick Columns still surfaces
+		# it (Frappe lists every field in the picker regardless of hidden).
+		if not frappe.db.get_value("Custom Field", FIELD, "hidden"):
+			frappe.db.set_value(
+				"Custom Field", FIELD, "hidden", 1,
+				update_modified=False,
+			)
+			print(f"[add_quotation_first_part_number] Set {FIELD}.hidden=1")
 
 	# Backfill: comma-joined ALL part numbers (deduped, ordered by idx)
 	# using GROUP_CONCAT. Rebuild for every Quotation — cheap enough at
