@@ -319,3 +319,9 @@ avientek.patches.add_quotation_first_part_number
 # Report Builder / Pick Columns while keeping the form-level field
 # editable.
 avientek.patches.hide_quotation_item_part_number_from_picker
+# Sridhar 2026-05-29: the Quotation-level first_item_part_number Custom
+# Field was added with hidden=0 originally. Later updated to hidden=1
+# in 16b193e but the existing add_quotation_first_part_number patch
+# was already in tabPatch Log on existing sites so the update never
+# re-ran. This separate bridge patch forces hidden=1 idempotently.
+avientek.patches.hide_quotation_first_part_number_field
