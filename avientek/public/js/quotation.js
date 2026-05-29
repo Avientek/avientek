@@ -2543,14 +2543,14 @@ frappe.ui.form.on('Quotation', {
                 }
                 d.hide();
                 frm.__probability_popup_open = false;
-                frm.__last_probabilities_snapshot = newRaw;
 
-                // Sridhar 2026-05-29: bypass frm.save() — full save
-                // triggers ERPNext's recalc which causes price_list_rate
-                // float drift (22000 → 21999.999986) and the submit-lock
-                // validator blocks. Call a focused server endpoint that
-                // updates ONLY probability + writes audit Comment via raw
-                // DB writes. No calc, no submit-lock check.
+                // Sridhar 2026-05-29 (BRD-faithful): the server captures
+                // the request in pending_probability_* fields without
+                // touching `probabilities` itself. We revert the form
+                // value to oldRaw immediately (BRD: "field should
+                // visually revert to its previous high value until
+                // approval is officially granted") and reload to pull
+                // the pending state for the approver banner.
                 frappe.call({
                     method: 'avientek.events.quotation.submit_probability_change',
                     args: {
@@ -2559,23 +2559,35 @@ frappe.ui.form.on('Quotation', {
                         reason: reason,
                     },
                     freeze: true,
-                    freeze_message: __('Submitting probability change...'),
+                    freeze_message: __('Submitting probability change for approval...'),
                 }).then((r) => {
-                    if (r && r.message && r.message.ok) {
-                        // Reload to clear dirty state and pick up fresh
-                        // server values (probability + audit Comment).
-                        frm.reload_doc().then(() => {
-                            frappe.show_alert({
-                                message: __('Probability change saved and submitted for approval.'),
-                                indicator: 'green',
-                            });
-                        });
-                    } else {
+                    if (!(r && r.message && r.message.ok)) {
                         frappe.show_alert({
                             message: __('Unexpected response from server.'),
                             indicator: 'red',
                         });
+                        return;
                     }
+                    // BRD visual revert: restore old high value in the
+                    // form before reload, so there's no flicker showing
+                    // the requested low value.
+                    frm.doc.probabilities = oldRaw;
+                    frm.refresh_field('probabilities');
+                    frm.__last_probabilities_snapshot = oldRaw;
+
+                    frm.reload_doc().then(() => {
+                        if (r.message.no_approval_needed) {
+                            frappe.show_alert({
+                                message: __('Probability updated.'),
+                                indicator: 'green',
+                            });
+                        } else {
+                            frappe.show_alert({
+                                message: __('Probability change submitted. Awaiting approver. Field reverted to current value until approved.'),
+                                indicator: 'orange',
+                            });
+                        }
+                    });
                 }).catch(() => {
                     // Revert visually so user can retry
                     frm.doc.probabilities = oldRaw;
@@ -2602,5 +2614,109 @@ frappe.ui.form.on('Quotation', {
         if (frm.doc.docstatus === 1 && frm.__last_probabilities_snapshot === undefined) {
             frm.__last_probabilities_snapshot = frm.doc.probabilities || '';
         }
+
+        // Sridhar 2026-05-29 (BRD): show pending probability change banner
+        // + Approve/Reject buttons for users with the approver role
+        // (quote_l2_approver_roles via Avientek Settings).
+        _render_pending_probability_ui(frm);
     },
 });
+
+
+function _render_pending_probability_ui(frm) {
+    if (frm.is_new() || frm.doc.docstatus !== 1) return;
+    if ((frm.doc.pending_probability_status || '') !== 'Pending') return;
+
+    const oldVal = frm.doc.probabilities || '';
+    const newVal = frm.doc.pending_probability_value || '';
+    const reason = frm.doc.pending_probability_reason || '';
+    const requestedBy = frm.doc.pending_probability_requested_by || '(unknown)';
+    const requestedAt = frm.doc.pending_probability_requested_at || '';
+
+    // Orange dashboard banner. set_headline replaces any previous one
+    // so this stays the dominant message until cleared on next refresh.
+    frm.dashboard.set_headline(
+        __(
+            '<b>Pending Probability Change</b><br>'
+            + 'Requested: <b>{0}</b> &rarr; <b>{1}</b><br>'
+            + 'By <b>{2}</b> at <b>{3}</b><br>'
+            + 'Reason: {4}',
+            [
+                frappe.utils.escape_html(oldVal),
+                frappe.utils.escape_html(newVal),
+                frappe.utils.escape_html(requestedBy),
+                frappe.utils.escape_html(String(requestedAt).slice(0, 16).replace('T', ' ')),
+                frappe.utils.escape_html(reason).replace(/\n/g, '<br>'),
+            ]
+        ),
+        'orange'
+    );
+
+    // Approve/Reject buttons only for users with the configured role.
+    frappe.call({
+        method: 'avientek.events.quotation.can_approve_probability_change',
+        args: { quotation_name: frm.doc.name },
+    }).then((r) => {
+        if (!(r && r.message)) return;
+
+        frm.add_custom_button(__('Approve Probability Change'), () => {
+            frappe.confirm(
+                __('Approve change of probability from {0} to {1}?', [oldVal, newVal]),
+                () => {
+                    frappe.call({
+                        method: 'avientek.events.quotation.approve_probability_change',
+                        args: { quotation_name: frm.doc.name },
+                        freeze: true,
+                        freeze_message: __('Approving...'),
+                    }).then((rr) => {
+                        if (rr && rr.message && rr.message.ok) {
+                            frm.reload_doc().then(() => {
+                                frappe.show_alert({
+                                    message: __('Probability change approved.'),
+                                    indicator: 'green',
+                                });
+                            });
+                        }
+                    });
+                }
+            );
+        }, __('Probability'));
+
+        frm.add_custom_button(__('Reject Probability Change'), () => {
+            const rd = new frappe.ui.Dialog({
+                title: __('Reject Probability Change'),
+                fields: [
+                    {
+                        fieldname: 'rejection_reason',
+                        fieldtype: 'Small Text',
+                        label: __('Rejection Reason'),
+                        reqd: 1,
+                        description: __('Explain why this downgrade is not approved.'),
+                    },
+                ],
+                primary_action_label: __('Reject'),
+                primary_action(v) {
+                    const rr = (v.rejection_reason || '').trim();
+                    if (!rr) { frappe.throw(__('Rejection reason is required')); return; }
+                    rd.hide();
+                    frappe.call({
+                        method: 'avientek.events.quotation.reject_probability_change',
+                        args: { quotation_name: frm.doc.name, rejection_reason: rr },
+                        freeze: true,
+                        freeze_message: __('Rejecting...'),
+                    }).then((rrx) => {
+                        if (rrx && rrx.message && rrx.message.ok) {
+                            frm.reload_doc().then(() => {
+                                frappe.show_alert({
+                                    message: __('Probability change rejected.'),
+                                    indicator: 'red',
+                                });
+                            });
+                        }
+                    });
+                },
+            });
+            rd.show();
+        }, __('Probability'));
+    });
+}

@@ -1656,22 +1656,43 @@ def validate_probability_change_approval(doc, method=None):
         )
 
 
+def _get_probability_revision_approver_roles():
+    """Return the configured list of roles allowed to approve / reject
+    pending probability changes. Reuses `quote_l2_approver_roles` per
+    Sridhar 2026-05-29 — same senior management group that approves
+    high-margin quotes also approves probability downgrades.
+
+    Returns empty list if not configured.
+    """
+    try:
+        settings = frappe.get_single("Avientek Settings")
+    except Exception:
+        return []
+    return [r.role for r in (settings.get("quote_l2_approver_roles") or []) if r.get("role")]
+
+
+def _user_can_approve_probability(user=None):
+    user = user or frappe.session.user
+    if user == "Administrator":
+        return True
+    user_roles = set(frappe.get_roles(user))
+    approver_roles = set(_get_probability_revision_approver_roles())
+    if not approver_roles:
+        # Fallback to System Manager when not configured (admin only)
+        return "System Manager" in user_roles
+    return bool(user_roles & approver_roles)
+
+
 @frappe.whitelist()
 def submit_probability_change(quotation_name, new_probability, reason):
-    """Update probability + write audit Comment without running the full
-    save pipeline.
+    """Sridhar 2026-05-29 (BRD-faithful): capture a pending probability
+    change request without modifying the actual `probabilities` field.
+    The probability field stays at its current (high) value — only the
+    pending_probability_* fields are populated. The L2 approver then
+    decides via approve_probability_change / reject_probability_change.
 
-    Sridhar 2026-05-29: frm.save() from the popup triggered ERPNext's
-    full recalc → price_list_rate float drift (22000.0 →
-    21999.99998617344) → ERPNext's submit-lock validator rejected the
-    save. Net result: form stuck at "Not Saved", reason persisted in
-    field, no audit Comment written.
-
-    This endpoint bypasses the doc save entirely. Updates only
-    `probabilities` via frappe.db.set_value (raw DB), writes the audit
-    Comment, returns success. Server-side enforcement of the trigger
-    conditions (submitted_probability ≥ 75% AND new < 75%) is in here
-    so the popup-flow can't be tricked into auto-approving an upgrade.
+    Trigger conditions:
+      submitted_probability >= 75% AND new_probability < 75%
     """
     if not quotation_name:
         frappe.throw(_("Quotation name is required."))
@@ -1679,16 +1700,22 @@ def submit_probability_change(quotation_name, new_probability, reason):
     if not reason:
         frappe.throw(_("Reason is required."))
 
-    # Pull current state directly from DB — avoids loading the full doc
     row = frappe.db.get_value(
         "Quotation", quotation_name,
-        ["docstatus", "submitted_probability", "probabilities"],
+        ["docstatus", "submitted_probability", "probabilities",
+         "pending_probability_status"],
         as_dict=True,
     )
     if not row:
         frappe.throw(_("Quotation {0} not found.").format(quotation_name))
     if row.docstatus != 1:
-        frappe.throw(_("Quote must be submitted to change probability."))
+        frappe.throw(_("Quote must be submitted to request a probability change."))
+
+    if row.pending_probability_status == "Pending":
+        frappe.throw(
+            _("This Quotation already has a Pending probability change. "
+              "Wait for the approver to act on it before requesting another.")
+        )
 
     submitted = (row.submitted_probability or "").strip()
     if not submitted:
@@ -1697,9 +1724,9 @@ def submit_probability_change(quotation_name, new_probability, reason):
     submitted_pct = _pct_int(submitted)
     new_pct = _pct_int(new_probability)
 
-    if submitted_pct < 75:
-        # Per BRD: originally-low quotes get free edits, no approval needed.
-        # If user reached the popup, JS condition was wrong — just update.
+    if submitted_pct < 75 or new_pct >= 75:
+        # No approval needed per BRD — update directly and skip the
+        # pending-request flow.
         frappe.db.set_value(
             "Quotation", quotation_name, "probabilities", new_probability,
             update_modified=True,
@@ -1707,20 +1734,20 @@ def submit_probability_change(quotation_name, new_probability, reason):
         frappe.db.commit()
         return {"ok": True, "no_approval_needed": True}
 
-    if new_pct >= 75:
-        # Same — both within high range, no approval needed.
-        frappe.db.set_value(
-            "Quotation", quotation_name, "probabilities", new_probability,
-            update_modified=True,
-        )
-        frappe.db.commit()
-        return {"ok": True, "no_approval_needed": True}
-
-    # Real downgrade — update probability + write audit Comment.
+    # Real downgrade — capture as pending request. probability field
+    # stays at its current high value (BRD: "field should visually
+    # revert to its previous high value until approval is granted").
     from frappe.utils import now_datetime, escape_html
 
     frappe.db.set_value(
-        "Quotation", quotation_name, "probabilities", new_probability,
+        "Quotation", quotation_name,
+        {
+            "pending_probability_value": new_probability,
+            "pending_probability_status": "Pending",
+            "pending_probability_reason": reason,
+            "pending_probability_requested_by": frappe.session.user,
+            "pending_probability_requested_at": now_datetime(),
+        },
         update_modified=True,
     )
 
@@ -1731,9 +1758,10 @@ def submit_probability_change(quotation_name, new_probability, reason):
             "reference_doctype": "Quotation",
             "reference_name": quotation_name,
             "content": _(
-                "<b>Probability change request</b> by {0} at {1}.<br>"
-                "<b>Change:</b> {2} → {3}<br>"
-                "<b>Reason:</b> {4}"
+                "<b>Probability change requested</b> by {0} at {1}.<br>"
+                "<b>Requested:</b> {2} → {3}<br>"
+                "<b>Reason:</b> {4}<br>"
+                "<i>Awaiting L2 approver.</i>"
             ).format(
                 frappe.session.user,
                 now_datetime().strftime("%Y-%m-%d %H:%M"),
@@ -1748,67 +1776,224 @@ def submit_probability_change(quotation_name, new_probability, reason):
             title="submit_prob_change Comment",
         )
 
-    # Sridhar 2026-05-29: on a real downgrade, the quote must go back
-    # through the full approval workflow. Following the precedent in
-    # patches/fix_post_v3_quotation_margin_leaks.py:61-71 which routes
-    # leaked submitted quotes back to draft via raw SQL.
-    #
-    # The V3 workflow has NO transition from "Approved" back to "Draft"
-    # or "Pending For Approval" — confirmed by Workflow tool audit. So
-    # apply_workflow() can't do this. Direct DB write is the established
-    # pattern.
-    #
-    # We flip docstatus 1 → 0 + workflow_state → "Draft". The user then
-    # manually clicks "Send for Approval" to route the doc through
-    # Pending For Approval → L1 → L2 → Approved.
-    #
-    # WARNING: if this quote has linked Sales Orders, they will become
-    # orphaned (parent docstatus=0). The probability_downgrade flow is
-    # primarily for quotes that haven't been converted to SO yet —
-    # client typically downgrades when the deal slips, before order.
-    # Adding linked-SO safety check via frappe.db.exists.
-    linked_so = frappe.db.exists(
-        "Sales Order Item", {"prevdoc_docname": quotation_name, "docstatus": 1}
-    )
-    if linked_so:
-        frappe.throw(
-            _("Cannot downgrade probability — this Quotation has a linked Sales Order. "
-              "Cancel the Sales Order first if you need to re-route the quote.")
+    # Send ToDo + email to all L2 approvers
+    try:
+        _notify_probability_approvers(quotation_name, submitted, new_probability, reason)
+    except Exception as e:
+        frappe.log_error(
+            message=f"notify approvers failed for {quotation_name}: {e}",
+            title="submit_prob_change notify",
         )
+
+    frappe.db.commit()
+    return {"ok": True, "pending": True}
+
+
+def _notify_probability_approvers(quotation_name, old_val, new_val, reason):
+    approver_roles = _get_probability_revision_approver_roles()
+    if not approver_roles:
+        return
+
+    # Find all users who have ANY of the approver roles
+    users = frappe.db.sql(
+        """SELECT DISTINCT u.name, u.email
+           FROM `tabUser` u
+           INNER JOIN `tabHas Role` hr ON hr.parent = u.name
+           WHERE hr.role IN %(roles)s
+             AND u.enabled = 1
+             AND u.name NOT IN ('Administrator', 'Guest')""",
+        {"roles": tuple(approver_roles)},
+        as_dict=True,
+    )
+
+    todo_desc = _(
+        "Probability change requested on {0}: {1} → {2}. Reason: {3}"
+    ).format(quotation_name, old_val, new_val, reason)
+
+    for u in users:
+        try:
+            frappe.get_doc({
+                "doctype": "ToDo",
+                "allocated_to": u["name"],
+                "reference_type": "Quotation",
+                "reference_name": quotation_name,
+                "description": todo_desc,
+                "priority": "High",
+                "status": "Open",
+            }).insert(ignore_permissions=True)
+        except Exception:
+            pass
+
+
+@frappe.whitelist()
+def approve_probability_change(quotation_name):
+    """Approve a pending probability change. probabilities = pending_value,
+    pending fields cleared, audit Comment written. Caller must hold a
+    role from `quote_l2_approver_roles` (or be Administrator).
+    """
+    if not quotation_name:
+        frappe.throw(_("Quotation name is required."))
+
+    if not _user_can_approve_probability():
+        frappe.throw(_("You do not have permission to approve probability changes."))
+
+    row = frappe.db.get_value(
+        "Quotation", quotation_name,
+        ["pending_probability_value", "pending_probability_status",
+         "pending_probability_reason", "pending_probability_requested_by",
+         "probabilities"],
+        as_dict=True,
+    )
+    if not row:
+        frappe.throw(_("Quotation {0} not found.").format(quotation_name))
+    if row.pending_probability_status != "Pending":
+        frappe.throw(_("No pending probability change to approve."))
+
+    new_val = row.pending_probability_value
+    old_val = row.probabilities
+
+    from frappe.utils import now_datetime, escape_html
 
     frappe.db.set_value(
         "Quotation", quotation_name,
         {
-            "docstatus": 0,
-            "workflow_state": "Draft",
-            "status": "Draft",
+            "probabilities": new_val,
+            "pending_probability_status": "Approved",
+            # Keep the requested-by + at + reason fields populated as audit
+            # record. The status flip is enough to identify resolved.
         },
         update_modified=True,
     )
 
-    # Workflow audit Comment (matches Frappe's apply_workflow() history
-    # convention so the change shows in the Workflow History panel).
-    try:
-        frappe.get_doc({
-            "doctype": "Comment",
-            "comment_type": "Workflow",
-            "reference_doctype": "Quotation",
-            "reference_name": quotation_name,
-            "content": _("Reset to Draft for re-approval (probability downgraded from {0} to {1}).").format(
-                submitted, new_probability
-            ),
-        }).insert(ignore_permissions=True)
-    except Exception as e:
-        frappe.log_error(
-            message=f"submit_probability_change Workflow Comment failed for {quotation_name}: {e}",
-            title="submit_prob_change wf_comment",
-        )
+    # Reset pending fields (status stays "Approved" briefly for audit;
+    # clear the request body so it doesn't show as a stale banner)
+    frappe.db.set_value(
+        "Quotation", quotation_name,
+        {
+            "pending_probability_value": "",
+            "pending_probability_reason": "",
+            "pending_probability_requested_by": "",
+        },
+        update_modified=False,
+    )
 
-    # Note: probability_change_reason field is NOT updated here — the
-    # popup-flow doesn't write it via this path. The validator-flow
-    # (validate_probability_change_approval) does, and clears after capture.
+    frappe.get_doc({
+        "doctype": "Comment",
+        "comment_type": "Info",
+        "reference_doctype": "Quotation",
+        "reference_name": quotation_name,
+        "content": _(
+            "<b>Probability change APPROVED</b> by {0} at {1}.<br>"
+            "<b>Changed:</b> {2} → {3}<br>"
+            "<b>Originally requested by:</b> {4}"
+        ).format(
+            frappe.session.user,
+            now_datetime().strftime("%Y-%m-%d %H:%M"),
+            escape_html(old_val or ""),
+            escape_html(new_val or ""),
+            escape_html(row.pending_probability_requested_by or "(unknown)"),
+        ),
+    }).insert(ignore_permissions=True)
+
+    # Close any open ToDos against this Quotation for probability requests
+    try:
+        frappe.db.sql(
+            """UPDATE `tabToDo` SET status='Closed'
+               WHERE reference_type='Quotation'
+                 AND reference_name=%s
+                 AND status='Open'
+                 AND description LIKE %%s""",
+            (quotation_name, "%Probability change requested%"),
+        )
+    except Exception:
+        pass
+
     frappe.db.commit()
-    return {"ok": True, "audit_logged": True, "workflow_reset": "Draft"}
+    return {"ok": True, "approved": True, "new_value": new_val}
+
+
+@frappe.whitelist()
+def reject_probability_change(quotation_name, rejection_reason=""):
+    """Reject a pending probability change. Pending fields cleared,
+    probabilities stays at current value, audit Comment written.
+    """
+    if not quotation_name:
+        frappe.throw(_("Quotation name is required."))
+
+    if not _user_can_approve_probability():
+        frappe.throw(_("You do not have permission to reject probability changes."))
+
+    rejection_reason = (rejection_reason or "").strip()
+    if not rejection_reason:
+        frappe.throw(_("Rejection reason is required."))
+
+    row = frappe.db.get_value(
+        "Quotation", quotation_name,
+        ["pending_probability_value", "pending_probability_status",
+         "pending_probability_reason", "pending_probability_requested_by",
+         "probabilities"],
+        as_dict=True,
+    )
+    if not row:
+        frappe.throw(_("Quotation {0} not found.").format(quotation_name))
+    if row.pending_probability_status != "Pending":
+        frappe.throw(_("No pending probability change to reject."))
+
+    from frappe.utils import now_datetime, escape_html
+
+    frappe.db.set_value(
+        "Quotation", quotation_name,
+        {
+            "pending_probability_status": "Rejected",
+            "pending_probability_value": "",
+            "pending_probability_reason": "",
+            "pending_probability_requested_by": "",
+        },
+        update_modified=True,
+    )
+
+    frappe.get_doc({
+        "doctype": "Comment",
+        "comment_type": "Info",
+        "reference_doctype": "Quotation",
+        "reference_name": quotation_name,
+        "content": _(
+            "<b>Probability change REJECTED</b> by {0} at {1}.<br>"
+            "<b>Rejected request:</b> {2} → {3}<br>"
+            "<b>Rejection reason:</b> {4}<br>"
+            "<b>Originally requested by:</b> {5}"
+        ).format(
+            frappe.session.user,
+            now_datetime().strftime("%Y-%m-%d %H:%M"),
+            escape_html(row.probabilities or ""),
+            escape_html(row.pending_probability_value or ""),
+            escape_html(rejection_reason).replace("\n", "<br>"),
+            escape_html(row.pending_probability_requested_by or "(unknown)"),
+        ),
+    }).insert(ignore_permissions=True)
+
+    try:
+        frappe.db.sql(
+            """UPDATE `tabToDo` SET status='Closed'
+               WHERE reference_type='Quotation'
+                 AND reference_name=%s
+                 AND status='Open'
+                 AND description LIKE %%s""",
+            (quotation_name, "%Probability change requested%"),
+        )
+    except Exception:
+        pass
+
+    frappe.db.commit()
+    return {"ok": True, "rejected": True}
+
+
+@frappe.whitelist()
+def can_approve_probability_change(quotation_name=None):
+    """Cheap helper for the JS to ask whether the current user can show
+    the Approve / Reject buttons. Returns boolean.
+    """
+    return _user_can_approve_probability()
 
 
 @frappe.whitelist()
