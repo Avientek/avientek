@@ -57,7 +57,11 @@ function _strip_create_buttons_unless_approved(frm) {
     if (frm.is_new() || frm.doc.docstatus !== 1) { return; }
     if ((frappe.user_roles || []).indexOf("System Manager") >= 0) { return; }
 
-    const APPROVED_STATES = new Set(["Approved", "Approved for Update"]);
+    // Sridhar 2026-05-29 client confirmation: only strict "Approved"
+    // counts. Dropped "Approved for Update" — even if a quote is in
+    // post-approval edit mode, SO button stays hidden until the new
+    // value is re-approved and lands back in "Approved" state.
+    const APPROVED_STATES = new Set(["Approved"]);
     const isApproved = APPROVED_STATES.has(frm.doc.workflow_state || "");
 
     // Probability lives in EITHER `probabilities` (Data, "100%") OR
