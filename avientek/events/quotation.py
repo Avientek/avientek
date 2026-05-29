@@ -1748,11 +1748,67 @@ def submit_probability_change(quotation_name, new_probability, reason):
             title="submit_prob_change Comment",
         )
 
+    # Sridhar 2026-05-29: on a real downgrade, the quote must go back
+    # through the full approval workflow. Following the precedent in
+    # patches/fix_post_v3_quotation_margin_leaks.py:61-71 which routes
+    # leaked submitted quotes back to draft via raw SQL.
+    #
+    # The V3 workflow has NO transition from "Approved" back to "Draft"
+    # or "Pending For Approval" — confirmed by Workflow tool audit. So
+    # apply_workflow() can't do this. Direct DB write is the established
+    # pattern.
+    #
+    # We flip docstatus 1 → 0 + workflow_state → "Draft". The user then
+    # manually clicks "Send for Approval" to route the doc through
+    # Pending For Approval → L1 → L2 → Approved.
+    #
+    # WARNING: if this quote has linked Sales Orders, they will become
+    # orphaned (parent docstatus=0). The probability_downgrade flow is
+    # primarily for quotes that haven't been converted to SO yet —
+    # client typically downgrades when the deal slips, before order.
+    # Adding linked-SO safety check via frappe.db.exists.
+    linked_so = frappe.db.exists(
+        "Sales Order Item", {"prevdoc_docname": quotation_name, "docstatus": 1}
+    )
+    if linked_so:
+        frappe.throw(
+            _("Cannot downgrade probability — this Quotation has a linked Sales Order. "
+              "Cancel the Sales Order first if you need to re-route the quote.")
+        )
+
+    frappe.db.set_value(
+        "Quotation", quotation_name,
+        {
+            "docstatus": 0,
+            "workflow_state": "Draft",
+            "status": "Draft",
+        },
+        update_modified=True,
+    )
+
+    # Workflow audit Comment (matches Frappe's apply_workflow() history
+    # convention so the change shows in the Workflow History panel).
+    try:
+        frappe.get_doc({
+            "doctype": "Comment",
+            "comment_type": "Workflow",
+            "reference_doctype": "Quotation",
+            "reference_name": quotation_name,
+            "content": _("Reset to Draft for re-approval (probability downgraded from {0} to {1}).").format(
+                submitted, new_probability
+            ),
+        }).insert(ignore_permissions=True)
+    except Exception as e:
+        frappe.log_error(
+            message=f"submit_probability_change Workflow Comment failed for {quotation_name}: {e}",
+            title="submit_prob_change wf_comment",
+        )
+
     # Note: probability_change_reason field is NOT updated here — the
     # popup-flow doesn't write it via this path. The validator-flow
     # (validate_probability_change_approval) does, and clears after capture.
     frappe.db.commit()
-    return {"ok": True, "audit_logged": True}
+    return {"ok": True, "audit_logged": True, "workflow_reset": "Draft"}
 
 
 @frappe.whitelist()
