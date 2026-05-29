@@ -47,7 +47,13 @@ function _so_button_conditions_met(frm) {
     const isApproved = (frm.doc.workflow_state || "") === "Approved";
     const probRaw = (frm.doc.probabilities || "").toString().replace("%", "").trim();
     const probNum = parseInt(probRaw || frm.doc.probability || 0, 10) || 0;
-    return isApproved && (probNum === 100);
+    const has100 = (probNum === 100);
+    // Sridhar 2026-05-29: also block Create→Sales Order when there's
+    // a pending probability change. The visual probability is back at
+    // 100% so the basic gate passes, but if L2 approver hasn't acted
+    // yet we shouldn't let sales push to SO.
+    const hasPendingProb = (frm.doc.pending_probability_status || "") === "Pending";
+    return isApproved && has100 && !hasPendingProb;
 }
 
 
@@ -2664,10 +2670,10 @@ function _render_pending_probability_ui(frm) {
                     "as user:", frappe.session.user);
         if (!can) return;
 
-        // Sridhar 2026-05-29: standalone buttons (no group) so they're
-        // immediately visible next to GST / Update Special Price etc.
-        // Marked primary-style for emphasis via the `green` class.
-        frm.add_custom_button(__('✓ Approve Probability Change'), () => {
+        // Sridhar 2026-05-29: revert to a single "Probability" dropdown
+        // with Approve / Reject inside — less visually intrusive than two
+        // big standalone colored buttons.
+        frm.add_custom_button(__('Approve'), () => {
             frappe.confirm(
                 __('Approve change of probability from {0} to {1}?', [oldVal, newVal]),
                 () => {
@@ -2688,13 +2694,9 @@ function _render_pending_probability_ui(frm) {
                     });
                 }
             );
-        }).addClass('btn-success').css({
-            'background-color': '#28a745',
-            'color': 'white',
-            'border-color': '#28a745',
-        });
+        }, __('Probability'));
 
-        frm.add_custom_button(__('✗ Reject Probability Change'), () => {
+        frm.add_custom_button(__('Reject'), () => {
             const rd = new frappe.ui.Dialog({
                 title: __('Reject Probability Change'),
                 fields: [
@@ -2729,10 +2731,6 @@ function _render_pending_probability_ui(frm) {
                 },
             });
             rd.show();
-        }).addClass('btn-danger').css({
-            'background-color': '#dc3545',
-            'color': 'white',
-            'border-color': '#dc3545',
-        });
+        }, __('Probability'));
     });
 }
