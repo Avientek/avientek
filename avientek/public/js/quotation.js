@@ -2543,13 +2543,28 @@ frappe.ui.form.on('Quotation', {
                 }
                 frm.doc.probability_change_reason = reason;
                 frm.refresh_field('probability_change_reason');
-                frm.dirty();
                 frm.__last_probabilities_snapshot = newRaw;
                 d.hide();
                 frm.__probability_popup_open = false;
-                frappe.show_alert({
-                    message: __('Reason captured. Click Save to submit the change for approval.'),
-                    indicator: 'orange',
+
+                // Sridhar 2026-05-29: auto-save after Send for Approval
+                // so the user doesn't have to click Update manually.
+                // Server validator picks up the reason, writes audit
+                // Comment, clears the field, persists the new value.
+                frm.save().then(() => {
+                    frappe.show_alert({
+                        message: __('Probability change saved and submitted for approval.'),
+                        indicator: 'green',
+                    });
+                }).catch((err) => {
+                    // If save fails (validation etc.) leave form dirty
+                    // so user can fix and retry. Keep the reason in the
+                    // field so they don't have to re-enter it.
+                    frm.dirty();
+                    frappe.show_alert({
+                        message: __('Save failed — review errors and click Update to retry.'),
+                        indicator: 'red',
+                    });
                 });
             },
             secondary_action_label: __('Cancel'),
