@@ -100,3 +100,63 @@ function setup_brand_list_click(listview, doctype) {
 		},
 	});
 }
+
+
+// Sridhar 2026-05-29: Frappe v15 picker dialog doesn't honor `report_hide=1`
+// on child-table fields. Hide the two broken "Part Number" entries (under
+// Items and Service Items sections) from the Pick Columns dialog with a JS
+// MutationObserver. The Quotation-parent "Part Number" (first_item_part_number)
+// stays visible — it's a separate field on the parent doctype.
+(function _hide_broken_part_number_picker_entries() {
+	if (window.__avk_pick_columns_observer) return;
+	const observer = new MutationObserver(function(mutations) {
+		for (const m of mutations) {
+			for (const node of m.addedNodes) {
+				if (node.nodeType !== 1) continue;
+				const el = node.classList && node.classList.contains("modal-dialog")
+					? node
+					: node.querySelector && node.querySelector(".modal-dialog");
+				if (el) _filter_pick_columns(el);
+			}
+		}
+	});
+	observer.observe(document.body, { childList: true, subtree: true });
+	window.__avk_pick_columns_observer = observer;
+
+	function _filter_pick_columns(modalEl) {
+		setTimeout(function() {
+			const title = modalEl.querySelector(".modal-title");
+			if (!title) return;
+			if (title.textContent.trim().toLowerCase().indexOf("pick columns") < 0) return;
+			// Only act on Quotation report view
+			const route = (frappe.get_route && frappe.get_route()) || [];
+			const onQuotation = route.indexOf("Quotation") >= 0;
+			if (!onQuotation) return;
+
+			// Hide checkbox rows where the section header above contains
+			// "(Quotation Item)" AND the label is "Part Number".
+			const checkboxes = modalEl.querySelectorAll(".checkbox, .frappe-control[data-fieldtype='Check']");
+			checkboxes.forEach(function(cb) {
+				const labelEl = cb.querySelector("label") || cb.querySelector(".label-area");
+				if (!labelEl) return;
+				if (labelEl.textContent.trim() !== "Part Number") return;
+				// Walk up to find the nearest preceding heading/section header
+				let cur = cb;
+				let header = null;
+				for (let i = 0; i < 40 && cur; i++) {
+					cur = cur.previousElementSibling || (cur.parentElement && cur.parentElement.previousElementSibling) || null;
+					if (!cur) break;
+					if (cur.tagName === "H6" || cur.tagName === "H5" ||
+					    cur.classList.contains("section-head") ||
+					    cur.classList.contains("text-muted")) {
+						header = cur;
+						break;
+					}
+				}
+				if (header && /\(Quotation Item\)/i.test(header.textContent)) {
+					cb.style.display = "none";
+				}
+			});
+		}, 100);
+	}
+})();
