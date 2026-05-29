@@ -42,18 +42,45 @@ function _user_is_whitelisted_for_high_prob() {
     return _HIGH_PROB_WHITELIST.some(r => roles.indexOf(r) !== -1);
 }
 
+function _so_button_conditions_met(frm) {
+    if (frm.is_new()) { return false; }
+    const isApproved = (frm.doc.workflow_state || "") === "Approved";
+    const probRaw = (frm.doc.probabilities || "").toString().replace("%", "").trim();
+    const probNum = parseInt(probRaw || frm.doc.probability || 0, 10) || 0;
+    return isApproved && (probNum === 100);
+}
+
+
+function _install_so_button_interceptor(frm) {
+    // Sridhar 2026-05-29 round 4: previous DOM-based strip didn't work
+    // because Frappe v15 renders Create-dropdown items LAZILY (only on
+    // dropdown open). My setTimeout strip kept finding 0 elements in
+    // the DOM. New approach: monkey-patch frm.add_custom_button so the
+    // SO/SI buttons NEVER get registered when conditions aren't met.
+    // Installed once per form via the `setup` event so it's in place
+    // before ERPNext's refresh handler tries to add the button.
+    if (frm.__avk_so_intercept_installed) return;
+    frm.__avk_so_intercept_installed = true;
+
+    const orig_add = frm.add_custom_button.bind(frm);
+    frm.add_custom_button = function(label, action, group) {
+        const labelStr = (typeof label === "string") ? label : ((label && label.toString) ? label.toString() : "");
+        const groupStr = (typeof group === "string") ? group : ((group && group.toString) ? group.toString() : "");
+        const blocked = (labelStr === __("Sales Order") || labelStr === __("Sales Invoice"))
+                        && (groupStr === __("Create") || groupStr === "Create");
+        if (blocked && !_so_button_conditions_met(frm)) {
+            // Silently skip — caller's button is never registered.
+            return;
+        }
+        return orig_add(label, action, group);
+    };
+}
+
+
 function _strip_create_buttons_unless_approved(frm) {
-    // Sridhar 2026-05-24..29: strict gate on Create→Sales Order +
-    // Create→Sales Invoice. Both must match:
-    //   - workflow_state = "Approved" (strict only — drop "Approved for Update")
-    //   - probabilities = 100%
-    //
-    // Sridhar 2026-05-29 (round 3) — strict for ALL users:
-    //   - System Manager bypass DROPPED — admins also see hidden button
-    //   - docstatus check DROPPED — Pending For Approval drafts
-    //     (docstatus=0) on amended quotes were still showing SO option
-    //   - Strip runs immediately + at 250ms + 1200ms to defeat any race
-    //     where another hook re-adds the button after our refresh
+    // Legacy reactive strip — kept as a safety net for any code path
+    // that bypasses the add_custom_button interceptor. The interceptor
+    // is the primary defence.
     if (frm.is_new()) { return; }
 
     const APPROVED_STATES = new Set(["Approved"]);
@@ -137,18 +164,23 @@ function _apply_high_probability_lock(frm) {
 
 frappe.ui.form.on('Quotation', {
 
+    setup(frm) {
+        // Sridhar 2026-05-29 round 4: install the add_custom_button
+        // interceptor BEFORE any refresh fires. Frappe v15 renders
+        // Create-dropdown items lazily so any reactive DOM strip races
+        // and finds zero elements. Intercepting at registration time
+        // means SO/SI never enter the button cache.
+        _install_so_button_interceptor(frm);
+    },
+
     refresh(frm) {
         _load_high_prob_role_config().then(() => {
             _apply_high_probability_lock(frm);
         });
-        // Sridhar 2026-05-24: block "Create → Sales Order" + "Create → Sales
-        // Invoice" until the V3 workflow lands the doc in Approved /
-        // Approved for Update. Frappe adds those buttons on docstatus=1
-        // regardless of workflow_state, so a quote in Submitted /
-        // Pending For Approval / Pending L2 Approval would otherwise
-        // let the creator skip the audit chain. ERPNext re-adds the
-        // buttons on every refresh, so we strip them on every refresh
-        // when state is not in the approved set.
+        // Defensive safety net — the setup-time interceptor is the
+        // primary defence, but if any code path bypasses it (e.g., a
+        // future Client Script using a different button API) this
+        // reactive strip catches the leak.
         _strip_create_buttons_unless_approved(frm);
     },
 
