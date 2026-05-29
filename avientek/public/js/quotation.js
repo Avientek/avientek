@@ -77,10 +77,38 @@ function _install_so_button_interceptor(frm) {
 }
 
 
+function _toggle_create_button_visibility(frm) {
+    // Sridhar 2026-05-29 round 5: instead of trying to remove individual
+    // items from the lazy-rendered Create dropdown, hide the whole
+    // Create button when conditions aren't met. The Create button is
+    // ALWAYS in the DOM (not lazy), so this works reliably regardless
+    // of Frappe's render timing.
+    if (frm.is_new()) { return; }
+    const show = _so_button_conditions_met(frm);
+    const _apply = function() {
+        try {
+            $(frm.page.wrapper).find('.page-actions .btn-group, .page-actions .standard-actions .btn-group')
+                .filter(function() {
+                    const $btn = $(this).children('button, a').first();
+                    const txt = ($btn.text() || "").replace(/\s+/g, " ").trim();
+                    // Match "Create", "Create ▾", "+ Create" etc.
+                    return /(^| )Create( ▾)?$/i.test(txt) || txt === __("Create");
+                })
+                .css('display', show ? '' : 'none');
+        } catch (e) {}
+    };
+    _apply();
+    setTimeout(_apply, 250);
+    setTimeout(_apply, 1200);
+}
+
+
 function _strip_create_buttons_unless_approved(frm) {
-    // Legacy reactive strip — kept as a safety net for any code path
-    // that bypasses the add_custom_button interceptor. The interceptor
-    // is the primary defence.
+    // Round-4 legacy interceptor still removes the SO/SI custom-button
+    // registration as a defensive secondary layer. The primary defence
+    // is now _toggle_create_button_visibility which hides the whole
+    // Create dropdown trigger when conditions aren't met.
+    _toggle_create_button_visibility(frm);
     if (frm.is_new()) { return; }
 
     const APPROVED_STATES = new Set(["Approved"]);
