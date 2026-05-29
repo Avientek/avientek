@@ -13,6 +13,7 @@
   "quote_approval_role",
   "quote_approver_roles",
   "quote_l2_approver_roles",
+  "probability_approver_roles",
   "quote_high_prob_column_break",
   "quote_high_prob_creator_role",
   "quote_creator_roles",
@@ -25,6 +26,7 @@
   "notifications_section",
   "enable_quotation_notifications",
   "enable_workflow_state_notifications",
+  "enable_probability_change_emails",
   "restrict_notifications_to_workflow_participants"
  ],
  "fields": [
@@ -81,6 +83,13 @@
    "options": "Avientek Quote Role",
    "label": "Level 2 Approval Roles",
    "description": "Any user with ANY of these roles can perform LEVEL 2 approvals — second stage of the L1→L2 chain (Approve Level 2 / Approve Cancellation Level 2). OR-logic. If empty, the L1 approver pool is reused for L2 (single-stage fallback)."
+  },
+  {
+   "fieldname": "probability_approver_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quote Role",
+   "label": "Probability Approver Roles",
+   "description": "Any user with ANY of these roles can approve or reject a Pending Probability Change request on a submitted Quotation (per Probability BRD: downgrade from ≥75% to <75% requires management approval). OR-logic. If empty, falls back to Level 2 Approval Roles."
   },
   {
    "fieldname": "quote_high_prob_column_break",
@@ -159,6 +168,13 @@
    "fieldtype": "Check",
    "label": "Enable Workflow-State Notifications",
    "description": "Phase 2 opt-in. When ON, transitions to Pending For Approval / Pending L2 Approval / Approved / Rejected create ToDos for the relevant users and send templated emails (routed by Sales Person → User Permission match per BRD). ToDos are created regardless of the master email switch."
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_probability_change_emails",
+   "fieldtype": "Check",
+   "label": "Enable Probability Change Emails",
+   "description": "When ON, sending a Probability Change Request triggers an email to all configured Probability Approvers, and Approve / Reject decisions email the original requester. When OFF, ToDos are still created but no emails are sent. Independent of the other notification switches above."
   },
   {
    "default": "1",

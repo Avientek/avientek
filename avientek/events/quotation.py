@@ -1658,17 +1658,30 @@ def validate_probability_change_approval(doc, method=None):
 
 def _get_probability_revision_approver_roles():
     """Return the configured list of roles allowed to approve / reject
-    pending probability changes. Reuses `quote_l2_approver_roles` per
-    Sridhar 2026-05-29 — same senior management group that approves
-    high-margin quotes also approves probability downgrades.
+    pending probability changes.
 
-    Returns empty list if not configured.
+    Sridhar 2026-05-29 (round 2): use the dedicated
+    `probability_approver_roles` field on Avientek Settings. Falls back
+    to `quote_l2_approver_roles` if the dedicated field is empty, then
+    to empty list (caller defaults to System Manager only).
     """
     try:
         settings = frappe.get_single("Avientek Settings")
     except Exception:
         return []
+    roles = [r.role for r in (settings.get("probability_approver_roles") or []) if r.get("role")]
+    if roles:
+        return roles
     return [r.role for r in (settings.get("quote_l2_approver_roles") or []) if r.get("role")]
+
+
+def _emails_enabled():
+    try:
+        return bool(frappe.db.get_single_value(
+            "Avientek Settings", "enable_probability_change_emails"
+        ))
+    except Exception:
+        return False
 
 
 def _user_can_approve_probability(user=None):
@@ -1794,7 +1807,6 @@ def _notify_probability_approvers(quotation_name, old_val, new_val, reason):
     if not approver_roles:
         return
 
-    # Find all users who have ANY of the approver roles
     users = frappe.db.sql(
         """SELECT DISTINCT u.name, u.email
            FROM `tabUser` u
@@ -1810,6 +1822,7 @@ def _notify_probability_approvers(quotation_name, old_val, new_val, reason):
         "Probability change requested on {0}: {1} → {2}. Reason: {3}"
     ).format(quotation_name, old_val, new_val, reason)
 
+    requester = frappe.session.user
     for u in users:
         try:
             frappe.get_doc({
@@ -1823,6 +1836,102 @@ def _notify_probability_approvers(quotation_name, old_val, new_val, reason):
             }).insert(ignore_permissions=True)
         except Exception:
             pass
+
+    if not _emails_enabled():
+        return
+
+    recipients = [u["email"] for u in users if u.get("email")]
+    if not recipients:
+        return
+
+    try:
+        site_url = frappe.utils.get_url()
+        subject = _("Probability change approval needed — {0}").format(quotation_name)
+        body = _(
+            "<p>Hi,</p>"
+            "<p>A probability change request needs your review on Quotation "
+            "<a href=\"{site}/app/quotation/{quote}\"><b>{quote}</b></a>.</p>"
+            "<p><b>Requested by:</b> {by}<br>"
+            "<b>Change:</b> {old} → {new}<br>"
+            "<b>Reason:</b> {reason}</p>"
+            "<p>Open the quote and click <b>Probability → Approve</b> or "
+            "<b>Probability → Reject</b> to act on this request.</p>"
+        ).format(
+            site=site_url, quote=quotation_name, by=requester,
+            old=frappe.utils.escape_html(old_val),
+            new=frappe.utils.escape_html(new_val),
+            reason=frappe.utils.escape_html(reason).replace("\n", "<br>"),
+        )
+        frappe.sendmail(
+            recipients=recipients, subject=subject, message=body,
+            reference_doctype="Quotation", reference_name=quotation_name,
+            now=True,
+        )
+    except Exception as e:
+        frappe.log_error(
+            message=f"prob change request email failed for {quotation_name}: {e}",
+            title="prob_change request email",
+        )
+
+
+def _email_requester_decision(quotation_name, decision, old_val, new_val, requester, extra=""):
+    """decision: 'approved' or 'rejected'."""
+    if not _emails_enabled():
+        return
+    if not requester:
+        return
+    email = frappe.db.get_value("User", requester, "email") or requester
+    if not email:
+        return
+
+    site_url = frappe.utils.get_url()
+    if decision == "approved":
+        subject = _("Probability change APPROVED — {0}").format(quotation_name)
+        body = _(
+            "<p>Hi,</p>"
+            "<p>Your probability change request on Quotation "
+            "<a href=\"{site}/app/quotation/{quote}\"><b>{quote}</b></a> "
+            "has been <b style=\"color:#28a745\">APPROVED</b>.</p>"
+            "<p>The Quotation probability is now <b>{new}</b> (was <b>{old}</b>).</p>"
+            "<p>Approved by: {actor} at {ts}.</p>"
+        ).format(
+            site=site_url, quote=quotation_name,
+            old=frappe.utils.escape_html(old_val),
+            new=frappe.utils.escape_html(new_val),
+            actor=frappe.session.user,
+            ts=frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M"),
+        )
+    else:
+        subject = _("Probability change REJECTED — {0}").format(quotation_name)
+        body = _(
+            "<p>Hi,</p>"
+            "<p>Your probability change request on Quotation "
+            "<a href=\"{site}/app/quotation/{quote}\"><b>{quote}</b></a> "
+            "has been <b style=\"color:#dc3545\">REJECTED</b>.</p>"
+            "<p>The probability stays at <b>{old}</b>; your requested value <b>{new}</b> "
+            "will NOT be applied.</p>"
+            "<p>Rejection reason:<br>{extra}</p>"
+            "<p>Rejected by: {actor} at {ts}.</p>"
+        ).format(
+            site=site_url, quote=quotation_name,
+            old=frappe.utils.escape_html(old_val),
+            new=frappe.utils.escape_html(new_val),
+            extra=frappe.utils.escape_html(extra).replace("\n", "<br>"),
+            actor=frappe.session.user,
+            ts=frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M"),
+        )
+
+    try:
+        frappe.sendmail(
+            recipients=[email], subject=subject, message=body,
+            reference_doctype="Quotation", reference_name=quotation_name,
+            now=True,
+        )
+    except Exception as e:
+        frappe.log_error(
+            message=f"prob change decision email failed for {quotation_name}: {e}",
+            title="prob_change decision email",
+        )
 
 
 @frappe.whitelist()
@@ -1908,6 +2017,16 @@ def approve_probability_change(quotation_name):
     except Exception:
         pass
 
+    # Email the original requester about the decision
+    try:
+        _email_requester_decision(
+            quotation_name, "approved",
+            old_val=old_val, new_val=new_val,
+            requester=row.pending_probability_requested_by,
+        )
+    except Exception:
+        pass
+
     frappe.db.commit()
     return {"ok": True, "approved": True, "new_value": new_val}
 
@@ -1980,6 +2099,18 @@ def reject_probability_change(quotation_name, rejection_reason=""):
                  AND status='Open'
                  AND description LIKE %%s""",
             (quotation_name, "%Probability change requested%"),
+        )
+    except Exception:
+        pass
+
+    # Email the original requester about the rejection
+    try:
+        _email_requester_decision(
+            quotation_name, "rejected",
+            old_val=row.probabilities,
+            new_val=row.pending_probability_value,
+            requester=row.pending_probability_requested_by,
+            extra=rejection_reason,
         )
     except Exception:
         pass
