@@ -2657,9 +2657,17 @@ function _render_pending_probability_ui(frm) {
         method: 'avientek.events.quotation.can_approve_probability_change',
         args: { quotation_name: frm.doc.name },
     }).then((r) => {
-        if (!(r && r.message)) return;
+        const can = r && r.message;
+        // Surface diagnostic in console — helps Sridhar see WHY buttons
+        // didn't appear for a given user.
+        console.log("[avk] can approve probability change:", can,
+                    "as user:", frappe.session.user);
+        if (!can) return;
 
-        frm.add_custom_button(__('Approve Probability Change'), () => {
+        // Sridhar 2026-05-29: standalone buttons (no group) so they're
+        // immediately visible next to GST / Update Special Price etc.
+        // Marked primary-style for emphasis via the `green` class.
+        frm.add_custom_button(__('✓ Approve Probability Change'), () => {
             frappe.confirm(
                 __('Approve change of probability from {0} to {1}?', [oldVal, newVal]),
                 () => {
@@ -2680,9 +2688,13 @@ function _render_pending_probability_ui(frm) {
                     });
                 }
             );
-        }, __('Probability'));
+        }).addClass('btn-success').css({
+            'background-color': '#28a745',
+            'color': 'white',
+            'border-color': '#28a745',
+        });
 
-        frm.add_custom_button(__('Reject Probability Change'), () => {
+        frm.add_custom_button(__('✗ Reject Probability Change'), () => {
             const rd = new frappe.ui.Dialog({
                 title: __('Reject Probability Change'),
                 fields: [
@@ -2717,6 +2729,10 @@ function _render_pending_probability_ui(frm) {
                 },
             });
             rd.show();
-        }, __('Probability'));
+        }).addClass('btn-danger').css({
+            'background-color': '#dc3545',
+            'color': 'white',
+            'border-color': '#dc3545',
+        });
     });
 }
