@@ -1253,20 +1253,29 @@ def validate_total_discount(doc, method):
 
 
 def copy_first_item_part_number(doc, method=None):
-    """Sridhar/Rahul 2026-05-29: surface the first item row's part_number
-    onto the Quotation parent so it can be added as a clean column in
-    Report View without hitting the (Quotation, Quotation Item) child-
-    table column collision.
+    """Sridhar/Rahul 2026-05-29 (updated 2026-05-29 evening): surface the
+    item rows' part_number onto the Quotation parent so Report View can
+    use a clean parent-level column instead of hitting the
+    (Quotation, Quotation Item) child-table collision between `items`
+    and `custom_service_items`.
 
-    Runs on before_save. Reads items[0].part_number and writes it to
-    the parent `first_item_part_number` Custom Field. Empty string if
-    no rows or no part_number on the first row.
+    Updated to join ALL items' part numbers with comma (was first-only)
+    per Sridhar's go-ahead. Empty rows skipped, dedup-preserving order.
+    Field fieldtype switched from Data to Small Text live on prod.
+
+    Fieldname stays `first_item_part_number` for historical compatibility
+    with the API-created Custom Field. Label remains "Part Number".
     """
     items = list(doc.get("items") or [])
-    new_val = ""
-    if items:
-        first = items[0]
-        new_val = (first.get("part_number") or "") or ""
+    seen = set()
+    parts = []
+    for row in items:
+        pn = (row.get("part_number") or "").strip()
+        if not pn or pn in seen:
+            continue
+        seen.add(pn)
+        parts.append(pn)
+    new_val = ", ".join(parts)
     current = doc.get("first_item_part_number") or ""
     if current != new_val:
         doc.first_item_part_number = new_val
