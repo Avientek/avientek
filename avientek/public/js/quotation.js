@@ -43,24 +43,19 @@ function _user_is_whitelisted_for_high_prob() {
 }
 
 function _strip_create_buttons_unless_approved(frm) {
-    // Sridhar 2026-05-24: hide Create→Sales Order + Create→Sales
-    // Invoice buttons unless the V3 workflow has landed the quote in
-    // Approved or Approved for Update.
+    // Sridhar 2026-05-24..29: strict gate on Create→Sales Order +
+    // Create→Sales Invoice. Both must match:
+    //   - workflow_state = "Approved" (strict only — drop "Approved for Update")
+    //   - probabilities = 100%
     //
-    // Sridhar 2026-05-29 client BRD update: the button should ALSO
-    // require probabilities = 100% (not just Approved state). Both
-    // conditions must match — Approved state alone is not enough.
-    //
-    // Frappe adds these buttons on every refresh based purely on
-    // docstatus=1, so we have to strip on every refresh too. System
-    // Manager bypass keeps admin escape hatch open.
-    if (frm.is_new() || frm.doc.docstatus !== 1) { return; }
-    if ((frappe.user_roles || []).indexOf("System Manager") >= 0) { return; }
+    // Sridhar 2026-05-29 (round 3) — strict for ALL users:
+    //   - System Manager bypass DROPPED — admins also see hidden button
+    //   - docstatus check DROPPED — Pending For Approval drafts
+    //     (docstatus=0) on amended quotes were still showing SO option
+    //   - Strip runs immediately + at 250ms + 1200ms to defeat any race
+    //     where another hook re-adds the button after our refresh
+    if (frm.is_new()) { return; }
 
-    // Sridhar 2026-05-29 client confirmation: only strict "Approved"
-    // counts. Dropped "Approved for Update" — even if a quote is in
-    // post-approval edit mode, SO button stays hidden until the new
-    // value is re-approved and lands back in "Approved" state.
     const APPROVED_STATES = new Set(["Approved"]);
     const isApproved = APPROVED_STATES.has(frm.doc.workflow_state || "");
 
@@ -73,12 +68,15 @@ function _strip_create_buttons_unless_approved(frm) {
 
     if (isApproved && is100) { return; }
 
-    try {
-        frm.remove_custom_button(__("Sales Order"), __("Create"));
-    } catch (e) {}
-    try {
-        frm.remove_custom_button(__("Sales Invoice"), __("Create"));
-    } catch (e) {}
+    const _strip = function() {
+        try { frm.remove_custom_button(__("Sales Order"), __("Create")); } catch (e) {}
+        try { frm.remove_custom_button(__("Sales Invoice"), __("Create")); } catch (e) {}
+    };
+    _strip();
+    // Delayed re-strip — covers races where Frappe finishes adding
+    // standard buttons after our refresh handler runs.
+    setTimeout(_strip, 250);
+    setTimeout(_strip, 1200);
 }
 
 
