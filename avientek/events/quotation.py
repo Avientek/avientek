@@ -1657,6 +1657,105 @@ def validate_probability_change_approval(doc, method=None):
 
 
 @frappe.whitelist()
+def submit_probability_change(quotation_name, new_probability, reason):
+    """Update probability + write audit Comment without running the full
+    save pipeline.
+
+    Sridhar 2026-05-29: frm.save() from the popup triggered ERPNext's
+    full recalc → price_list_rate float drift (22000.0 →
+    21999.99998617344) → ERPNext's submit-lock validator rejected the
+    save. Net result: form stuck at "Not Saved", reason persisted in
+    field, no audit Comment written.
+
+    This endpoint bypasses the doc save entirely. Updates only
+    `probabilities` via frappe.db.set_value (raw DB), writes the audit
+    Comment, returns success. Server-side enforcement of the trigger
+    conditions (submitted_probability ≥ 75% AND new < 75%) is in here
+    so the popup-flow can't be tricked into auto-approving an upgrade.
+    """
+    if not quotation_name:
+        frappe.throw(_("Quotation name is required."))
+    reason = (reason or "").strip()
+    if not reason:
+        frappe.throw(_("Reason is required."))
+
+    # Pull current state directly from DB — avoids loading the full doc
+    row = frappe.db.get_value(
+        "Quotation", quotation_name,
+        ["docstatus", "submitted_probability", "probabilities"],
+        as_dict=True,
+    )
+    if not row:
+        frappe.throw(_("Quotation {0} not found.").format(quotation_name))
+    if row.docstatus != 1:
+        frappe.throw(_("Quote must be submitted to change probability."))
+
+    submitted = (row.submitted_probability or "").strip()
+    if not submitted:
+        frappe.throw(_("No submitted_probability captured on this quote — cannot validate change."))
+
+    submitted_pct = _pct_int(submitted)
+    new_pct = _pct_int(new_probability)
+
+    if submitted_pct < 75:
+        # Per BRD: originally-low quotes get free edits, no approval needed.
+        # If user reached the popup, JS condition was wrong — just update.
+        frappe.db.set_value(
+            "Quotation", quotation_name, "probabilities", new_probability,
+            update_modified=True,
+        )
+        frappe.db.commit()
+        return {"ok": True, "no_approval_needed": True}
+
+    if new_pct >= 75:
+        # Same — both within high range, no approval needed.
+        frappe.db.set_value(
+            "Quotation", quotation_name, "probabilities", new_probability,
+            update_modified=True,
+        )
+        frappe.db.commit()
+        return {"ok": True, "no_approval_needed": True}
+
+    # Real downgrade — update probability + write audit Comment.
+    from frappe.utils import now_datetime, escape_html
+
+    frappe.db.set_value(
+        "Quotation", quotation_name, "probabilities", new_probability,
+        update_modified=True,
+    )
+
+    try:
+        frappe.get_doc({
+            "doctype": "Comment",
+            "comment_type": "Info",
+            "reference_doctype": "Quotation",
+            "reference_name": quotation_name,
+            "content": _(
+                "<b>Probability change request</b> by {0} at {1}.<br>"
+                "<b>Change:</b> {2} → {3}<br>"
+                "<b>Reason:</b> {4}"
+            ).format(
+                frappe.session.user,
+                now_datetime().strftime("%Y-%m-%d %H:%M"),
+                escape_html(submitted),
+                escape_html(new_probability),
+                escape_html(reason).replace("\n", "<br>"),
+            ),
+        }).insert(ignore_permissions=True)
+    except Exception as e:
+        frappe.log_error(
+            message=f"submit_probability_change Comment failed for {quotation_name}: {e}",
+            title="submit_prob_change Comment",
+        )
+
+    # Note: probability_change_reason field is NOT updated here — the
+    # popup-flow doesn't write it via this path. The validator-flow
+    # (validate_probability_change_approval) does, and clears after capture.
+    frappe.db.commit()
+    return {"ok": True, "audit_logged": True}
+
+
+@frappe.whitelist()
 def update_special_price(quotation_name, items):
     """Update Special Price on a submitted Quotation.
     Recalculates COGS and margin but keeps Selling Price / Rate / Amount unchanged."""

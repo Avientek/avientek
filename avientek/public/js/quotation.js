@@ -2541,30 +2541,46 @@ frappe.ui.form.on('Quotation', {
                     frappe.throw(__('Reason is required'));
                     return;
                 }
-                frm.doc.probability_change_reason = reason;
-                frm.refresh_field('probability_change_reason');
-                frm.__last_probabilities_snapshot = newRaw;
                 d.hide();
                 frm.__probability_popup_open = false;
+                frm.__last_probabilities_snapshot = newRaw;
 
-                // Sridhar 2026-05-29: auto-save after Send for Approval
-                // so the user doesn't have to click Update manually.
-                // Server validator picks up the reason, writes audit
-                // Comment, clears the field, persists the new value.
-                frm.save().then(() => {
-                    frappe.show_alert({
-                        message: __('Probability change saved and submitted for approval.'),
-                        indicator: 'green',
-                    });
-                }).catch((err) => {
-                    // If save fails (validation etc.) leave form dirty
-                    // so user can fix and retry. Keep the reason in the
-                    // field so they don't have to re-enter it.
-                    frm.dirty();
-                    frappe.show_alert({
-                        message: __('Save failed — review errors and click Update to retry.'),
-                        indicator: 'red',
-                    });
+                // Sridhar 2026-05-29: bypass frm.save() — full save
+                // triggers ERPNext's recalc which causes price_list_rate
+                // float drift (22000 → 21999.999986) and the submit-lock
+                // validator blocks. Call a focused server endpoint that
+                // updates ONLY probability + writes audit Comment via raw
+                // DB writes. No calc, no submit-lock check.
+                frappe.call({
+                    method: 'avientek.events.quotation.submit_probability_change',
+                    args: {
+                        quotation_name: frm.doc.name,
+                        new_probability: newRaw,
+                        reason: reason,
+                    },
+                    freeze: true,
+                    freeze_message: __('Submitting probability change...'),
+                }).then((r) => {
+                    if (r && r.message && r.message.ok) {
+                        // Reload to clear dirty state and pick up fresh
+                        // server values (probability + audit Comment).
+                        frm.reload_doc().then(() => {
+                            frappe.show_alert({
+                                message: __('Probability change saved and submitted for approval.'),
+                                indicator: 'green',
+                            });
+                        });
+                    } else {
+                        frappe.show_alert({
+                            message: __('Unexpected response from server.'),
+                            indicator: 'red',
+                        });
+                    }
+                }).catch(() => {
+                    // Revert visually so user can retry
+                    frm.doc.probabilities = oldRaw;
+                    frm.refresh_field('probabilities');
+                    frm.__last_probabilities_snapshot = oldRaw;
                 });
             },
             secondary_action_label: __('Cancel'),
