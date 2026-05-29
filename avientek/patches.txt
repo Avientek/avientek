@@ -297,3 +297,17 @@ avientek.patches.add_submitted_probability_field
 # the filtered list. Open Sales Orders had a Company dynamic filter
 # Sridhar didn't want. Removed it; status pipeline filter stays.
 avientek.patches.resync_avientek_number_cards
+# Sridhar/Rahul 2026-05-29 (Quote Report Part Number column bug):
+# Quotation has two child tables both pointing to Quotation Item
+# (`items` and `custom_service_items`), so Report View's Pick Columns
+# shows two indistinguishable "Part Number (Quotation Item)" entries
+# and Frappe's column resolver renders the wrong / blank data.
+# Patches:
+#  (1) Relabel custom_service_items "Optional Items" → "Service Items"
+#      so the dropdown is at least distinguishable.
+#  (2) Add a Quotation-level `first_item_part_number` Custom Field
+#      maintained by avientek.events.quotation.copy_first_item_part_number
+#      on before_save. Users tick this in Pick Columns — no child-table
+#      involved, no collision. Backfills existing rows.
+avientek.patches.relabel_quotation_service_items
+avientek.patches.add_quotation_first_part_number

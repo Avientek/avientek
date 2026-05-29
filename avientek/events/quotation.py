@@ -1252,6 +1252,26 @@ def validate_total_discount(doc, method):
         frappe.throw("Sum of item discount amounts must equal parent discount amount")
 
 
+def copy_first_item_part_number(doc, method=None):
+    """Sridhar/Rahul 2026-05-29: surface the first item row's part_number
+    onto the Quotation parent so it can be added as a clean column in
+    Report View without hitting the (Quotation, Quotation Item) child-
+    table column collision.
+
+    Runs on before_save. Reads items[0].part_number and writes it to
+    the parent `first_item_part_number` Custom Field. Empty string if
+    no rows or no part_number on the first row.
+    """
+    items = list(doc.get("items") or [])
+    new_val = ""
+    if items:
+        first = items[0]
+        new_val = (first.get("part_number") or "") or ""
+    current = doc.get("first_item_part_number") or ""
+    if current != new_val:
+        doc.first_item_part_number = new_val
+
+
 def get_overall_margin(salesperson, brand):
     if not (salesperson and brand):
         return 0
