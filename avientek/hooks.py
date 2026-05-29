@@ -544,6 +544,13 @@ doc_events = {
         ],
         "on_update_after_submit": [
             "avientek.api.quotation_high_probability.on_update_after_submit",
+            # Sridhar 2026-05-29: validate also fires from on_update_after_submit
+            # so probability downgrades via post-submit edits (which may not
+            # always reach the standard validate hook on workflow action paths)
+            # still get audit-trailed + reason cleared. Idempotent — duplicate
+            # Comments / clears are prevented by the change_reason emptiness
+            # check.
+            "avientek.events.quotation.validate_probability_change_approval",
             # Rahul/Sridhar 2026-05-08 — fire notification when probability
             # transitions to 100% (the unlock event for downstream teams).
             "avientek.api.quotation_high_probability.notify_probability_100",

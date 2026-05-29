@@ -1607,27 +1607,53 @@ def validate_probability_change_approval(doc, method=None):
             title=_("Reason Required"),
         )
 
+    # Sridhar 2026-05-29: prior version wrote Comment + cleared field via
+    # doc-mutation in validate. Trace on QN-LTD-26-02120 showed neither
+    # happened — likely the workflow action save path bypassed our hooks
+    # OR the Comment insert errored silently. Both steps now hardened:
+    #   1. Comment insert wrapped in try/except so failure doesn't block save
+    #   2. Field cleared via frappe.db.set_value (bypasses validate cycle,
+    #      survives even if doc.save() path is unusual)
+    #   3. Errors logged via frappe.log_error for diagnosis
     from frappe.utils import now_datetime, escape_html
 
-    frappe.get_doc({
-        "doctype": "Comment",
-        "comment_type": "Info",
-        "reference_doctype": "Quotation",
-        "reference_name": doc.name,
-        "content": _(
-            "<b>Probability change request</b> by {0} at {1}.<br>"
-            "<b>Change:</b> {2}<br>"
-            "<b>Reason:</b> {3}"
-        ).format(
-            frappe.session.user,
-            now_datetime().strftime("%Y-%m-%d %H:%M"),
-            escape_html(trigger_reason),
-            escape_html(change_reason).replace("\n", "<br>"),
-        ),
-    }).insert(ignore_permissions=True)
+    try:
+        frappe.get_doc({
+            "doctype": "Comment",
+            "comment_type": "Info",
+            "reference_doctype": "Quotation",
+            "reference_name": doc.name,
+            "content": _(
+                "<b>Probability change request</b> by {0} at {1}.<br>"
+                "<b>Change:</b> {2}<br>"
+                "<b>Reason:</b> {3}"
+            ).format(
+                frappe.session.user,
+                now_datetime().strftime("%Y-%m-%d %H:%M"),
+                escape_html(trigger_reason),
+                escape_html(change_reason).replace("\n", "<br>"),
+            ),
+        }).insert(ignore_permissions=True)
+    except Exception as e:
+        frappe.log_error(
+            message=f"Probability change Comment failed for {doc.name}: {e}",
+            title="prob_change Comment",
+        )
 
-    # One-shot reason: clear after capture so next change requires fresh input.
-    doc.probability_change_reason = ""
+    # Clear the reason field one-shot — use db_set so the change persists
+    # even on save paths that skip the doc-mutation persistence. Also
+    # update the in-memory doc so subsequent hooks see the cleared value.
+    try:
+        frappe.db.set_value(
+            "Quotation", doc.name, "probability_change_reason", "",
+            update_modified=False,
+        )
+        doc.probability_change_reason = ""
+    except Exception as e:
+        frappe.log_error(
+            message=f"Probability reason clear failed for {doc.name}: {e}",
+            title="prob_change reason clear",
+        )
 
 
 @frappe.whitelist()
