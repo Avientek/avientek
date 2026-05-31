@@ -337,3 +337,8 @@ avientek.patches.add_pending_probability_fields
 # the rename is now moot (report_hide + JS dedup handle the duplicates).
 # Fieldname stays unchanged — only the display label changes.
 avientek.patches.relabel_quotation_service_items_back_to_optional
+# Sridhar 2026-05-30: users couldn't filter Quotation list by workflow_state
+# because Frappe auto-injects workflow_state without in_standard_filter=1,
+# so typing "Wor" in the filter dropdown returned nothing. Property Setter
+# enables it. Idempotent.
+avientek.patches.enable_quotation_workflow_state_filter
