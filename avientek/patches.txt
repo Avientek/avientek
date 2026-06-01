@@ -356,3 +356,10 @@ avientek.patches.rename_quotation_workflow_status_to_workflow_state
 # valid workflow states instead of a free-text box. All distinct existing
 # values have matching Workflow State doctype rows. Idempotent.
 avientek.patches.convert_quotation_workflow_status_to_link
+# Sridhar 2026-06-01: parent-level Part Number mirror was hidden=1, so it
+# didn't surface in Pick Columns. Unhide + re-park on More Info tab so
+# users have a working 'Part Number' option in Report View (the
+# child-table Part Numbers from items / custom_service_items are
+# unusable due to Frappe's column-resolver collision on shared child
+# doctypes). Idempotent.
+avientek.patches.surface_quotation_first_part_number_in_picker

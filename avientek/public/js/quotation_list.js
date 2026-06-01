@@ -128,9 +128,12 @@ function setup_brand_list_click(listview, doctype) {
 			const title = modalEl.querySelector(".modal-title");
 			if (!title) return;
 			if (title.textContent.trim().toLowerCase().indexOf("pick columns") < 0) return;
-			// Only act on Quotation report view
+			// Only act on Quotation report view. Frappe routes are lowercase
+			// ("quotation"), not Title Case — earlier check missed every time.
 			const route = (frappe.get_route && frappe.get_route()) || [];
-			const onQuotation = route.indexOf("Quotation") >= 0;
+			const onQuotation = route.some(seg =>
+				typeof seg === "string" && seg.toLowerCase() === "quotation"
+			);
 			if (!onQuotation) return;
 
 			// Hide checkbox rows where the section header above contains
