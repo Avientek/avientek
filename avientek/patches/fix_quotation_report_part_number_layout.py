@@ -109,6 +109,10 @@ def execute():
 			"UPDATE `__UserSettings` SET data = %s WHERE user = %s AND doctype = 'Quotation'",
 			(json.dumps(data), user),
 		)
+		# Invalidate Frappe's per-user Redis cache (it shadows __UserSettings
+		# on read — without this, browsers serve stale columns until the
+		# cache TTL expires or sync_user_settings runs).
+		frappe.cache.hdel("_user_settings", f"Quotation::{user}")
 		touched += 1
 
 	frappe.db.commit()

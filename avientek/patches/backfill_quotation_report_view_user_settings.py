@@ -113,6 +113,8 @@ def execute():
 				(user, "Quotation", json.dumps(data)),
 			)
 			inserted += 1
+		# Drop Redis cache so next page load reads our new DB row.
+		frappe.cache.hdel("_user_settings", f"Quotation::{user}")
 
 	frappe.db.commit()
 	frappe.clear_cache()
