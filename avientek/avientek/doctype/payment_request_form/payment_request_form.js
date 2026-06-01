@@ -3204,6 +3204,13 @@ frappe.ui.form.on('Payment Request Form', {
         if (frm.selected_workflow_action !== 'Revise') return;
 
         return new Promise((resolve, reject) => {
+            let settled = false;
+            const settle = (ok) => {
+                if (settled) return;
+                settled = true;
+                ok ? resolve() : reject();
+            };
+
             const d = new frappe.ui.Dialog({
                 title: __('Send back for Revision'),
                 fields: [
@@ -3229,35 +3236,48 @@ frappe.ui.form.on('Payment Request Form', {
                 primary_action(values) {
                     const reason = (values.reason || '').trim();
                     if (!reason) {
-                        frappe.throw(__('Reason for Revise is required'));
+                        // Inline validation — never call frappe.throw inside a
+                        // dialog primary_action: it raises a JS exception that
+                        // leaves the dialog button stuck in "loading" state and
+                        // the outer Promise never settles → page freezes.
+                        frappe.show_alert({
+                            message: __('Reason for Revise is required'),
+                            indicator: 'red',
+                        });
+                        d.set_df_property('reason', 'reqd', 1);
+                        d.get_field('reason').$wrapper.find('textarea').focus();
                         return;
                     }
+                    d.disable_primary_action();
                     frappe.call({
                         method: 'avientek.events.prf_revise.send_for_revise',
                         args: { prf_name: frm.doc.name, reason: reason },
                         freeze: true,
                         freeze_message: __('Sending back for revision...'),
                         callback(r) {
+                            d.hide();
                             if (r && r.message && r.message.ok) {
-                                d.hide();
-                                resolve();
+                                settle(true);
                             } else {
-                                d.hide();
-                                reject();
+                                settle(false);
                             }
                         },
                         error() {
+                            d.enable_primary_action();
                             d.hide();
-                            reject();
+                            settle(false);
                         },
                     });
                 },
                 secondary_action_label: __('Cancel'),
                 secondary_action() {
                     d.hide();
-                    reject();
+                    settle(false);
                 },
             });
+            // If the user closes the dialog via the X / Esc, the outer Promise
+            // must still settle so Frappe's workflow runner doesn't await forever.
+            d.$wrapper.on('hidden.bs.modal', () => settle(false));
             d.show();
         });
     },
