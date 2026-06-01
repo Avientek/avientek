@@ -369,3 +369,8 @@ avientek.patches.surface_quotation_first_part_number_in_picker
 # pickable in Report View Pick Columns. Hook populates both on save +
 # backfill via SQL.
 avientek.patches.add_quotation_optional_item_part_numbers
+# Sridhar 2026-06-01: V3 seeder Draft → Submit now lands directly on
+# 'Approved' (collapsed the Draft → Submitted → Approved two-step). This
+# patch migrates existing quotes stuck in 'Submitted' state to 'Approved'
+# with an audit Comment. Idempotent.
+avientek.patches.migrate_quotation_submitted_to_approved

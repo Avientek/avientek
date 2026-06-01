@@ -119,24 +119,16 @@ def _build_transitions(creators, approvers, l2_approvers=None):
     NEEDS_APPROVAL = "doc.custom_auto_approve_ok == 0"
 
     template = [
-        # Auto-approved (margin OK) — Draft fast-forwards to Submitted.
-        ("Draft",                  "Submit",                "Submitted",              "All",         1, AUTO_OK),
+        # Sridhar 2026-06-01: collapsed Draft → Submitted → Approved into a
+        # single Draft → Approved transition for auto-OK (margin-OK) quotes.
+        # 'Submitted' is no longer a destination — users were confused by the
+        # two-step Approve flow. The Submit action now lands directly on the
+        # final 'Approved' state. 'Submitted' state still exists in the
+        # workflow for legacy/stuck quotes (see migration patch).
+        ("Draft",                  "Submit",                "Approved",               "All",         1, AUTO_OK),
 
         # Low-margin route — Draft must enter the L1 approval chain.
         ("Draft",                  "Send for Approval",     "Pending For Approval",   "All",         1, NEEDS_APPROVAL),
-
-        # Once submitted (margin OK), fast-forward to Approved. If the
-        # margin flag has since flipped to 0 (e.g., post-save recalc),
-        # the Approve button hides and the user must request L1/L2.
-        #
-        # Jithin / Rahul 2026-05-22 (QN-KSA-26-00132): self-approval
-        # blocked on the auto-OK fast-forward path. Without this guard
-        # the SAME user could drive a quote Draft → Submit → Approved
-        # — me.sales11 did exactly that for QN-KSA-26-00132 on 2026-05-18
-        # (Submit) + 2026-05-19 (Approve). allow_self_approval=0 forces
-        # a DIFFERENT user to click Approve, matching the L1/L2 audit
-        # standard already used for the low-margin path.
-        ("Submitted",              "Approve",               "Approved",               "All",         0, AUTO_OK),
 
         # Document Approval: user ticks one of the checkboxes + saves.
         # Rahul 2026-05-15 — same transitions must fire from `Submitted`
