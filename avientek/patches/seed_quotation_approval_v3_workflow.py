@@ -151,18 +151,12 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         ("Submitted",              "Request for Update",    "Requested for update",   "creator",     1, "doc.custom_request_for_update"),
         ("Submitted",              "Request Cancellation",  "Cancellation Requested", "creator",     1, "doc.custom_cancellation_check"),
 
-        # Direct Cancel for low-prob / std-margin quotes only. Quotes
-        # at >=75% MUST go through the 2-step Request Cancellation ->
-        # L1 -> L2 chain (audit requirement).
-        # Frappe's workflow safe_eval (frappe/utils/safe_exec.py
-        # WHITELISTED_SAFE_EVAL_GLOBALS) only exposes int/float/round —
-        # no flt/cint/max/min, no string methods on attributes.
-        #
-        # Sridhar 2026-05-29: dropped CANCEL_COND on Approved + Submitted
-        # so Cancel is always available in the Actions menu (was hidden
-        # when probability >= 75%). After cancel, Frappe's standard
-        # Delete action works on docstatus=2 docs.
-        ("Approved",               "Cancel",                "Cancelled",              "All",         1, ""),
+        # Direct Cancel from Submitted only. Approved quotes MUST go
+        # through the Cancellation Check checkbox -> Request Cancellation
+        # -> L1 -> L2 chain (Sridhar 2026-06-01: audit requirement —
+        # approved quotes can't be hard-cancelled without approver sign-off,
+        # the Cancellation Check field in the Document Approval section
+        # is the only path).
         ("Submitted",              "Cancel",                "Cancelled",              "All",         1, ""),
 
         # Sridhar 2026-05-29: Rejected state needs Cancel too — sales
