@@ -3203,12 +3203,30 @@ frappe.ui.form.on('Payment Request Form', {
     before_workflow_action(frm) {
         if (frm.selected_workflow_action !== 'Revise') return;
 
+        // Frappe v15 calls frappe.dom.freeze() BEFORE firing before_workflow_action
+        // (frappe/public/js/frappe/form/workflow.js:107). That overlay covers our
+        // dialog, making the textarea and primary button uninteractive (the page
+        // looks "frozen"). Lift the freeze immediately so the dialog is usable.
+        // Frappe's outer chain only re-freezes inside its own apply_workflow
+        // xcall, so we re-freeze ourselves on resolve to bridge the gap.
+        frappe.dom.unfreeze();
+
         return new Promise((resolve, reject) => {
             let settled = false;
             const settle = (ok) => {
                 if (settled) return;
                 settled = true;
-                ok ? resolve() : reject();
+                if (ok) {
+                    // Re-freeze so Frappe's subsequent apply_workflow xcall has
+                    // the expected visual state. Its .finally() will unfreeze.
+                    frappe.dom.freeze(__('Sending back for revision...'));
+                    resolve();
+                } else {
+                    // Reject: Frappe's outer .then() skips, so its unfreeze
+                    // never runs — but we already unfroze at entry, so we're
+                    // balanced. Just resolve the local Promise.
+                    reject();
+                }
             };
 
             const d = new frappe.ui.Dialog({
