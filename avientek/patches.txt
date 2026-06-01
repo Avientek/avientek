@@ -390,3 +390,9 @@ avientek.patches.backfill_quotation_sales_team_from_user_permission
 # fields (item_name, warehouse, net_rate, net_amount, base_amount,
 # base_net_amount). Idempotent.
 avientek.patches.align_quotation_item_in_list_view_with_so
+# Sridhar 2026-06-01: ship 'Quotation Item Detail' Report Builder report
+# so users get item-level row expansion by selecting it from Select Report.
+avientek.patches.create_quotation_item_detail_report
+# Sridhar 2026-06-01: flip in_list_view=1 on parent-level Part Number
+# mirrors so they appear in default Report View without Pick Columns.
+avientek.patches.expose_quotation_part_numbers_in_list_view
