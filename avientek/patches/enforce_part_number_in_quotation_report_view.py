@@ -45,8 +45,11 @@ def _ensure_field(fields, fieldname, doctype):
 
 
 def execute():
+	# Include Administrator — Sridhar often tests as Administrator and the
+	# earlier exclusion meant his Quotation Report View kept the old
+	# (Part-Number-less) column set. Guest still excluded (no UI access).
 	users = frappe.db.sql_list(
-		"SELECT name FROM `tabUser` WHERE enabled = 1 AND name NOT IN ('Administrator', 'Guest')"
+		"SELECT name FROM `tabUser` WHERE enabled = 1 AND name != 'Guest'"
 	)
 
 	touched = 0

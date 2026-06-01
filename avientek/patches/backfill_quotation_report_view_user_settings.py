@@ -65,8 +65,10 @@ def _has_quotation_item_field(report_cfg):
 
 
 def execute():
+	# Include Administrator (commonly used for testing). Guest excluded
+	# since it has no UI session.
 	users = frappe.db.sql_list(
-		"SELECT name FROM `tabUser` WHERE enabled = 1 AND name NOT IN ('Administrator', 'Guest')"
+		"SELECT name FROM `tabUser` WHERE enabled = 1 AND name != 'Guest'"
 	)
 
 	updated = 0
