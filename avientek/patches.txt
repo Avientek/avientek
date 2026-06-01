@@ -363,3 +363,9 @@ avientek.patches.convert_quotation_workflow_status_to_link
 # unusable due to Frappe's column-resolver collision on shared child
 # doctypes). Idempotent.
 avientek.patches.surface_quotation_first_part_number_in_picker
+# Sridhar 2026-06-01: split Quotation Part Number mirror into two columns —
+# 'Item Part Number' (existing first_item_part_number relabelled) and a
+# new 'Optional Item Part Number' (mirrors custom_service_items[]). Both
+# pickable in Report View Pick Columns. Hook populates both on save +
+# backfill via SQL.
+avientek.patches.add_quotation_optional_item_part_numbers

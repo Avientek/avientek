@@ -1253,32 +1253,41 @@ def validate_total_discount(doc, method):
 
 
 def copy_first_item_part_number(doc, method=None):
-    """Sridhar/Rahul 2026-05-29 (updated 2026-05-29 evening): surface the
-    item rows' part_number onto the Quotation parent so Report View can
-    use a clean parent-level column instead of hitting the
-    (Quotation, Quotation Item) child-table collision between `items`
-    and `custom_service_items`.
+    """Sridhar/Rahul 2026-05-29 (updated 2026-06-01): surface the item rows'
+    part_number onto the Quotation parent so Report View can use clean
+    parent-level columns instead of hitting the (Quotation, Quotation Item)
+    child-table collision between `items` and `custom_service_items`.
 
-    Updated to join ALL items' part numbers with comma (was first-only)
-    per Sridhar's go-ahead. Empty rows skipped, dedup-preserving order.
-    Field fieldtype switched from Data to Small Text live on prod.
+    Sridhar 2026-06-01: split into TWO parent fields so the report can
+    show item part numbers and optional-item part numbers separately:
 
-    Fieldname stays `first_item_part_number` for historical compatibility
-    with the API-created Custom Field. Label remains "Part Number".
+      - `first_item_part_number` (label 'Item Part Number') ←  items[]
+      - `optional_item_part_numbers` (label 'Optional Item Part Number') ←
+        custom_service_items[]
+
+    Each value is the comma-joined, order-preserving, dedup'd list of
+    non-empty part_number values from its source child table. Fieldname
+    `first_item_part_number` stays unchanged for historical compatibility
+    with the API-created Custom Field.
     """
-    items = list(doc.get("items") or [])
-    seen = set()
-    parts = []
-    for row in items:
-        pn = (row.get("part_number") or "").strip()
-        if not pn or pn in seen:
-            continue
-        seen.add(pn)
-        parts.append(pn)
-    new_val = ", ".join(parts)
-    current = doc.get("first_item_part_number") or ""
-    if current != new_val:
-        doc.first_item_part_number = new_val
+    def _join(rows):
+        seen = set()
+        parts = []
+        for row in rows or []:
+            pn = (row.get("part_number") or "").strip()
+            if not pn or pn in seen:
+                continue
+            seen.add(pn)
+            parts.append(pn)
+        return ", ".join(parts)
+
+    new_items = _join(doc.get("items"))
+    if (doc.get("first_item_part_number") or "") != new_items:
+        doc.first_item_part_number = new_items
+
+    new_optional = _join(doc.get("custom_service_items"))
+    if (doc.get("optional_item_part_numbers") or "") != new_optional:
+        doc.optional_item_part_numbers = new_optional
 
 
 def get_overall_margin(salesperson, brand):
