@@ -385,3 +385,8 @@ avientek.patches.hide_quotation_workflow_status_from_form
 # the owner's first Sales Person UP and insert one row at 100% allocation.
 # Owners without any Sales Person UP are logged and skipped. Idempotent.
 avientek.patches.backfill_quotation_sales_team_from_user_permission
+# Sridhar 2026-06-01: match Quotation Report View columns to Sales Order's
+# default — flips in_list_view=1 via Property Setter on Quotation Item
+# fields (item_name, warehouse, net_rate, net_amount, base_amount,
+# base_net_amount). Idempotent.
+avientek.patches.align_quotation_item_in_list_view_with_so
