@@ -589,6 +589,10 @@ doc_events = {
         "before_submit": [
             "avientek.events.purchase_receipt.validate_po_workflow_state",
             "avientek.events.purchase_receipt.add_batch_bundle_from_intercompany_dn",
+            # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
+            # submit-time guard against per-batch negatives. See
+            # avientek/stock/batch_negative_guard.py.
+            "avientek.stock.batch_negative_guard.check_batches_remain_positive",
         ],
     },
     "Purchase Invoice": {
@@ -626,6 +630,13 @@ doc_events = {
             "avientek.events.sales_invoice.set_vat_emirate",
             "avientek.events.sales_invoice.sync_custom_sales_person",
         ],
+        "before_submit": [
+            # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
+            # submit-time guard against per-batch negatives. Only fires on
+            # stock-affecting SIs (update_stock=1 / POS); inert otherwise
+            # because the row's warehouse will be empty.
+            "avientek.stock.batch_negative_guard.check_batches_remain_positive",
+        ],
         "on_submit": "avientek.events.sales_invoice_reward_incentive.book_reward_incentive_jv",
         "on_cancel": "avientek.events.sales_invoice_reward_incentive.cancel_reward_incentive_jv",
     },
@@ -639,8 +650,24 @@ doc_events = {
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
         "validate": "avientek.events.delivery_note.validate_item_tax_template",
+        "before_submit": [
+            # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
+            # submit-time guard against per-batch negatives. See
+            # avientek/stock/batch_negative_guard.py.
+            "avientek.stock.batch_negative_guard.check_batches_remain_positive",
+        ],
         "on_submit": "avientek.events.warranty.on_delivery_note_submit",
         "on_cancel": "avientek.events.warranty.on_delivery_note_cancel",
+    },
+    "Stock Entry": {
+        "before_submit": [
+            # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
+            # submit-time guard against per-batch negatives. Only blocks rows
+            # with a source warehouse (Material Issue / Material Transfer /
+            # Send to Subcontractor / Repack consume side). Pure Material
+            # Receipts have no source warehouse → skipped.
+            "avientek.stock.batch_negative_guard.check_batches_remain_positive",
+        ],
     },
     "DocShare": {
         "before_insert": "avientek.events.docshare.auto_share_po_with_write",
