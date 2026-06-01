@@ -124,42 +124,38 @@ function setup_brand_list_click(listview, doctype) {
 	window.__avk_pick_columns_observer = observer;
 
 	function _filter_pick_columns(modalEl) {
-		setTimeout(function() {
-			const title = modalEl.querySelector(".modal-title");
-			if (!title) return;
-			if (title.textContent.trim().toLowerCase().indexOf("pick columns") < 0) return;
-			// Only act on Quotation report view. Frappe routes are lowercase
-			// ("quotation"), not Title Case — earlier check missed every time.
-			const route = (frappe.get_route && frappe.get_route()) || [];
-			const onQuotation = route.some(seg =>
-				typeof seg === "string" && seg.toLowerCase() === "quotation"
-			);
-			if (!onQuotation) return;
+		// Run multiple passes — Frappe v15 lazy-renders sections, so a single
+		// 100ms tick can fire before the child-table checkboxes exist.
+		[80, 250, 600, 1200].forEach(function(delay) {
+			setTimeout(function() {
+				const title = modalEl.querySelector(".modal-title");
+				if (!title) return;
+				if (title.textContent.trim().toLowerCase().indexOf("pick columns") < 0) return;
+				const route = (frappe.get_route && frappe.get_route()) || [];
+				const onQuotation = route.some(seg =>
+					typeof seg === "string" && seg.toLowerCase() === "quotation"
+				);
+				if (!onQuotation) return;
 
-			// Hide checkbox rows where the section header above contains
-			// "(Quotation Item)" AND the label is "Part Number".
-			const checkboxes = modalEl.querySelectorAll(".checkbox, .frappe-control[data-fieldtype='Check']");
-			checkboxes.forEach(function(cb) {
-				const labelEl = cb.querySelector("label") || cb.querySelector(".label-area");
-				if (!labelEl) return;
-				if (labelEl.textContent.trim() !== "Part Number") return;
-				// Walk up to find the nearest preceding heading/section header
-				let cur = cb;
-				let header = null;
-				for (let i = 0; i < 40 && cur; i++) {
-					cur = cur.previousElementSibling || (cur.parentElement && cur.parentElement.previousElementSibling) || null;
-					if (!cur) break;
-					if (cur.tagName === "H6" || cur.tagName === "H5" ||
-					    cur.classList.contains("section-head") ||
-					    cur.classList.contains("text-muted")) {
-						header = cur;
-						break;
+				// The parent-level columns are labelled 'Item Part Number' and
+				// 'Optional Item Part Number'. Any checkbox labelled EXACTLY
+				// 'Part Number' is therefore from a Quotation Item child table
+				// (items / custom_service_items), which renders blank cells in
+				// Report View due to Frappe's column-resolver collision between
+				// two child tables of the same doctype. Hide them. Note: this
+				// is purely a label match — no DOM walk-up needed since the
+				// parent labels are disambiguated.
+				const checkboxes = modalEl.querySelectorAll(
+					".checkbox, .frappe-control[data-fieldtype='Check']"
+				);
+				checkboxes.forEach(function(cb) {
+					const labelEl = cb.querySelector("label") || cb.querySelector(".label-area");
+					if (!labelEl) return;
+					if (labelEl.textContent.trim() === "Part Number") {
+						cb.style.display = "none";
 					}
-				}
-				if (header && /\(Quotation Item\)/i.test(header.textContent)) {
-					cb.style.display = "none";
-				}
-			});
-		}, 100);
+				});
+			}, delay);
+		});
 	}
 })();
