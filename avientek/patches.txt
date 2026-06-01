@@ -374,3 +374,8 @@ avientek.patches.add_quotation_optional_item_part_numbers
 # patch migrates existing quotes stuck in 'Submitted' state to 'Approved'
 # with an audit Comment. Idempotent.
 avientek.patches.migrate_quotation_submitted_to_approved
+# Sridhar 2026-06-01: hide the workflow_status mirror from the Quotation
+# form (it cluttered the Details tab with an implementation-detail
+# description) while keeping it surfaced in Pick Columns / filter
+# typeahead via depends_on="eval:0". Idempotent.
+avientek.patches.hide_quotation_workflow_status_from_form
