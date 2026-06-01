@@ -396,3 +396,8 @@ avientek.patches.create_quotation_item_detail_report
 # Sridhar 2026-06-01: flip in_list_view=1 on parent-level Part Number
 # mirrors so they appear in default Report View without Pick Columns.
 avientek.patches.expose_quotation_part_numbers_in_list_view
+# Sridhar 2026-06-01: make Quotation Report View show item-level rows by
+# default for EVERY user (matching how SO works). Backfills __UserSettings
+# rows for users who don't yet have Quotation Item columns saved. Users
+# with existing customization are preserved.
+avientek.patches.backfill_quotation_report_view_user_settings
