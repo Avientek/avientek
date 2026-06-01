@@ -26,7 +26,8 @@ def execute():
 		cf = frappe.new_doc("Custom Field")
 		cf.dt = "Quotation"
 		cf.fieldname = "workflow_status"
-		cf.fieldtype = "Data"
+		cf.fieldtype = "Link"
+		cf.options = "Workflow State"
 		cf.label = "Workflow State"
 		cf.fetch_from = "workflow_state"
 		cf.read_only = 1
@@ -47,6 +48,8 @@ def execute():
 			"Custom Field",
 			"Quotation-workflow_status",
 			{
+				"fieldtype": "Link",
+				"options": "Workflow State",
 				"fetch_from": "workflow_state",
 				"label": "Workflow State",
 				"read_only": 1,

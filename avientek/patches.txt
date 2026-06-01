@@ -351,3 +351,8 @@ avientek.patches.add_quotation_workflow_status_filter_field
 # and drop the duplicate Property Setter chip on the Link variant, so users
 # see one filter chip / typeahead entry, not two. Idempotent.
 avientek.patches.rename_quotation_workflow_status_to_workflow_state
+# Sridhar 2026-06-01: convert the workflow_status mirror from Data to Link
+# (options=Workflow State) so the filter shows an autocomplete dropdown of
+# valid workflow states instead of a free-text box. All distinct existing
+# values have matching Workflow State doctype rows. Idempotent.
+avientek.patches.convert_quotation_workflow_status_to_link
