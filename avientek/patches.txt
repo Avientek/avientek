@@ -379,3 +379,9 @@ avientek.patches.migrate_quotation_submitted_to_approved
 # description) while keeping it surfaced in Pick Columns / filter
 # typeahead via depends_on="eval:0". Idempotent.
 avientek.patches.hide_quotation_workflow_status_from_form
+# Sridhar 2026-06-01: backfill missing sales_team rows on Quotations so
+# ERPNext User Permissions on Sales Person actually filter them in list
+# views and Number Cards. For each quote with zero sales_team rows, find
+# the owner's first Sales Person UP and insert one row at 100% allocation.
+# Owners without any Sales Person UP are logged and skipped. Idempotent.
+avientek.patches.backfill_quotation_sales_team_from_user_permission
