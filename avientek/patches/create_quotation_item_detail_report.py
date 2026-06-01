@@ -33,10 +33,11 @@ REPORT_CONFIG = {
 		["currency", "Quotation"],
 		["grand_total", "Quotation"],
 		["base_grand_total", "Quotation"],
-		# Child fields — drive item-level row expansion
+		# Child fields — drive item-level row expansion. part_number
+		# sits right after item_code per Sridhar 2026-06-01.
 		["item_code", "Quotation Item"],
-		["item_name", "Quotation Item"],
 		["part_number", "Quotation Item"],
+		["item_name", "Quotation Item"],
 		["qty", "Quotation Item"],
 		["rate", "Quotation Item"],
 		["amount", "Quotation Item"],

@@ -406,3 +406,8 @@ avientek.patches.backfill_quotation_report_view_user_settings
 # (parent mirror) and part_number (Quotation Item child) in every user's
 # __UserSettings.Report.fields; preserves all other selections. Idempotent.
 avientek.patches.enforce_part_number_in_quotation_report_view
+# Sridhar 2026-06-01: drop parent comma-joined Part Number mirrors from
+# default Report View column lists (confusing — same value repeats on
+# every item row of same quote). Move per-item part_number (Quotation
+# Item) to immediately after item_code in every user's saved config.
+avientek.patches.fix_quotation_report_part_number_layout
