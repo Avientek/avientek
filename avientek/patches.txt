@@ -342,3 +342,12 @@ avientek.patches.relabel_quotation_service_items_back_to_optional
 # so typing "Wor" in the filter dropdown returned nothing. Property Setter
 # enables it. Idempotent.
 avientek.patches.enable_quotation_workflow_state_filter
+# Sridhar 2026-06-01: Frappe v15 hides the auto-injected workflow_state Link
+# from the "+ Add a Filter" typeahead even with in_standard_filter=1. Mirror
+# it into a Data Custom Field that the picker can always find. fetch_from
+# keeps it in sync on every save.
+avientek.patches.add_quotation_workflow_status_filter_field
+# Sridhar 2026-06-01: relabel the workflow_status mirror to 'Workflow State'
+# and drop the duplicate Property Setter chip on the Link variant, so users
+# see one filter chip / typeahead entry, not two. Idempotent.
+avientek.patches.rename_quotation_workflow_status_to_workflow_state
