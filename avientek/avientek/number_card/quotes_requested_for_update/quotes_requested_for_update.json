@@ -1,16 +1,23 @@
 {
  "color": "#8E44AD",
+ "creation": "2026-06-01 13:03:32.849054",
+ "docstatus": 0,
  "doctype": "Number Card",
  "document_type": "Quotation",
- "filters_json": "[]",
+ "filters_json": "[[\"Quotation\",\"workflow_status\",\"=\",\"Requested for update\",false]]",
  "function": "Count",
+ "idx": 0,
  "is_public": 1,
  "is_standard": 1,
  "label": "Quotes Requested for Update",
  "method": "avientek.api.quotation_cards.count_quotes_requested_for_update",
+ "modified": "2026-06-01 13:10:29.464217",
+ "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Quotes Requested for Update",
- "show_percentage_stats": 0,
+ "owner": "Administrator",
+ "show_full_number": 0,
+ "show_percentage_stats": 1,
  "stats_time_interval": "Daily",
- "type": "Custom"
+ "type": "Document Type"
 }
