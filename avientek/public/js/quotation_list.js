@@ -124,13 +124,14 @@ function setup_brand_list_click(listview, doctype) {
 	window.__avk_pick_columns_observer = observer;
 
 	function _filter_pick_columns(modalEl) {
-		// Run multiple passes — Frappe v15 lazy-renders sections, so a single
-		// 100ms tick can fire before the child-table checkboxes exist.
-		[80, 250, 600, 1200].forEach(function(delay) {
+		// Run several passes — Frappe v15 lazy-renders sections and the
+		// initial mount has zero child-table checkboxes yet.
+		[50, 200, 500, 1000, 2000].forEach(function(delay) {
 			setTimeout(function() {
 				const title = modalEl.querySelector(".modal-title");
 				if (!title) return;
 				if (title.textContent.trim().toLowerCase().indexOf("pick columns") < 0) return;
+
 				const route = (frappe.get_route && frappe.get_route()) || [];
 				const onQuotation = route.some(seg =>
 					typeof seg === "string" && seg.toLowerCase() === "quotation"
@@ -138,22 +139,26 @@ function setup_brand_list_click(listview, doctype) {
 				if (!onQuotation) return;
 
 				// The parent-level columns are labelled 'Item Part Number' and
-				// 'Optional Item Part Number'. Any checkbox labelled EXACTLY
-				// 'Part Number' is therefore from a Quotation Item child table
-				// (items / custom_service_items), which renders blank cells in
-				// Report View due to Frappe's column-resolver collision between
-				// two child tables of the same doctype. Hide them. Note: this
-				// is purely a label match — no DOM walk-up needed since the
-				// parent labels are disambiguated.
-				const checkboxes = modalEl.querySelectorAll(
-					".checkbox, .frappe-control[data-fieldtype='Check']"
-				);
-				checkboxes.forEach(function(cb) {
-					const labelEl = cb.querySelector("label") || cb.querySelector(".label-area");
-					if (!labelEl) return;
-					if (labelEl.textContent.trim() === "Part Number") {
-						cb.style.display = "none";
-					}
+				// 'Optional Item Part Number'. Any element whose trimmed text
+				// is EXACTLY 'Part Number' must be a child-table entry (items
+				// / custom_service_items, both Quotation Item) that renders
+				// blank cells due to Frappe's column-resolver collision. Hide
+				// the enclosing row regardless of which DOM container Frappe
+				// v15 wraps it in.
+				const labels = modalEl.querySelectorAll("label, span, .label-area");
+				labels.forEach(function(lbl) {
+					if (lbl.textContent.trim() !== "Part Number") return;
+					// Find the nearest row container that holds both the label
+					// and its associated checkbox; if nothing matches, fall
+					// back to the label's parent element.
+					const row =
+						lbl.closest(".checkbox") ||
+						lbl.closest(".frappe-control") ||
+						lbl.closest("[data-fieldtype='Check']") ||
+						lbl.closest(".form-check") ||
+						lbl.closest("tr") ||
+						lbl.parentElement;
+					if (row) row.style.display = "none";
 				});
 			}, delay);
 		});
