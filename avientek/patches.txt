@@ -401,3 +401,8 @@ avientek.patches.expose_quotation_part_numbers_in_list_view
 # rows for users who don't yet have Quotation Item columns saved. Users
 # with existing customization are preserved.
 avientek.patches.backfill_quotation_report_view_user_settings
+# Sridhar 2026-06-01: Part Number is mandatory in the default Quotation
+# Report View for every user. Strict-enforce both first_item_part_number
+# (parent mirror) and part_number (Quotation Item child) in every user's
+# __UserSettings.Report.fields; preserves all other selections. Idempotent.
+avientek.patches.enforce_part_number_in_quotation_report_view
