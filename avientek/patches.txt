@@ -426,3 +426,10 @@ avientek.patches.relabel_prf_outstanding_amount_to_net_amount
 # valid path. Pairs with the new sync_workflow_status validate hook in
 # events/quotation.py.
 avientek.patches.sync_quotation_workflow_status_field
+# Rahul 2026-06-02: Workflow State filter dropdown listed all 39 Workflow
+# State records system-wide, including states from unrelated workflows
+# (Pending Project Lead Approval, Pending Events Head Approval, ...).
+# Set link_filters on Quotation-workflow_state + Quotation-workflow_status
+# Custom Fields to restrict the picker to the V3 workflow's 14 states
+# (+ V2 legacy bridges 'Pending Level 1/2 Approval'). Idempotent.
+avientek.patches.restrict_quotation_workflow_state_link_filter
