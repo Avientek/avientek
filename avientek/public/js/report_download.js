@@ -239,21 +239,67 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 		return;
 	}
 
+	// Rahul 2026-06-02: previously hard-capped at 9999 rows per export.
+	// Item / Item Price / Sales Order have 10k–160k rows on prod, so users
+	// only ever got the first 9999. Switch to chunked pagination via
+	// rv.start + rv.page_length so we accumulate ALL matching rows.
+	// Soft cap at 100,000 rows total per export (browser memory + Excel
+	// practicality); warn if hit.
 	var prev_pl = rv.page_length;
-	rv.page_length = 9999;
+	var prev_start = rv.start;
+	var CHUNK = 5000;
+	var MAX_ROWS = 100000;
 
-	frappe.show_alert({ message: __("Fetching all rows for export…"), indicator: "blue" }, 8);
+	var all_data = [];
+	var fetched_offsets = {};  // guard against runaway loops
 
-	var refresh_result = rv.refresh();
-	var p = (refresh_result && typeof refresh_result.then === "function")
-		? refresh_result
-		: new Promise(function (resolve) { setTimeout(resolve, 1500); });
+	function next_chunk() {
+		rv.page_length = CHUNK;
+		rv.start = all_data.length;
+		frappe.show_alert({
+			message: __("Fetching rows {0}–{1} for export…",
+				[rv.start + 1, rv.start + CHUNK]),
+			indicator: "blue",
+		}, 5);
 
-	p.then(function () {
+		var refresh_result = rv.refresh();
+		var p = (refresh_result && typeof refresh_result.then === "function")
+			? refresh_result
+			: new Promise(function (resolve) { setTimeout(resolve, 1500); });
+
+		return p.then(function () {
+			var batch = (rv.data || []).slice();
+			if (fetched_offsets[rv.start]) {
+				// Same offset returned twice — refresh didn't paginate;
+				// stop to avoid infinite loop.
+				return;
+			}
+			fetched_offsets[rv.start] = true;
+			all_data = all_data.concat(batch);
+			// Continue if batch was full AND we haven't hit the safety cap.
+			if (batch.length >= CHUNK && all_data.length < MAX_ROWS) {
+				return next_chunk();
+			}
+		});
+	}
+
+	next_chunk().then(function () {
 		rv.page_length = prev_pl;
-		proceed((rv.data || []).slice());
+		rv.start = prev_start || 0;
+		if (all_data.length >= MAX_ROWS) {
+			frappe.msgprint(__(
+				"Export truncated at {0} rows. Apply narrower filters to export the remainder.",
+				[MAX_ROWS]
+			));
+		}
+		frappe.show_alert({
+			message: __("Exporting {0} rows…", [all_data.length]),
+			indicator: "green",
+		}, 5);
+		proceed(all_data);
 	}).catch(function (err) {
 		rv.page_length = prev_pl;
+		rv.start = prev_start || 0;
 		frappe.msgprint(__("Failed to fetch all rows: {0}", [err || "unknown error"]));
 	});
 }
