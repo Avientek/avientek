@@ -259,33 +259,39 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 
 	match_cond = get_match_cond(table)
 
-	# Employee uses `employee_name` for the display column; Supplier/
-	# Customer have their own *_name columns; everything else just shows
-	# `name`. Build the extra columns inline so the outer SELECT can
-	# pull a unified display string.
+	# Build display + search columns dynamically from doctype metadata.
+	# Frappe's standard link picker uses meta.title_field as the display
+	# column AND searches against it alongside `name`. We mirror that
+	# behaviour so the picker works for any party_type without
+	# hardcoded knowledge of the doctype's name-field (Supplier ->
+	# supplier_name, Customer -> customer_name, Employee ->
+	# employee_name, and any future party doctype with title_field set).
 	#
-	# Sridhar 2026-06-02: also include the display-name column in the
-	# txt LIKE search. The previous form OR'd two identical
-	# `{searchfield} LIKE` / `name LIKE` clauses (since searchfield
-	# defaults to "name"), so typing "Sennheiser Middle East" never
-	# matched Supplier S-FZCO-00176 whose name is the ID code. Frappe's
-	# standard link picker searches both fields — this restores parity.
-	if table == "Supplier":
-		display_select = "`tabSupplier`.supplier_name AS display_name"
-		display_search_col = "`tabSupplier`.supplier_name"
-	elif table == "Customer":
-		display_select = "`tabCustomer`.customer_name AS display_name"
-		display_search_col = "`tabCustomer`.customer_name"
-	elif table == "Employee":
-		display_select = "`tabEmployee`.employee_name AS display_name"
-		display_search_col = "`tabEmployee`.employee_name"
+	# Sridhar 2026-06-02: 'should fix dynamically'. Previous version
+	# only checked `name` (searchfield defaults to 'name') so typing
+	# 'Sennheiser Middle East' never matched Supplier S-FZCO-00176 —
+	# the supplier_name held the text but the picker only searched
+	# the ID column. Frappe's stock picker doesn't have this bug.
+	try:
+		meta = frappe.get_meta(table)
+		title_field = meta.title_field or None
+		# Validate the title_field actually exists on the table (catches
+		# stale meta references that would crash the SQL).
+		if title_field and not meta.has_field(title_field):
+			title_field = None
+	except Exception:
+		title_field = None
+
+	if title_field:
+		display_select = f"`tab{table}`.{title_field} AS display_name"
+		display_search_col = f"`tab{table}`.{title_field}"
 	else:
 		display_select = "'' AS display_name"
 		display_search_col = None
 
-	# Build the txt LIKE clauses: always search name; also search the
-	# display-name column when we have one; also honour the explicit
-	# searchfield if Frappe passed one other than "name".
+	# Build the txt LIKE clauses: always search `name`; also search the
+	# title-field column when one exists; also honour an explicit
+	# searchfield if Frappe passed one other than 'name'.
 	search_or_clauses = [f"`tab{table}`.name LIKE %(txt)s"]
 	if display_search_col:
 		search_or_clauses.append(f"{display_search_col} LIKE %(txt)s")
@@ -317,7 +323,10 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 	)
 	# Frappe set_query expects a list of tuples; first column is the
 	# value, additional columns become the search-help description.
-	if table in ("Supplier", "Customer", "Employee"):
+	# Return shape mirrors what we selected: 2-tuple (name, display_name)
+	# when the doctype has a title_field, else 1-tuple. Frappe set_query
+	# accepts both; the second column shows as search-help text.
+	if title_field:
 		return [(r[0], r[1] or "") for r in rows]
 	return [(r[0],) for r in rows]
 
