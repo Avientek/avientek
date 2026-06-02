@@ -1943,20 +1943,20 @@ def get_outstanding_reference_documents(args):
             row["base_grand_total"] = (row["grand_total"] or 0) * row["exchange_rate"]
             row["base_outstanding"] = os_company
 
+            # Jithin 2026-06-02: document_reference must point to the
+            # target doc itself — that's the canonical link the View
+            # button and the Combined PDF print loop both follow. Apply
+            # this universally for EVERY voucher_type that flows
+            # through this loop (PI, Debit Note, Sales Invoice, etc.).
+            # No doctype-specific branches — the rule is the same.
+            # See commit 39215ab (2026-05-14) for the original
+            # REFERENCE_TARGET_DOCTYPE pattern this restores.
+            row["document_reference"] = voucher_no
+
+            # Surface upstream-doc references where they apply, on
+            # voucher-type-specific informational fields. These do NOT
+            # drive any link or print resolution — purely display.
             if voucher_type == "Purchase Invoice":
-                # Jithin 2026-06-02: document_reference must point to the
-                # PI itself — that's the canonical link the View button
-                # and the Combined PDF print loop both follow. Pointing
-                # it at the linked Purchase Order broke (a) the View
-                # action (opens the PO instead of the PI) and (b) the
-                # Combined PDF print (attaches the PO instead of the
-                # PI). Restored to voucher_no per the
-                # REFERENCE_TARGET_DOCTYPE map pattern (see
-                # commit 39215ab 2026-05-14).
-                row["document_reference"] = voucher_no
-                # Surface the linked PO (if any) on a separate field for
-                # users who still want to see it in the picker grid /
-                # remarks. Doesn't drive any link or print resolution.
                 row["purchase_order"] = frappe.get_value(
                     "Purchase Invoice Item",
                     {"parent": voucher_no},
