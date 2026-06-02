@@ -417,3 +417,7 @@ avientek.patches.fix_quotation_report_part_number_layout
 # The JS MutationObserver hides duplicate picker entries directly now,
 # so the global report_hide is no longer needed.
 avientek.patches.drop_quotation_item_part_number_report_hide
+# Sridhar 2026-06-02: rename Payment Request Reference.outstanding_amount
+# label 'Net Payment' -> 'Net Amount' for consistency with Currency Totals
+# header (a6df151). Idempotent Property Setter.
+avientek.patches.relabel_prf_outstanding_amount_to_net_amount
