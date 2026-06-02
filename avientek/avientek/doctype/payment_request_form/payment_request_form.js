@@ -2004,8 +2004,8 @@ frappe.ui.form.on('Payment Request Form', {
                         <th style="padding: 8px 12px;">Currency</th>
                         <th style="padding: 8px 12px; text-align: right;">Billing Amount</th>
                         <th style="padding: 8px 12px; text-align: right;">Base Amount (${company_currency})</th>
-                        <th style="padding: 8px 12px; text-align: right;">Net Payment</th>
-                        <th style="padding: 8px 12px; text-align: right;">Base Net Payment (${company_currency})</th>
+                        <th style="padding: 8px 12px; text-align: right;">Outstanding</th>
+                        <th style="padding: 8px 12px; text-align: right;">Base Outstanding (${company_currency})</th>
                     </tr>
                 </thead>
                 <tbody>`;
