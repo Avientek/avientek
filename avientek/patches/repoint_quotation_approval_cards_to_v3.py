@@ -29,16 +29,16 @@ import frappe
 UPDATES = {
 	"Pending Level 1 Approvals": (
 		'[["Quotation","workflow_state","in",'
-		'["Pending For Approval","Pending Level 1 Approval"]]]'
+		'["Pending For Approval","Pending Level 1 Approval"],false]]'
 	),
 	"Pending Level 2 Approvals": (
 		'[["Quotation","workflow_state","in",'
-		'["Pending L2 Approval","Pending Level 2 Approval"]]]'
+		'["Pending L2 Approval","Pending Level 2 Approval"],false]]'
 	),
 	"My Quotes Pending Approval": (
 		'[["Quotation","workflow_state","in",'
-		'["Pending For Approval","Pending L2 Approval",'
-		'"Pending Level 1 Approval","Pending Level 2 Approval"]]]'
+		'["Pending For Approval","Pending L2 Approval","Pending Approval",'
+		'"Pending Level 1 Approval","Pending Level 2 Approval"],false]]'
 	),
 }
 
