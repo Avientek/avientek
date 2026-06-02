@@ -263,14 +263,35 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 	# Customer have their own *_name columns; everything else just shows
 	# `name`. Build the extra columns inline so the outer SELECT can
 	# pull a unified display string.
+	#
+	# Sridhar 2026-06-02: also include the display-name column in the
+	# txt LIKE search. The previous form OR'd two identical
+	# `{searchfield} LIKE` / `name LIKE` clauses (since searchfield
+	# defaults to "name"), so typing "Sennheiser Middle East" never
+	# matched Supplier S-FZCO-00176 whose name is the ID code. Frappe's
+	# standard link picker searches both fields — this restores parity.
 	if table == "Supplier":
 		display_select = "`tabSupplier`.supplier_name AS display_name"
+		display_search_col = "`tabSupplier`.supplier_name"
 	elif table == "Customer":
 		display_select = "`tabCustomer`.customer_name AS display_name"
+		display_search_col = "`tabCustomer`.customer_name"
 	elif table == "Employee":
 		display_select = "`tabEmployee`.employee_name AS display_name"
+		display_search_col = "`tabEmployee`.employee_name"
 	else:
 		display_select = "'' AS display_name"
+		display_search_col = None
+
+	# Build the txt LIKE clauses: always search name; also search the
+	# display-name column when we have one; also honour the explicit
+	# searchfield if Frappe passed one other than "name".
+	search_or_clauses = [f"`tab{table}`.name LIKE %(txt)s"]
+	if display_search_col:
+		search_or_clauses.append(f"{display_search_col} LIKE %(txt)s")
+	if searchfield and searchfield != "name":
+		search_or_clauses.append(f"`tab{table}`.{searchfield} LIKE %(txt)s")
+	search_clause = " OR ".join(search_or_clauses)
 
 	rows = frappe.db.sql(
 		f"""
@@ -281,8 +302,7 @@ def party_query_with_internal(doctype, txt, searchfield, start, page_len, filter
 				{display_select}
 			FROM `tab{table}`
 			WHERE {active_clause}
-			  AND (`tab{table}`.{searchfield} LIKE %(txt)s
-			       OR `tab{table}`.name LIKE %(txt)s)
+			  AND ({search_clause})
 			  AND (
 			       `tab{table}`.company = %(company)s
 			       {internal_clause}
