@@ -41,6 +41,15 @@ def check_batches_remain_positive(doc, method=None):
 	if not getattr(doc, "items", None):
 		return
 
+	# Rahul 2026-06-02: false-positive on Sales Invoice LTD-26-27-00303.
+	# An SI/PI created from a DN/PR has update_stock=0 and does NOT write
+	# to the Stock Ledger — the DN/PR already did. We must not validate
+	# batch availability on these docs or every standard billing flow
+	# breaks once the source batch's post-DN balance is low.
+	if doc.doctype in ("Sales Invoice", "Purchase Invoice"):
+		if not bool(getattr(doc, "update_stock", 0)):
+			return
+
 	# Collect (item, source_warehouse, batch_no, signed_qty_delta) tuples.
 	# We only care about deltas that REDUCE a batch — adding stock can't
 	# cause a negative.
