@@ -433,3 +433,7 @@ avientek.patches.sync_quotation_workflow_status_field
 # Custom Fields to restrict the picker to the V3 workflow's 14 states
 # (+ V2 legacy bridges 'Pending Level 1/2 Approval'). Idempotent.
 avientek.patches.restrict_quotation_workflow_state_link_filter
+# Jithin 2026-06-02 (AVFZC-02215): conversion_rate field default precision
+# rounded exchange rates to 2 decimals (3.67 instead of 3.6725). Set
+# precision=6 to align with sibling transfer_exchange_rate. Idempotent.
+avientek.patches.set_prf_conversion_rate_precision_6

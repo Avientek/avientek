@@ -1963,8 +1963,14 @@ frappe.ui.form.on('Payment Request Form', {
             }
             currency_totals[curr].billing += flt(row.grand_total || 0, 2);
             currency_totals[curr].base += flt(row.base_grand_total || 0, 2);
-            currency_totals[curr].outstanding += flt(row.outstanding_amount || 0, 2);
-            currency_totals[curr].base_outstanding += flt(row.base_outstanding_amount || 0, 2);
+            // Jithin 2026-06-02 (AVFZC-02215): Net Amount must show the
+            // actual payment being made, not the supplier PI outstanding.
+            // For partial payments the two differ wildly (this doc:
+            // $29,509 billing vs $98,624 outstanding). Net Amount =
+            // grand_total matches what the print INVOICE DETAILS shows
+            // (commit a7556c2) and matches user expectation.
+            currency_totals[curr].outstanding += flt(row.grand_total || 0, 2);
+            currency_totals[curr].base_outstanding += flt(row.base_grand_total || 0, 2);
         });
 
         // Round accumulated totals to avoid floating-point drift
