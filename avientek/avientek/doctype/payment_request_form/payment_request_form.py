@@ -1944,13 +1944,25 @@ def get_outstanding_reference_documents(args):
             row["base_outstanding"] = os_company
 
             if voucher_type == "Purchase Invoice":
-                purchase_order = frappe.get_value(
+                # Jithin 2026-06-02: document_reference must point to the
+                # PI itself — that's the canonical link the View button
+                # and the Combined PDF print loop both follow. Pointing
+                # it at the linked Purchase Order broke (a) the View
+                # action (opens the PO instead of the PI) and (b) the
+                # Combined PDF print (attaches the PO instead of the
+                # PI). Restored to voucher_no per the
+                # REFERENCE_TARGET_DOCTYPE map pattern (see
+                # commit 39215ab 2026-05-14).
+                row["document_reference"] = voucher_no
+                # Surface the linked PO (if any) on a separate field for
+                # users who still want to see it in the picker grid /
+                # remarks. Doesn't drive any link or print resolution.
+                row["purchase_order"] = frappe.get_value(
                     "Purchase Invoice Item",
                     {"parent": voucher_no},
                     "purchase_order",
-                    order_by="idx asc"
-                )
-                row["document_reference"] = purchase_order
+                    order_by="idx asc",
+                ) or ""
 
             filtered_rows.append(row)
 
