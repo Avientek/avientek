@@ -4073,8 +4073,12 @@ def get_payment_voucher_context(docname):
     total_base = 0
     rows_data = []
     for row in (doc.payment_references or []):
-        amount_fc = flt(row.outstanding_amount or row.grand_total or 0)
-        amount_base = flt(row.base_outstanding_amount or row.base_grand_total or 0)
+        # Sridhar 2026-06-02: show actual partial-payment amount, not the PI
+        # outstanding. INVOICE DETAILS TOTAL must reflect what's being paid
+        # ($6,191.24 for AVFZC-02211), not the full supplier outstanding
+        # ($22,737.33).
+        amount_fc = flt(row.grand_total or row.outstanding_amount or 0)
+        amount_base = flt(row.base_grand_total or row.base_outstanding_amount or 0)
         curr = row.currency or company_currency
 
         if curr not in currency_totals:
