@@ -1290,6 +1290,30 @@ def copy_first_item_part_number(doc, method=None):
         doc.optional_item_part_numbers = new_optional
 
 
+def sync_workflow_status(doc, method=None):
+    """Keep workflow_status mirror in sync with workflow_state.
+
+    Sridhar/Rahul 2026-06-02: workflow_status was created as a Custom Field
+    with fetch_from="workflow_state" so it would surface in the list-view
+    filter typeahead (Frappe v15 hides the auto-injected workflow_state
+    Link). But fetch_from="workflow_state" is NOT a valid Frappe path
+    (fetch_from needs a Link.targetfield chain like "customer.tax_id"),
+    so the mirror only got populated via incidental save events. Workflow
+    transitions that write workflow_state via frappe.db.set_value bypassed
+    fetch_from entirely, leaving workflow_status stuck at stale values
+    (e.g. quote moved Pending For Approval -> Approved but filter still
+    counted it as Pending For Approval).
+
+    Explicit sync on every validate keeps both fields aligned. Cheap
+    Python assignment, no DB roundtrip — fires regardless of how the
+    save was triggered (workflow action, direct save, API, etc.).
+    """
+    current_state = doc.get("workflow_state") or ""
+    current_status = doc.get("workflow_status") or ""
+    if current_state != current_status:
+        doc.workflow_status = current_state
+
+
 def get_overall_margin(salesperson, brand):
     if not (salesperson and brand):
         return 0

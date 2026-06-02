@@ -421,3 +421,8 @@ avientek.patches.drop_quotation_item_part_number_report_hide
 # label 'Net Payment' -> 'Net Amount' for consistency with Currency Totals
 # header (a6df151). Idempotent Property Setter.
 avientek.patches.relabel_prf_outstanding_amount_to_net_amount
+# Sridhar/Rahul 2026-06-02: one-time backfill of Quotation workflow_status
+# = workflow_state after discovering fetch_from='workflow_state' wasn't a
+# valid path. Pairs with the new sync_workflow_status validate hook in
+# events/quotation.py.
+avientek.patches.sync_quotation_workflow_status_field

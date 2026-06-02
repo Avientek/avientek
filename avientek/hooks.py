@@ -522,6 +522,12 @@ doc_events = {
             # a mandatory reason captured by the JS popup. Server-side
             # enforcement catches API / direct-save bypass.
             "avientek.events.quotation.validate_probability_change_approval",
+            # Sridhar 2026-06-02: keep workflow_status mirror in sync with
+            # workflow_state. fetch_from='workflow_state' wasn't actually
+            # firing (not a valid Frappe path), so workflow transitions
+            # left the mirror stale and the list-view filter on
+            # workflow_status returned wrong rows.
+            "avientek.events.quotation.sync_workflow_status",
         ],
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
