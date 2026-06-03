@@ -28,6 +28,7 @@ LEDGER_METHODS = {
 	"Purchase Invoice":  ("make_gl_entries",),
 	"Journal Entry":     ("make_gl_entries",),
 	"Payment Entry":     ("make_gl_entries",),
+	"Expense Claim":     ("make_gl_entries",),
 	"Stock Entry":       ("update_stock_ledger", "make_gl_entries"),
 	"Delivery Note":     ("update_stock_ledger", "make_gl_entries"),
 	"Purchase Receipt":  ("update_stock_ledger", "make_gl_entries"),
@@ -76,33 +77,85 @@ def execute():
 				skipped += 1
 				continue
 
-			log.repost_started = now_datetime()
-			log.save(ignore_permissions=True)
-			frappe.db.commit()
-
+			started = now_datetime()
 			doc = frappe.get_doc(vt, vn)
 			methods_called = []
 			for method_name in LEDGER_METHODS.get(vt, ()):
 				method = getattr(doc, method_name, None)
 				if not method:
 					continue
-				method()
+				# from_repost=True wakes idempotency guards in ERPNext's
+				# StockController.make_gl_entries (otherwise it short-circuits
+				# on docs that "should already have" entries).
+				try:
+					method(from_repost=True)
+				except TypeError:
+					method()
 				methods_called.append(method_name)
 
-			log.repost_method = ",".join(methods_called) or "manual"
-			log.gl_entries_after = _count_gl(vt, vn)
-			log.sle_entries_after = _count_sle(vt, vn)
-			log.repost_finished = now_datetime()
-			log.status = "Done"
-			log.error_message = ""
-			log.save(ignore_permissions=True)
-			done += 1
+			gl_after = _count_gl(vt, vn)
+			sle_after = _count_sle(vt, vn)
+
+			# Map called methods to a value the Select field accepts.
+			# Field options: make_gl_entries / update_stock_ledger / both / manual.
+			if len(methods_called) >= 2:
+				repost_method_value = "both"
+			elif methods_called:
+				repost_method_value = methods_called[0]
+			else:
+				repost_method_value = "manual"
+
+			# If the methods executed but produced 0 entries on a doc
+			# that needed them, the root cause is upstream (typically
+			# items have incoming_rate=0, or grand_total is 0, so there's
+			# no value to write to the ledger). Mark Skipped with a
+			# diagnostic note — Accounts must investigate at item level.
+			gl_required = log.gl_entries_before == 0 and gl_after == 0 and vt in (
+				"Sales Invoice", "Purchase Invoice", "Journal Entry", "Payment Entry",
+				"Expense Claim", "Delivery Note", "Purchase Receipt",
+			)
+			sle_required = log.sle_entries_before == 0 and sle_after == 0 and vt in (
+				"Stock Entry", "Delivery Note", "Purchase Receipt",
+			)
+			no_progress = gl_required or sle_required
+
+			# Use direct DB writes (no doc.save) to skip the timestamp
+			# check entirely — ledger methods invoked above can trigger
+			# wildcard on_submit hooks that touch this row indirectly,
+			# leaving doc.save() to fail with TimestampMismatchError.
+			if no_progress:
+				frappe.db.set_value("Ghost Voucher Repost Log", log.name, {
+					"repost_started": started,
+					"repost_method": repost_method_value,
+					"gl_entries_after": gl_after,
+					"sle_entries_after": sle_after,
+					"repost_finished": now_datetime(),
+					"status": "Skipped",
+					"error_message": (
+						"Repost methods executed but produced 0 entries. "
+						"Likely upstream issue: items have incoming_rate=0 / no cost basis, "
+						"or doc grand_total=0. Accounts to investigate item valuation."
+					),
+				}, update_modified=True)
+				skipped += 1
+			else:
+				frappe.db.set_value("Ghost Voucher Repost Log", log.name, {
+					"repost_started": started,
+					"repost_method": repost_method_value,
+					"gl_entries_after": gl_after,
+					"sle_entries_after": sle_after,
+					"repost_finished": now_datetime(),
+					"status": "Done",
+					"error_message": "",
+				}, update_modified=True)
+				done += 1
 
 		except Exception as e:
-			log.status = "Failed"
-			log.error_message = str(e)[:500]
-			log.repost_finished = now_datetime()
-			log.save(ignore_permissions=True)
+			frappe.db.set_value("Ghost Voucher Repost Log", r["name"], {
+				"status": "Failed",
+				"error_message": str(e)[:500],
+				"repost_finished": now_datetime(),
+			}, update_modified=True)
 			failed += 1
 			# Continue with next row
 

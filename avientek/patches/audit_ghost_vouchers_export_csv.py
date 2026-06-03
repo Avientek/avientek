@@ -28,10 +28,24 @@ from frappe.utils import now_datetime
 
 
 # Voucher types that must create GL entries on submit
-GL_REQUIRED = ("Sales Invoice", "Purchase Invoice", "Journal Entry", "Payment Entry")
+GL_REQUIRED = (
+	"Sales Invoice", "Purchase Invoice", "Journal Entry", "Payment Entry",
+	"Expense Claim",
+)
 # Voucher types that must create SLE on submit
 SLE_REQUIRED = ("Stock Entry", "Delivery Note", "Purchase Receipt")
 ALL_VOUCHER_TYPES = GL_REQUIRED + SLE_REQUIRED
+
+# Per-doctype field map for amount + currency — Frappe doesn't have a
+# universal "grand_total" field name. Journal Entry uses total_debit,
+# Expense Claim uses total_claimed_amount, etc. Anything not listed
+# falls back to ("grand_total", "currency").
+AMOUNT_FIELDS = {
+	"Journal Entry": ("total_debit", None),
+	"Expense Claim": ("total_claimed_amount", None),
+	"Payment Entry": ("paid_amount", "paid_from_account_currency"),
+	"Stock Entry":   ("total_amount", None),
+}
 
 
 def _count_gl(voucher_type, voucher_no):
@@ -57,13 +71,16 @@ def execute():
 	for vt in ALL_VOUCHER_TYPES:
 		# Pull all submitted (docstatus=1) docs of this type
 		# Limit to non-return docs for SLE check (returns may legitimately have 0 SLE in some flows)
+		amt_field, curr_field = AMOUNT_FIELDS.get(vt, ("grand_total", "currency"))
+		fields = ["name", "company", "posting_date", f"{amt_field} AS grand_total"]
+		if curr_field:
+			fields.append(f"{curr_field} AS currency")
+
 		try:
 			docs = frappe.get_all(
 				vt,
 				filters={"docstatus": 1},
-				fields=["name", "company", "posting_date", "grand_total", "currency"]
-				if vt != "Journal Entry"
-				else ["name", "company", "posting_date", "total_debit AS grand_total"],
+				fields=fields,
 				limit_page_length=0,
 			)
 		except Exception as e:

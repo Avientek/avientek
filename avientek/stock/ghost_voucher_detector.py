@@ -22,6 +22,7 @@ LEDGER_REQUIREMENTS = {
 	"Purchase Invoice": (True, False),
 	"Journal Entry":    (True, False),
 	"Payment Entry":    (True, False),
+	"Expense Claim":    (True, False),
 	"Stock Entry":      (False, True),
 	"Delivery Note":    (True, True),
 	"Purchase Receipt": (True, True),
