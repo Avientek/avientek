@@ -8075,7 +8075,7 @@
   "name": "Quotation-custom_service_items",
   "no_copy": 0,
   "non_negative": 0,
-  "options": "Quotation Item",
+  "options": "Optional Item",
   "permlevel": 0,
   "placeholder": null,
   "precision": "",

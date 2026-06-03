@@ -451,3 +451,8 @@ avientek.patches.clone_quotation_item_custom_fields_to_optional_item
 # fields. Leaves originals in place — cleanup ships separately after
 # verification. Idempotent.
 avientek.patches.migrate_custom_service_items_to_optional_item
+# Sridhar 2026-06-03: Step 4 — switch Quotation.custom_service_items field
+# options to Optional Item. After this the form reads from tabOptional
+# Item (where Step 3 copied the 19 rows) instead of tabQuotation Item.
+# Old tabQuotation Item rows become orphans pending Step 8 cleanup.
+avientek.patches.switch_quotation_custom_service_items_to_optional_item
