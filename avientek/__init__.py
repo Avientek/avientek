@@ -334,6 +334,109 @@ def _patch_batch_wise_balance_history_legacy_query():
 	bwbh.get_stock_ledger_entries_for_batch_no = _patched_for_batch_no
 
 
+def _patch_batch_valuation_get_sle_for_batches():
+	"""Exclude SBB-linked SLEs from the legacy ledger-sum used by SBB
+	submit-time validate_negative_batch.
+
+	Sridhar 2026-06-03 (BN14571 / DN-AT-26-00332 still blocked despite
+	prior patches):
+
+	When a DN with batch-tracked items is submitted, ERPNext builds a
+	Serial and Batch Bundle (SBB) and validates it via
+	SerialAndBatchBundle.set_incoming_rate, which calls
+	BatchNoValuation.calculate_avg_rate:
+
+	    entries = self.get_batch_no_ledgers()         # SBB child rows only
+	    for ledger in entries:
+	        self.available_qty[batch] += qty
+	    self.calculate_avg_rate_from_deprecarated_ledgers()
+	        # ↑ adds SLE.actual_qty WHERE batch_no IS NOT NULL — does NOT
+	        #   exclude SBB-linked SLEs, so single-batch SBB rows are
+	        #   counted TWICE (once via SBE.qty, once via SLE.batch_no).
+	    # Then validate_negative_batch throws if self.available_qty[batch] < 0
+
+	Result: validate_negative_batch reads an INFLATED outflow total, sees
+	the batch as more negative than it really is, throws
+	"Batch No X of an Item Y has negative stock of quantity -1.0".
+
+	Concrete proof on local: BN14571 (I028753 / Stores-KSA) shows
+	  Old buggy query: -2.0
+	  TRUE SBB-aware:  +3.0
+	Yet DN-AT-26-00332 still throws -1.0 because this third validation
+	path uses the SAME upstream bug. The picker patch and the report
+	patch were not enough — submit validation also needs the SBB
+	exclusion.
+
+	Fix: monkey-patch DeprecatedBatchNoValuation.get_sle_for_batches to
+	add the same `serial_and_batch_bundle IS NULL` filter as the other
+	two patches. Modern v15 SBB-linked rows flow exclusively through
+	get_batch_no_ledgers (the SBB path). Only true pre-v15 / direct-
+	batch-field SLEs go through this legacy path.
+
+	Idempotent — replaces the bound method once at app load.
+	"""
+	import datetime
+	import frappe
+	from frappe.utils import nowtime
+	from frappe.query_builder.functions import Sum
+	from erpnext.stock import deprecated_serial_batch as dsb
+
+	def _patched_get_sle_for_batches(self):
+		from erpnext.stock.utils import get_combine_datetime
+
+		if not self.batchwise_valuation_batches:
+			return []
+
+		sle = frappe.qb.DocType("Stock Ledger Entry")
+
+		timestamp_condition = None
+		if self.sle.posting_date:
+			if self.sle.posting_time is None:
+				self.sle.posting_time = nowtime()
+
+			posting_datetime = get_combine_datetime(self.sle.posting_date, self.sle.posting_time)
+			if not self.sle.creation:
+				posting_datetime = posting_datetime + datetime.timedelta(milliseconds=1)
+
+			timestamp_condition = sle.posting_datetime < posting_datetime
+
+			if self.sle.creation:
+				timestamp_condition |= (sle.posting_datetime == posting_datetime) & (
+					sle.creation < self.sle.creation
+				)
+
+		query = (
+			frappe.qb.from_(sle)
+			.select(
+				sle.batch_no,
+				Sum(sle.stock_value_difference).as_("batch_value"),
+				Sum(sle.actual_qty).as_("batch_qty"),
+			)
+			.where(
+				(sle.item_code == self.sle.item_code)
+				& (sle.warehouse == self.sle.warehouse)
+				& (sle.batch_no.isin(self.batchwise_valuation_batches))
+				& (sle.batch_no.isnotnull())
+				& (sle.is_cancelled == 0)
+				# Avientek fix — exclude SBB-linked SLEs to stop the
+				# double-count with get_batch_no_ledgers (SBE.qty path).
+				& ((sle.serial_and_batch_bundle.isnull()) | (sle.serial_and_batch_bundle == ""))
+			)
+			.for_update()
+			.groupby(sle.batch_no)
+		)
+
+		if timestamp_condition:
+			query = query.where(timestamp_condition)
+
+		if self.sle.name:
+			query = query.where(sle.name != self.sle.name)
+
+		return query.run(as_dict=True)
+
+	dsb.DeprecatedBatchNoValuation.get_sle_for_batches = _patched_get_sle_for_batches
+
+
 _apply_patches()
 _patch_qb_get_query()
 try:
@@ -342,6 +445,10 @@ except Exception:
 	pass
 try:
 	_patch_batch_wise_balance_history_legacy_query()
+except Exception:
+	pass
+try:
+	_patch_batch_valuation_get_sle_for_batches()
 except Exception:
 	pass
 
