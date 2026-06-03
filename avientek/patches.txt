@@ -470,3 +470,9 @@ avientek.patches.flag_no_donor_for_writeoff
 # only acts on Ready rows. Idempotent + per-row failure-safe.
 avientek.patches.audit_ghost_vouchers_export_csv
 avientek.patches.repost_ghost_vouchers_bulk
+# Sridhar 2026-06-03 — Patch B4: auto-submit Draft Sales Invoices linked
+# to non-stock DNs that show 0 GL. For non-stock items, ERPNext writes
+# GL on the SI (not the DN). If the SI was created but never submitted,
+# the DN appears as a 'ghost'. Patch submits the Draft, auto-aligns DN
+# vs SI rate mismatches. Idempotent.
+avientek.patches.fix_non_stock_dn_drafts
