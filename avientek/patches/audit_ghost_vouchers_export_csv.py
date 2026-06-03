@@ -64,6 +64,57 @@ def _count_sle(voucher_type, voucher_no):
 	})
 
 
+# Item-bearing doctype → child-table doctype name
+ITEM_CHILD = {
+	"Sales Invoice":    "Sales Invoice Item",
+	"Purchase Invoice": "Purchase Invoice Item",
+	"Delivery Note":    "Delivery Note Item",
+	"Purchase Receipt": "Purchase Receipt Item",
+	"Stock Entry":      "Stock Entry Detail",
+}
+
+
+def _has_stock_item(voucher_type, voucher_no):
+	"""True if any line item is a stock-tracked item.
+
+	The original audit ignored this and flagged every transactional doc
+	with 0 SLE/GL as a ghost. Reality: a DN/SI shipping only services
+	(is_stock_item=0) correctly has no SLE, and a SI for services with
+	zero grand_total has no GL — both are valid system states, not
+	ghosts. Same false-positive pattern as the 528→1 negative-batch
+	finding (mirroring an upstream bug in our own audit).
+	"""
+	child = ITEM_CHILD.get(voucher_type)
+	if not child:
+		# Doctype has no item table (JV, PE, EC) — always evaluate
+		return True
+	stock_items = frappe.db.sql(f"""
+		SELECT 1 FROM `tab{child}` ci
+		INNER JOIN `tabItem` i ON i.name = ci.item_code
+		WHERE ci.parent = %s AND ci.parenttype = %s AND i.is_stock_item = 1
+		LIMIT 1
+	""", (voucher_no, voucher_type))
+	return bool(stock_items)
+
+
+def _has_any_amount(voucher_type, voucher_no, child_field, amount_field="amount"):
+	"""True if any item line has non-zero amount.
+
+	A SI with grand_total=0 and every line at 0 is a void/cancelled-like
+	state — no GL entries are expected. Flagging it as a ghost is wrong.
+	"""
+	child = ITEM_CHILD.get(voucher_type)
+	if not child:
+		return True
+	res = frappe.db.sql(f"""
+		SELECT 1 FROM `tab{child}`
+		WHERE parent = %s AND parenttype = %s
+		  AND ABS(IFNULL({amount_field}, 0)) > 0.001
+		LIMIT 1
+	""", (voucher_no, voucher_type))
+	return bool(res)
+
+
 def execute():
 	ghosts = []
 	ts = now_datetime()
@@ -87,9 +138,49 @@ def execute():
 			print(f"[audit_ghost_vouchers_export_csv] could not list {vt}: {e}")
 			continue
 
+		# Pre-fetch which docs have at least one stock item — major
+		# filter to drop service-only DN/SI/etc. that legitimately have
+		# no SLE / GL.
+		has_stock_item = {}
+		has_amount = {}
+		if vt in ITEM_CHILD:
+			child = ITEM_CHILD[vt]
+			rows = frappe.db.sql(f"""
+				SELECT ci.parent
+				FROM `tab{child}` ci
+				INNER JOIN `tabItem` i ON i.name = ci.item_code
+				WHERE ci.parenttype = %s AND i.is_stock_item = 1
+				GROUP BY ci.parent
+			""", (vt,))
+			has_stock_item = {r[0] for r in rows}
+			# Amount field varies — for SI/PI/DN/PR it's `amount`, for SE it's `amount` too
+			rows = frappe.db.sql(f"""
+				SELECT parent FROM `tab{child}`
+				WHERE parenttype = %s AND ABS(IFNULL(amount, 0)) > 0.001
+				GROUP BY parent
+			""", (vt,))
+			has_amount = {r[0] for r in rows}
+
 		for d in docs:
+			# GL requirement: doctype is in GL_REQUIRED AND (no items OR has at least one stock item or non-zero amount)
+			# For item-bearing doctypes, skip the GL check if all items are non-stock AND amount=0
+			# A SI for $0 of services has no GL (and shouldn't).
+			# A SI for $1000 of services HAS GL even with no stock items.
+			# A DN with non-stock items only has no GL/SLE (services).
 			needs_gl = vt in GL_REQUIRED
 			needs_sle = vt in SLE_REQUIRED
+
+			if vt in ITEM_CHILD:
+				dn_has_stock = d["name"] in has_stock_item
+				dn_has_amount = d["name"] in has_amount
+				if needs_sle and not dn_has_stock:
+					needs_sle = False  # service-only doc — no SLE expected
+				if needs_gl and not dn_has_stock and not dn_has_amount:
+					needs_gl = False  # zero-value void-like doc — no GL expected
+
+			if not (needs_gl or needs_sle):
+				continue  # nothing to detect on this doc
+
 			gl_cnt = _count_gl(vt, d["name"]) if needs_gl else None
 			sle_cnt = _count_sle(vt, d["name"]) if needs_sle else None
 

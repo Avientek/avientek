@@ -51,113 +51,142 @@ def execute():
 	)
 	print(f"[repost_ghost_vouchers_bulk] {len(ready)} rows Ready for repost")
 
+	# Lift all date-freeze locks for the duration of this run.
+	# Restored in the outer try/finally regardless of how we exit.
+	# - Stock Settings.stock_frozen_upto blocks Stock Ledger Entry
+	#   writes before the date.
+	# - Accounts Settings.acc_frozen_upto blocks GL Entry writes
+	#   before the date.
+	# - Stock Settings.allow_negative_stock=0 blocks SLEs that would
+	#   push a Bin negative (typical for legacy DN/SI cleanup).
+	orig_stock_frozen = frappe.db.get_single_value("Stock Settings", "stock_frozen_upto") or ""
+	orig_neg_stock = frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
+	orig_acc_frozen = frappe.db.get_single_value("Accounts Settings", "acc_frozen_upto") or ""
+
+	if orig_stock_frozen:
+		frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", "")
+	if not orig_neg_stock:
+		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
+	if orig_acc_frozen:
+		frappe.db.set_single_value("Accounts Settings", "acc_frozen_upto", "")
+	frappe.db.commit()
+
 	done = 0
 	skipped = 0
 	failed = 0
 
-	for r in ready:
-		log = frappe.get_doc("Ghost Voucher Repost Log", r["name"])
-		vt = r["voucher_type"]
-		vn = r["voucher_no"]
+	try:
+		for r in ready:
+			log = frappe.get_doc("Ghost Voucher Repost Log", r["name"])
+			vt = r["voucher_type"]
+			vn = r["voucher_no"]
 
-		try:
-			# Verify source doc still exists + is submitted
-			if not frappe.db.exists(vt, vn):
-				log.status = "Skipped"
-				log.remarks = "Source voucher no longer exists"
-				log.save(ignore_permissions=True)
-				skipped += 1
-				continue
-
-			doc_status = frappe.db.get_value(vt, vn, "docstatus")
-			if doc_status != 1:
-				log.status = "Skipped"
-				log.remarks = f"Source voucher docstatus={doc_status} (not submitted) — cannot repost"
-				log.save(ignore_permissions=True)
-				skipped += 1
-				continue
-
-			started = now_datetime()
-			doc = frappe.get_doc(vt, vn)
-			methods_called = []
-			for method_name in LEDGER_METHODS.get(vt, ()):
-				method = getattr(doc, method_name, None)
-				if not method:
+			try:
+				# Verify source doc still exists + is submitted
+				if not frappe.db.exists(vt, vn):
+					frappe.db.set_value("Ghost Voucher Repost Log", r["name"], {
+						"status": "Skipped",
+						"remarks": "Source voucher no longer exists",
+					}, update_modified=True)
+					skipped += 1
 					continue
-				# from_repost=True wakes idempotency guards in ERPNext's
-				# StockController.make_gl_entries (otherwise it short-circuits
-				# on docs that "should already have" entries).
-				try:
-					method(from_repost=True)
-				except TypeError:
-					method()
-				methods_called.append(method_name)
 
-			gl_after = _count_gl(vt, vn)
-			sle_after = _count_sle(vt, vn)
+				doc_status = frappe.db.get_value(vt, vn, "docstatus")
+				if doc_status != 1:
+					frappe.db.set_value("Ghost Voucher Repost Log", r["name"], {
+						"status": "Skipped",
+						"remarks": f"Source voucher docstatus={doc_status} (not submitted) — cannot repost",
+					}, update_modified=True)
+					skipped += 1
+					continue
 
-			# Map called methods to a value the Select field accepts.
-			# Field options: make_gl_entries / update_stock_ledger / both / manual.
-			if len(methods_called) >= 2:
-				repost_method_value = "both"
-			elif methods_called:
-				repost_method_value = methods_called[0]
-			else:
-				repost_method_value = "manual"
+				started = now_datetime()
+				doc = frappe.get_doc(vt, vn)
+				methods_called = []
+				for method_name in LEDGER_METHODS.get(vt, ()):
+					method = getattr(doc, method_name, None)
+					if not method:
+						continue
+					# from_repost=True wakes ERPNext's StockController.
+					# make_gl_entries idempotency guard (otherwise it
+					# short-circuits on already-submitted docs).
+					try:
+						method(from_repost=True)
+					except TypeError:
+						method()
+					methods_called.append(method_name)
 
-			# If the methods executed but produced 0 entries on a doc
-			# that needed them, the root cause is upstream (typically
-			# items have incoming_rate=0, or grand_total is 0, so there's
-			# no value to write to the ledger). Mark Skipped with a
-			# diagnostic note — Accounts must investigate at item level.
-			gl_required = log.gl_entries_before == 0 and gl_after == 0 and vt in (
-				"Sales Invoice", "Purchase Invoice", "Journal Entry", "Payment Entry",
-				"Expense Claim", "Delivery Note", "Purchase Receipt",
-			)
-			sle_required = log.sle_entries_before == 0 and sle_after == 0 and vt in (
-				"Stock Entry", "Delivery Note", "Purchase Receipt",
-			)
-			no_progress = gl_required or sle_required
+				gl_after = _count_gl(vt, vn)
+				sle_after = _count_sle(vt, vn)
 
-			# Use direct DB writes (no doc.save) to skip the timestamp
-			# check entirely — ledger methods invoked above can trigger
-			# wildcard on_submit hooks that touch this row indirectly,
-			# leaving doc.save() to fail with TimestampMismatchError.
-			if no_progress:
-				frappe.db.set_value("Ghost Voucher Repost Log", log.name, {
-					"repost_started": started,
-					"repost_method": repost_method_value,
-					"gl_entries_after": gl_after,
-					"sle_entries_after": sle_after,
+				# Field options on `repost_method` Select:
+				# make_gl_entries / update_stock_ledger / both / manual
+				if len(methods_called) >= 2:
+					repost_method_value = "both"
+				elif methods_called:
+					repost_method_value = methods_called[0]
+				else:
+					repost_method_value = "manual"
+
+				# If methods ran but produced 0 entries on a doc that
+				# needed them, root cause is upstream (items have
+				# incoming_rate=0, all non-stock, or doc grand_total=0).
+				# Mark Skipped with diagnostic so Accounts investigates.
+				gl_required = log.gl_entries_before == 0 and gl_after == 0 and vt in (
+					"Sales Invoice", "Purchase Invoice", "Journal Entry", "Payment Entry",
+					"Expense Claim", "Delivery Note", "Purchase Receipt",
+				)
+				sle_required = log.sle_entries_before == 0 and sle_after == 0 and vt in (
+					"Stock Entry", "Delivery Note", "Purchase Receipt",
+				)
+				no_progress = gl_required or sle_required
+
+				# Direct DB writes (no doc.save) — the ledger methods
+				# trigger wildcard on_submit hooks that touch this row
+				# indirectly, which races against doc.save's
+				# TimestampMismatch check.
+				if no_progress:
+					frappe.db.set_value("Ghost Voucher Repost Log", log.name, {
+						"repost_started": started,
+						"repost_method": repost_method_value,
+						"gl_entries_after": gl_after,
+						"sle_entries_after": sle_after,
+						"repost_finished": now_datetime(),
+						"status": "Skipped",
+						"error_message": (
+							"Repost methods executed but produced 0 entries. "
+							"Likely upstream issue: items have incoming_rate=0 / "
+							"no cost basis, all items non-stock, or doc "
+							"grand_total=0. Accounts to investigate at item level."
+						),
+					}, update_modified=True)
+					skipped += 1
+				else:
+					frappe.db.set_value("Ghost Voucher Repost Log", log.name, {
+						"repost_started": started,
+						"repost_method": repost_method_value,
+						"gl_entries_after": gl_after,
+						"sle_entries_after": sle_after,
+						"repost_finished": now_datetime(),
+						"status": "Done",
+						"error_message": "",
+					}, update_modified=True)
+					done += 1
+
+			except Exception as e:
+				frappe.db.set_value("Ghost Voucher Repost Log", r["name"], {
+					"status": "Failed",
+					"error_message": str(e)[:500],
 					"repost_finished": now_datetime(),
-					"status": "Skipped",
-					"error_message": (
-						"Repost methods executed but produced 0 entries. "
-						"Likely upstream issue: items have incoming_rate=0 / no cost basis, "
-						"or doc grand_total=0. Accounts to investigate item valuation."
-					),
 				}, update_modified=True)
-				skipped += 1
-			else:
-				frappe.db.set_value("Ghost Voucher Repost Log", log.name, {
-					"repost_started": started,
-					"repost_method": repost_method_value,
-					"gl_entries_after": gl_after,
-					"sle_entries_after": sle_after,
-					"repost_finished": now_datetime(),
-					"status": "Done",
-					"error_message": "",
-				}, update_modified=True)
-				done += 1
+				failed += 1
+				# Continue with next row
 
-		except Exception as e:
-			frappe.db.set_value("Ghost Voucher Repost Log", r["name"], {
-				"status": "Failed",
-				"error_message": str(e)[:500],
-				"repost_finished": now_datetime(),
-			}, update_modified=True)
-			failed += 1
-			# Continue with next row
+	finally:
+		# Restore Stock + Accounts freezes regardless of how we exit
+		frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", orig_stock_frozen or "")
+		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", orig_neg_stock or 0)
+		frappe.db.set_single_value("Accounts Settings", "acc_frozen_upto", orig_acc_frozen or "")
+		frappe.db.commit()
 
-	frappe.db.commit()
 	print(f"[repost_ghost_vouchers_bulk] done={done} skipped={skipped} failed={failed}")
