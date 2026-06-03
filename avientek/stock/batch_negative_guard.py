@@ -41,6 +41,14 @@ def check_batches_remain_positive(doc, method=None):
 	if not getattr(doc, "items", None):
 		return
 
+	# Sridhar 2026-06-03 — explicit bypass for negative-batch cleanup
+	# Repacks. Patch A3 sets `flags.ignore_avientek_negative_batch_guard`
+	# on the Stock Entry it builds; honour the flag here so the cleanup
+	# Repack (which TARGETS a negative batch — its consume side will
+	# temporarily look negative mid-validation) can submit successfully.
+	if getattr(doc.flags, "ignore_avientek_negative_batch_guard", False):
+		return
+
 	# Rahul 2026-06-02: false-positive on Sales Invoice LTD-26-27-00303.
 	# An SI/PI created from a DN/PR has update_stock=0 and does NOT write
 	# to the Stock Ledger — the DN/PR already did. We must not validate

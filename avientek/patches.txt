@@ -456,3 +456,17 @@ avientek.patches.migrate_custom_service_items_to_optional_item
 # Item (where Step 3 copied the 19 rows) instead of tabQuotation Item.
 # Old tabQuotation Item rows become orphans pending Step 8 cleanup.
 avientek.patches.switch_quotation_custom_service_items_to_optional_item
+# Sridhar 2026-06-03 — Negative-Stock Cleanup project: 4 patches that
+# audit, plan, and execute the Repack-based zero-GL cleanup. Stores Mgr
+# / Accounts Mgr ticks ready_for_execution per row in the Cleanup Plan;
+# Patch A3 only touches Ready rows. Idempotent + per-row failure-safe.
+avientek.patches.audit_negative_batches_export_csv
+avientek.patches.find_donor_batches_for_negative
+avientek.patches.execute_negative_batch_repack
+avientek.patches.flag_no_donor_for_writeoff
+# Sridhar 2026-06-03 — Ghost Voucher Cleanup project: 2 patches that
+# audit + repost. Audit populates Ghost Voucher Repost Log rows for
+# Accounts review. Accounts ticks ready_for_repost; the bulk patch
+# only acts on Ready rows. Idempotent + per-row failure-safe.
+avientek.patches.audit_ghost_vouchers_export_csv
+avientek.patches.repost_ghost_vouchers_bulk

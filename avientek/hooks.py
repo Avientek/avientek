@@ -694,6 +694,15 @@ doc_events = {
             "avientek.events.demo_unit_request_links.on_linked_doc_cancel",
         ],
     },
+    # Sridhar 2026-06-03 — Ghost Voucher Phase 1 lock-the-door.
+    # Wildcard on_submit. The detector self-filters by doctype (only
+    # acts on SI / PI / JV / PE / SE / DN / PR) and silently logs a
+    # Ghost Voucher Alert row if GL/SLE creation didn't happen as
+    # expected. No email. No retry. No throw. Sridhar reviews
+    # /app/ghost-voucher-alert on demand.
+    "*": {
+        "on_submit": "avientek.stock.ghost_voucher_detector.verify_ledger_created",
+    },
 }
 
 
