@@ -437,3 +437,10 @@ avientek.patches.restrict_quotation_workflow_state_link_filter
 # rounded exchange rates to 2 decimals (3.67 instead of 3.6725). Set
 # precision=6 to align with sibling transfer_exchange_rate. Idempotent.
 avientek.patches.set_prf_conversion_rate_precision_6
+# Sridhar 2026-06-03: Step 2 of 'Quotation Optional Items into own DocType'
+# migration. Clones all 85 Quotation Item Custom Fields onto the new
+# Optional Item child doctype so the upcoming data copy of the 19
+# `custom_service_items` rows is a straight column-for-column move with
+# no field-not-found errors. Step 1 (DocType creation) was done manually.
+# Idempotent.
+avientek.patches.clone_quotation_item_custom_fields_to_optional_item
