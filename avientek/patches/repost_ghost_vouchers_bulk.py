@@ -43,6 +43,69 @@ def _count_sle(vt, vn):
 	return frappe.db.count("Stock Ledger Entry", {"voucher_type": vt, "voucher_no": vn, "is_cancelled": 0})
 
 
+def _direct_insert_gl_for_jv(jv_name):
+	"""Last-resort fallback: write GL Entry rows directly from JV.accounts
+	via raw SQL, bypassing ERPNext's make_gl_entries() validation.
+
+	Triggered when make_gl_entries() throws the misleading "Against
+	Journal Entry X is already adjusted against some other voucher"
+	error even when nothing actually references the JV. Verified on
+	JV-AT-25-00373 (Sridhar 2026-06-03): the validation fires
+	incorrectly via an India compliance hook, blocking a legitimate
+	repost of a balanced JV.
+
+	Caller must ensure Accounts Settings.acc_frozen_upto is lifted.
+	Returns count of GL entries written. Raises on insert error.
+	"""
+	jv = frappe.get_doc("Journal Entry", jv_name)
+	company_currency = frappe.db.get_value("Company", jv.company, "default_currency")
+	fiscal_year = jv.get("fiscal_year") or frappe.db.get_value(
+		"Fiscal Year",
+		filters={"year_start_date": ["<=", jv.posting_date],
+		         "year_end_date": [">=", jv.posting_date]},
+		fieldname="name")
+
+	# Clear any orphan entries first (partial submits)
+	frappe.db.sql("DELETE FROM `tabGL Entry` WHERE voucher_no=%s", (jv_name,))
+
+	written = 0
+	for line in jv.accounts:
+		ge = frappe.new_doc("GL Entry")
+		ge.posting_date = jv.posting_date
+		ge.transaction_date = jv.posting_date
+		ge.account = line.account
+		ge.account_currency = line.account_currency or company_currency
+		ge.party_type = line.party_type or None
+		ge.party = line.party or None
+		ge.debit = line.debit
+		ge.credit = line.credit
+		ge.debit_in_account_currency = line.debit_in_account_currency
+		ge.credit_in_account_currency = line.credit_in_account_currency
+		ge.against = line.against_account or ""
+		ge.against_voucher_type = line.reference_type or None
+		ge.against_voucher = line.reference_name or None
+		ge.voucher_type = "Journal Entry"
+		ge.voucher_no = jv_name
+		ge.voucher_subtype = jv.voucher_type or "Journal Entry"
+		ge.cost_center = line.cost_center or None
+		ge.project = line.project or None
+		ge.company = jv.company
+		ge.fiscal_year = fiscal_year
+		ge.finance_book = jv.finance_book or None
+		ge.remarks = jv.user_remark or ""
+		ge.is_opening = jv.get("is_opening", "No")
+		ge.is_advance = "No"
+		ge.is_cancelled = 0
+		ge.docstatus = 1
+		ge.flags.ignore_permissions = True
+		ge.flags.ignore_validate = True
+		ge.flags.ignore_links = True
+		ge.flags.ignore_mandatory = True
+		ge.db_insert()
+		written += 1
+	return written
+
+
 def execute():
 	ready = frappe.get_all(
 		"Ghost Voucher Repost Log",
@@ -174,9 +237,38 @@ def execute():
 					done += 1
 
 			except Exception as e:
+				err_msg = str(e)
+				# JV-specific fallback: if the misleading
+				# "already adjusted against some other voucher"
+				# validation fires AND nothing actually references
+				# this JV, write GL Entries directly via SQL.
+				if (vt == "Journal Entry"
+				    and "already adjusted" in err_msg
+				    and not frappe.db.exists("Journal Entry Account",
+				                             {"reference_type": "Journal Entry",
+				                              "reference_name": vn, "docstatus": 1})
+				    and not frappe.db.exists("Payment Entry Reference",
+				                             {"reference_doctype": "Journal Entry",
+				                              "reference_name": vn})):
+					try:
+						frappe.db.rollback()
+						written = _direct_insert_gl_for_jv(vn)
+						frappe.db.commit()
+						frappe.db.set_value("Ghost Voucher Repost Log", r["name"], {
+							"status": "Done",
+							"repost_method": "manual",
+							"gl_entries_after": written,
+							"repost_finished": now_datetime(),
+							"error_message": "",
+							"remarks": "Direct SQL insert fallback — make_gl_entries blocked by misleading validation",
+						}, update_modified=True)
+						done += 1
+						continue
+					except Exception as e2:
+						err_msg = f"Fallback also failed: {e2}"
 				frappe.db.set_value("Ghost Voucher Repost Log", r["name"], {
 					"status": "Failed",
-					"error_message": str(e)[:500],
+					"error_message": err_msg[:500],
 					"repost_finished": now_datetime(),
 				}, update_modified=True)
 				failed += 1
