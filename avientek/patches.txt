@@ -464,6 +464,13 @@ avientek.patches.audit_negative_batches_export_csv
 avientek.patches.find_donor_batches_for_negative
 avientek.patches.execute_negative_batch_repack
 avientek.patches.flag_no_donor_for_writeoff
+# Sridhar 2026-06-03: A5 — SYSTEMIC dynamic fix for v15 SBB double-count.
+# NULL out batch_no on every SBB-linked SLE. The SBB child rows carry
+# the batch info, so legacy SLE.batch_no is redundant and creates the
+# double-count condition all upstream readers are vulnerable to. After
+# this patch + the before_save enforcer hook, no ERPNext reader can
+# double-count batch availability anywhere in the system. Idempotent.
+avientek.patches.null_batch_no_on_all_sbb_sles
 # Sridhar 2026-06-03 — Ghost Voucher Cleanup project: 2 patches that
 # audit + repost. Audit populates Ghost Voucher Repost Log rows for
 # Accounts review. Accounts ticks ready_for_repost; the bulk patch

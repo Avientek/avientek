@@ -703,6 +703,18 @@ doc_events = {
     "*": {
         "on_submit": "avientek.stock.ghost_voucher_detector.verify_ledger_created",
     },
+    # Sridhar 2026-06-03 — dynamic SBB-double-count immunizer. Whenever
+    # a Stock Ledger Entry is saved with a non-empty Serial and Batch
+    # Bundle attached, force batch_no = NULL. The SBB child rows carry
+    # the authoritative batch info; keeping batch_no on the SLE row
+    # creates the double-count condition the upstream ERPNext readers
+    # are vulnerable to. After this hook + the one-time A5 cleanup, no
+    # ERPNext reader (present or future) can double-count because the
+    # redundant data simply doesn't exist.
+    "Stock Ledger Entry": {
+        "before_save": "avientek.stock.sbb_batch_no_enforcer.enforce_sbb_null_batch_no",
+        "before_insert": "avientek.stock.sbb_batch_no_enforcer.enforce_sbb_null_batch_no",
+    },
 }
 
 
