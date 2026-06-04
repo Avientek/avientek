@@ -1317,13 +1317,16 @@ frappe.ui.form.on('Payment Request Form', {
             "Purchase Invoice": {
                 fields: ["bill_no", "posting_date", "due_date", "currency",
                          "conversion_rate", "grand_total", "base_grand_total",
-                         "outstanding_amount", "is_return"],
+                         "outstanding_amount", "base_outstanding_amount", "is_return"],
                 mapper: function (v) {
+                    // Sridhar 2026-06-04: PI.outstanding_amount is stored
+                    // in TRANSACTION currency (EUR) and PI.base_outstanding_amount
+                    // is in COMPANY currency (AED). Fetch both from source
+                    // — don't compute one from the other. Pre-fix
+                    // multiplied outstanding_amount × exchange_rate which
+                    // double-converted when both fields existed in the
+                    // source doc.
                     const out = {};
-                    // For Purchase Invoice / Debit Note: Invoice column
-                    // gets bill_no (supplier inv no), bill_no field too.
-                    // For PO and other types we don't auto-fill the
-                    // Invoice column.
                     if (v.bill_no) {
                         out.reference_name = v.bill_no;
                         out.bill_no = v.bill_no;
@@ -1335,8 +1338,11 @@ frappe.ui.form.on('Payment Request Form', {
                     out.grand_total = parseFloat(v.grand_total || 0) || 0;
                     out.base_grand_total = parseFloat(v.base_grand_total || 0) || 0;
                     out.outstanding_amount = parseFloat(v.outstanding_amount || 0) || 0;
+                    // Prefer source's stored base_outstanding_amount; fall
+                    // back to FC × rate only if absent (older docs).
                     out.base_outstanding_amount = (
-                        out.outstanding_amount * out.exchange_rate
+                        parseFloat(v.base_outstanding_amount || 0)
+                        || (out.outstanding_amount * out.exchange_rate)
                     );
                     out.is_return = parseInt(v.is_return || 0) || 0;
                     return out;
@@ -1345,19 +1351,24 @@ frappe.ui.form.on('Payment Request Form', {
             "Sales Invoice": {
                 fields: ["posting_date", "due_date", "currency",
                          "conversion_rate", "grand_total", "base_grand_total",
-                         "outstanding_amount", "is_return"],
+                         "outstanding_amount", "base_outstanding_amount", "is_return"],
                 mapper: function (v) {
+                    // Sridhar 2026-06-04: prefer source's base_outstanding_amount
+                    // over FC × rate (same fix as PI mapper).
+                    const os_fc = parseFloat(v.outstanding_amount || 0) || 0;
+                    const rate = parseFloat(v.conversion_rate || 1) || 1;
                     return {
                         reference_name: doc_name,
                         invoice_date: v.posting_date || "",
                         due_date: v.due_date || "",
                         currency: v.currency || "",
-                        exchange_rate: parseFloat(v.conversion_rate || 1) || 1,
+                        exchange_rate: rate,
                         grand_total: parseFloat(v.grand_total || 0) || 0,
                         base_grand_total: parseFloat(v.base_grand_total || 0) || 0,
-                        outstanding_amount: parseFloat(v.outstanding_amount || 0) || 0,
-                        base_outstanding_amount: parseFloat(v.outstanding_amount || 0)
-                            * (parseFloat(v.conversion_rate || 1) || 1),
+                        outstanding_amount: os_fc,
+                        base_outstanding_amount: (
+                            parseFloat(v.base_outstanding_amount || 0) || (os_fc * rate)
+                        ),
                         is_return: parseInt(v.is_return || 0) || 0,
                     };
                 },
@@ -1408,38 +1419,66 @@ frappe.ui.form.on('Payment Request Form', {
                 },
             },
             "Expense Claim": {
+                // Sridhar 2026-06-04: EC has no transaction currency
+                // (always company currency). Set FC == base for both
+                // grand_total + outstanding to keep currency-totals math
+                // and TR Amount print consistent.
                 fields: ["posting_date", "total_sanctioned_amount"],
                 mapper: function (v) {
+                    const amt = parseFloat(v.total_sanctioned_amount || 0) || 0;
                     return {
                         reference_name: doc_name,
                         invoice_date: v.posting_date || "",
-                        grand_total: parseFloat(v.total_sanctioned_amount || 0) || 0,
-                        base_grand_total: parseFloat(v.total_sanctioned_amount || 0) || 0,
-                        outstanding_amount: parseFloat(v.total_sanctioned_amount || 0) || 0,
+                        exchange_rate: 1,
+                        grand_total: amt,
+                        base_grand_total: amt,
+                        outstanding_amount: amt,
+                        base_outstanding_amount: amt,
                     };
                 },
             },
             "Employee Advance": {
+                // Sridhar 2026-06-04: EA has no transaction currency.
+                // FC == base.
                 fields: ["posting_date", "advance_amount", "paid_amount"],
                 mapper: function (v) {
                     const adv = parseFloat(v.advance_amount || 0) || 0;
                     const paid = parseFloat(v.paid_amount || 0) || 0;
+                    const outstanding = Math.max(0, adv - paid);
                     return {
                         reference_name: doc_name,
                         invoice_date: v.posting_date || "",
+                        exchange_rate: 1,
                         grand_total: adv,
                         base_grand_total: adv,
-                        outstanding_amount: Math.max(0, adv - paid),
+                        outstanding_amount: outstanding,
+                        base_outstanding_amount: outstanding,
                     };
                 },
             },
             "Payment Entry": {
-                fields: ["posting_date", "paid_amount"],
+                // Sridhar 2026-06-04: PE has multi-currency support. Fetch
+                // both paid_amount (FC) and base_paid_amount (company),
+                // set exchange_rate from PE's source_exchange_rate. Pre-fix
+                // only populated grand_total — base_grand_total /
+                // outstanding_amount / base_outstanding_amount were blank,
+                // which made PE rows invisible in currency-totals + print.
+                fields: ["posting_date", "paid_from_account_currency",
+                         "source_exchange_rate", "paid_amount",
+                         "base_paid_amount"],
                 mapper: function (v) {
+                    const fc = parseFloat(v.paid_amount || 0) || 0;
+                    const base = parseFloat(v.base_paid_amount || 0) || fc;
+                    const rate = parseFloat(v.source_exchange_rate || 1) || 1;
                     return {
                         reference_name: doc_name,
                         invoice_date: v.posting_date || "",
-                        grand_total: parseFloat(v.paid_amount || 0) || 0,
+                        currency: v.paid_from_account_currency || "",
+                        exchange_rate: rate,
+                        grand_total: fc,
+                        base_grand_total: base,
+                        outstanding_amount: fc,
+                        base_outstanding_amount: base,
                     };
                 },
             },
