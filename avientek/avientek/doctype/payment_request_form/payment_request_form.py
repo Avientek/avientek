@@ -4192,8 +4192,16 @@ def get_payment_voucher_context(docname):
     tr_total = 0.0
     for row in (doc.payment_references or []):
         row_curr = row.currency or company_currency
-        row_fc = flt(row.outstanding_amount or row.grand_total or 0)
-        row_base = flt(row.base_outstanding_amount or row.base_grand_total or 0)
+        # Sridhar 2026-06-04: prefer grand_total over outstanding_amount.
+        # `grand_total` is reliably populated in FC by every mapper path.
+        # `outstanding_amount` had a legacy bug where PI/SI single-picker
+        # rows stored the AED-equivalent value (see commit 1b36c43 for
+        # the mapper fix). Existing rows in the DB still have the bad
+        # data; for the print we prefer the value that's correct
+        # historically. Matches INVOICE DETAILS table's amount_fc
+        # computation so the two are internally consistent.
+        row_fc = flt(row.grand_total or row.outstanding_amount or 0)
+        row_base = flt(row.base_grand_total or row.base_outstanding_amount or 0)
         if row_curr == tr_currency_for_total:
             tr_total += row_fc
         elif tr_currency_for_total == company_currency:
