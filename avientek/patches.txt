@@ -529,3 +529,11 @@ avientek.patches.rename_quotation_pending_for_approval_to_l1
 # list view. Migrate the 13 docs to the V3 name. V3 bridge transitions
 # for the legacy name become dormant but stay intact.
 avientek.patches.normalize_quotation_pending_l2_state
+# Sridhar ERP-TKT-11 2026-06-05 — clean up duplicate filter dropdown
+# entries on Quotation workflow_state. After TKT-9/TKT-10 deprecated
+# "Pending For Approval" + "Pending Level 2 Approval", the link_filters
+# JSON still listed them (and was MISSING the new "Pending L1
+# Approval"). This patch rewrites link_filters to the V3 canonical
+# 12-state set + migrates the last legacy "Pending Level 1 Approval"
+# doc. Idempotent.
+avientek.patches.clean_quotation_workflow_state_filter_dropdown
