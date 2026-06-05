@@ -2229,58 +2229,41 @@ def patch_shared_document_filter():
 
 
 
-@frappe.whitelist()
-def export_report_as_excel(data, doctype, col_types=None, col_options=None):
-	"""Generate Excel file from Report Download data and return as download.
+def _build_xlsx_bytes_from_rows(rows, doctype, col_types, col_options):
+	"""Internal — render a list of rows (header + data rows, where each
+	row is a list of cell values) to xlsx bytes using openpyxl with
+	proper Excel number/date cell types. Falls back to legacy make_xlsx
+	when openpyxl is unavailable.
 
-	Sridhar 2026-05-10: writes Currency / Float / Int / Percent columns as
-	proper Excel number cells (with number_format) instead of strings, so
-	users can sum / sort / filter numerically. Date columns also write as
-	Excel date when ISO-parseable. Falls back to legacy make_xlsx if
-	openpyxl import fails.
+	Sridhar 2026-06-05: factored out of `export_report_as_excel` so the
+	chunked variant `export_report_as_excel_chunked` can reuse the same
+	builder after assembling chunks from cache.
 	"""
-	import json as json_mod
 	import io as _io
 	import datetime as _dt
-
-	rows = json_mod.loads(data) if isinstance(data, str) else data
-	col_types = json_mod.loads(col_types) if isinstance(col_types, str) else (col_types or [])
-	col_options = json_mod.loads(col_options) if isinstance(col_options, str) else (col_options or [])
-
 	try:
 		from openpyxl import Workbook
 		from openpyxl.utils import get_column_letter
 	except Exception:
 		from frappe.utils.xlsxutils import make_xlsx
-		xlsx_file = make_xlsx(rows, doctype)
-		frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
-		frappe.response["filecontent"] = xlsx_file.getvalue()
-		frappe.response["type"] = "download"
-		return
+		return make_xlsx(rows, doctype).getvalue()
 
-	# Excel number-format strings keyed on Frappe fieldtype.
 	NUMERIC_TYPES = {"Currency", "Float", "Int", "Percent", "Long Int"}
 	def _number_format(ftype):
 		if ftype == "Int" or ftype == "Long Int":
 			return "#,##0"
 		if ftype == "Percent":
 			return "0.00%"
-		# Currency + Float — generic 2-decimal thousands grouping. We don't
-		# embed currency symbols because reports often mix multiple
-		# currencies in one column.
 		return "#,##0.00"
 
 	wb = Workbook()
 	ws = wb.active
-	ws.title = (doctype or "Report")[:31]  # Excel sheet name limit
+	ws.title = (doctype or "Report")[:31]
 
 	if not rows:
 		buf = _io.BytesIO()
 		wb.save(buf)
-		frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
-		frappe.response["filecontent"] = buf.getvalue()
-		frappe.response["type"] = "download"
-		return
+		return buf.getvalue()
 
 	# Header row
 	header = rows[0]
@@ -2294,11 +2277,9 @@ def export_report_as_excel(data, doctype, col_types=None, col_options=None):
 			val = row[ci] if ci < len(row) else ""
 			ftype = col_types[ci] if ci < len(col_types) else "Data"
 			cell = ws.cell(row=ri, column=ci + 1)
-
 			if val == "" or val is None:
 				cell.value = None
 				continue
-
 			if ftype in NUMERIC_TYPES:
 				try:
 					n = float(val)
@@ -2309,7 +2290,6 @@ def export_report_as_excel(data, doctype, col_types=None, col_options=None):
 			elif ftype in ("Date", "Datetime"):
 				try:
 					if isinstance(val, str) and len(val) >= 10:
-						# Try ISO date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
 						dt = _dt.datetime.fromisoformat(val[:19]) if "T" in val or " " in val else _dt.date.fromisoformat(val[:10])
 						cell.value = dt
 						cell.number_format = "yyyy-mm-dd" if ftype == "Date" else "yyyy-mm-dd hh:mm:ss"
@@ -2326,7 +2306,7 @@ def export_report_as_excel(data, doctype, col_types=None, col_options=None):
 			else:
 				cell.value = str(val)
 
-	# Auto-width: simple heuristic — max 50 chars
+	# Auto-width
 	for ci in range(1, n_cols + 1):
 		max_len = 0
 		col_letter = get_column_letter(ci)
@@ -2339,14 +2319,157 @@ def export_report_as_excel(data, doctype, col_types=None, col_options=None):
 				max_len = len(s)
 		ws.column_dimensions[col_letter].width = min(50, max(10, max_len + 2))
 
-	# Freeze header row
 	ws.freeze_panes = "A2"
-
 	buf = _io.BytesIO()
 	wb.save(buf)
+	return buf.getvalue()
+
+
+@frappe.whitelist()
+def export_report_as_excel(data, doctype, col_types=None, col_options=None):
+	"""Generate Excel file from Report Download data and return as download.
+
+	Sridhar 2026-05-10: writes Currency / Float / Int / Percent columns as
+	proper Excel number cells (with number_format) instead of strings, so
+	users can sum / sort / filter numerically. Date columns also write as
+	Excel date when ISO-parseable. Falls back to legacy make_xlsx if
+	openpyxl import fails.
+
+	Sridhar 2026-06-05: Frappe Cloud nginx caps request body at ~1MB so
+	for exports >2K rows this 1-shot path returns 413. Use the chunked
+	variant `export_report_as_excel_chunked` for large exports — same
+	builder, just multi-call accumulation.
+	"""
+	import json as json_mod
+
+	rows = json_mod.loads(data) if isinstance(data, str) else data
+	col_types = json_mod.loads(col_types) if isinstance(col_types, str) else (col_types or [])
+	col_options = json_mod.loads(col_options) if isinstance(col_options, str) else (col_options or [])
+
+	xlsx_bytes = _build_xlsx_bytes_from_rows(rows, doctype, col_types, col_options)
 	frappe.response["filename"] = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
-	frappe.response["filecontent"] = buf.getvalue()
+	frappe.response["filecontent"] = xlsx_bytes
 	frappe.response["type"] = "download"
+	return
+
+
+@frappe.whitelist()
+def export_report_as_excel_chunked(
+	session_token,
+	chunk_index,
+	total_chunks,
+	data,
+	doctype,
+	col_types=None,
+	col_options=None,
+):
+	"""Chunked Excel export — accept rows in batches, build the workbook
+	on the final chunk, return as base64 in JSON.
+
+	Sridhar 2026-06-05: Frappe Cloud nginx caps request body around 1MB.
+	For exports > ~2,000 rows the consolidated `data` JSON exceeded the
+	limit and the legacy `export_report_as_excel` returned 413. This
+	chunked variant POSTs rows in batches of ~500 so each request stays
+	well under any reasonable body limit. Server accumulates chunks in
+	Redis cache keyed by session_token; the FINAL chunk triggers
+	workbook assembly and returns the binary file as base64 in the JSON
+	response — customer downloads ONE file at the end (the chunking is
+	invisible to them).
+
+	Args:
+		session_token: random ID generated by client, identifies this
+			export session. Min 8 chars / max 64.
+		chunk_index: 0-based index of this chunk.
+		total_chunks: total number of chunks the client will send.
+			Final chunk has chunk_index == total_chunks - 1.
+		data: JSON-encoded array of row arrays for THIS chunk. The
+			first chunk should contain the header row at position [0].
+		doctype, col_types, col_options: same shape as
+			`export_report_as_excel`. Only used on the final chunk.
+
+	Returns:
+		Intermediate chunks: {"ok": True, "chunk_received": int, "of": int}
+		Final chunk:         {"ok": True, "complete": True,
+		                      "filename": "<dt>_<date>.xlsx",
+		                      "filecontent_base64": "<base64>"}
+
+	Cache lifecycle: keyed by `avientek_excel_chunks:<session_token>`
+	as a Redis hash. TTL of 1 hour. Cleaned up on final-chunk success
+	(success or failure both delete the key to avoid orphan memory).
+	"""
+	import json as json_mod
+	import base64 as _b64
+
+	# Input validation
+	chunk_index = int(chunk_index)
+	total_chunks = int(total_chunks)
+	if total_chunks < 1 or total_chunks > 5000:
+		frappe.throw(_("Invalid total_chunks"))
+	if chunk_index < 0 or chunk_index >= total_chunks:
+		frappe.throw(_("Invalid chunk_index"))
+	if not (isinstance(session_token, str) and 8 <= len(session_token) <= 64
+	        and all(c.isalnum() or c in "_-" for c in session_token)):
+		frappe.throw(_("Invalid session_token"))
+
+	cache_key = f"avientek_excel_chunks:{session_token}"
+	cache = frappe.cache()
+
+	# Store this chunk
+	try:
+		cache.hset(cache_key, str(chunk_index), data)
+	except Exception as e:
+		frappe.throw(_("Failed to buffer chunk: {0}").format(str(e)))
+	# Refresh TTL on every chunk so slow exports don't expire mid-flight
+	try:
+		cache.expire(cache_key, 3600)
+	except Exception:
+		pass
+
+	# Intermediate chunk — just acknowledge
+	if chunk_index < total_chunks - 1:
+		return {"ok": True, "chunk_received": chunk_index, "of": total_chunks}
+
+	# Final chunk: assemble all chunks in order then build the workbook
+	try:
+		all_rows = []
+		for i in range(total_chunks):
+			piece = cache.hget(cache_key, str(i))
+			if piece is None:
+				frappe.throw(
+					_("Missing chunk {0} of {1} (session expired or lost?)").format(
+						i, total_chunks
+					)
+				)
+			# Redis returns bytes; decode if needed
+			if isinstance(piece, bytes):
+				piece = piece.decode("utf-8")
+			chunk_rows = json_mod.loads(piece)
+			all_rows.extend(chunk_rows)
+
+		col_types_list = (
+			json_mod.loads(col_types) if isinstance(col_types, str) else (col_types or [])
+		)
+		col_options_list = (
+			json_mod.loads(col_options) if isinstance(col_options, str) else (col_options or [])
+		)
+
+		xlsx_bytes = _build_xlsx_bytes_from_rows(
+			all_rows, doctype, col_types_list, col_options_list
+		)
+		filename = f"{doctype}_{frappe.utils.nowdate()}.xlsx"
+		return {
+			"ok": True,
+			"complete": True,
+			"filename": filename,
+			"filecontent_base64": _b64.b64encode(xlsx_bytes).decode("ascii"),
+		}
+	finally:
+		# Always cleanup the cache entry — succeed or fail. Stale
+		# chunks just take up Redis memory.
+		try:
+			cache.delete(cache_key)
+		except Exception:
+			pass
 
 
 @frappe.whitelist()

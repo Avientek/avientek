@@ -185,6 +185,101 @@ function _rd_coerce_value(raw, ftype) {
 
 
 /**
+ * POST the assembled rows (header + data rows, each row is an array of
+ * cell values) to the server in chunks of 500. Server accumulates them
+ * in cache keyed by session_token; the final chunk triggers workbook
+ * build + returns the file as base64. Client decodes + downloads ONE
+ * .xlsx file.
+ *
+ * Sridhar 2026-06-05: avoids the 413 Request Entity Too Large error
+ * on Frappe Cloud nginx for exports > ~2K rows (default
+ * client_max_body_size ≈ 1MB; a 6800-row Quotation export was ~3-5MB
+ * in a single POST). Chunks of 500 keep each request well under any
+ * reasonable body limit.
+ */
+function _rd_chunked_excel_post(rows, doctype, col_types, col_options) {
+	var BATCH = 500;
+	var session_token = String(Date.now()) + "_" + Math.random().toString(36).slice(2, 10);
+	var total_chunks = Math.max(1, Math.ceil(rows.length / BATCH));
+
+	function send(i) {
+		var start = i * BATCH;
+		var end = start + BATCH;
+		var batch = rows.slice(start, end);
+		var is_last = (i === total_chunks - 1);
+
+		frappe.show_alert({
+			message: __("Uploading rows {0}–{1} of {2}…",
+				[start + 1, Math.min(end, rows.length), rows.length]),
+			indicator: "blue",
+		}, 3);
+
+		return frappe.call({
+			method: "avientek.api.quotation_access.export_report_as_excel_chunked",
+			args: {
+				session_token: session_token,
+				chunk_index: i,
+				total_chunks: total_chunks,
+				data: JSON.stringify(batch),
+				doctype: doctype,
+				// Only the final chunk needs the metadata — but we send it
+				// every time so the server build code stays simple. Cheap.
+				col_types: JSON.stringify(col_types || []),
+				col_options: JSON.stringify(col_options || []),
+			},
+			type: "POST",
+		}).then(function (r) {
+			var msg = r && r.message;
+			if (is_last) {
+				if (msg && msg.complete && msg.filecontent_base64) {
+					_rd_trigger_download_base64(
+						msg.filecontent_base64,
+						msg.filename || (doctype + ".xlsx"),
+						"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+					);
+					frappe.show_alert({
+						message: __("Downloaded {0} rows", [rows.length - 1]),
+						indicator: "green",
+					}, 5);
+				} else {
+					frappe.msgprint(__("Export failed — server did not return the file"));
+				}
+			} else {
+				return send(i + 1);
+			}
+		}).catch(function (err) {
+			frappe.msgprint(__("Export failed on chunk {0}: {1}", [i + 1, err || "unknown error"]));
+		});
+	}
+	return send(0);
+}
+
+
+/**
+ * Decode a base64 string into a Blob and trigger a browser download.
+ * Used by `_rd_chunked_excel_post` to deliver the final .xlsx file.
+ */
+function _rd_trigger_download_base64(b64, filename, mime) {
+	var byteChars = atob(b64);
+	var len = byteChars.length;
+	var byteArray = new Uint8Array(len);
+	for (var i = 0; i < len; i++) {
+		byteArray[i] = byteChars.charCodeAt(i);
+	}
+	var blob = new Blob([byteArray], { type: mime || "application/octet-stream" });
+	var url = URL.createObjectURL(blob);
+	var a = document.createElement("a");
+	a.href = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	// Free the blob URL after the download starts
+	setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+}
+
+
+/**
  * Export the Report View's data, respecting the user's row selection:
  *   - If rows are checked via the list-view checkboxes → export only
  *     those parent docs (and all their child rows).
@@ -216,15 +311,15 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 		});
 
 		if (file_type === "Excel") {
-			open_url_post(
-				"/api/method/avientek.api.quotation_access.export_report_as_excel",
-				{
-					data: JSON.stringify(rows),
-					doctype: dt,
-					col_types: JSON.stringify(col_types || []),
-					col_options: JSON.stringify(col_options || []),
-				}
-			);
+			// Sridhar 2026-06-05: Frappe Cloud nginx rejected single-POST
+			// exports > ~2K rows with 413 Request Entity Too Large.
+			// Send the rows to `export_report_as_excel_chunked` in
+			// batches of 500 — server accumulates in Redis cache keyed
+			// by session_token, builds the workbook on the final chunk,
+			// returns the file as base64 in JSON. Client decodes to
+			// Blob and triggers ONE download — the chunking is
+			// invisible to the user.
+			_rd_chunked_excel_post(rows, dt, col_types, col_options);
 		} else {
 			_rd_download_csv(rows, dt);
 		}
