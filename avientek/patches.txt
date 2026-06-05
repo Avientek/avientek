@@ -489,3 +489,11 @@ avientek.patches.fix_non_stock_dn_drafts
 # outstanding_amount ≈ base_grand_total but ≠ grand_total, replaces
 # with grand_total (always FC). Idempotent.
 avientek.patches.backfill_prf_reference_fc_amounts
+# Sridhar 2026-06-05 — drop the parent-level Quotation Part Number mirror
+# fields (first_item_part_number, optional_item_part_numbers). They were
+# added to work around a Report View child-table collision; now that
+# Optional Item is its own DocType (Step 4), per-table Part Number
+# columns work directly. Also strips dropped-field refs from User
+# Settings + Property Setters. Companion to hook + function removal in
+# the same commit.
+avientek.patches.drop_quotation_part_number_mirror_fields

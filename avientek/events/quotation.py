@@ -1252,42 +1252,12 @@ def validate_total_discount(doc, method):
         frappe.throw("Sum of item discount amounts must equal parent discount amount")
 
 
-def copy_first_item_part_number(doc, method=None):
-    """Sridhar/Rahul 2026-05-29 (updated 2026-06-01): surface the item rows'
-    part_number onto the Quotation parent so Report View can use clean
-    parent-level columns instead of hitting the (Quotation, Quotation Item)
-    child-table collision between `items` and `custom_service_items`.
-
-    Sridhar 2026-06-01: split into TWO parent fields so the report can
-    show item part numbers and optional-item part numbers separately:
-
-      - `first_item_part_number` (label 'Item Part Number') ←  items[]
-      - `optional_item_part_numbers` (label 'Optional Item Part Number') ←
-        custom_service_items[]
-
-    Each value is the comma-joined, order-preserving, dedup'd list of
-    non-empty part_number values from its source child table. Fieldname
-    `first_item_part_number` stays unchanged for historical compatibility
-    with the API-created Custom Field.
-    """
-    def _join(rows):
-        seen = set()
-        parts = []
-        for row in rows or []:
-            pn = (row.get("part_number") or "").strip()
-            if not pn or pn in seen:
-                continue
-            seen.add(pn)
-            parts.append(pn)
-        return ", ".join(parts)
-
-    new_items = _join(doc.get("items"))
-    if (doc.get("first_item_part_number") or "") != new_items:
-        doc.first_item_part_number = new_items
-
-    new_optional = _join(doc.get("custom_service_items"))
-    if (doc.get("optional_item_part_numbers") or "") != new_optional:
-        doc.optional_item_part_numbers = new_optional
+# Sridhar 2026-06-05: removed copy_first_item_part_number. The parent-level
+# Quotation.first_item_part_number / .optional_item_part_numbers mirror
+# fields are removed (patch drop_quotation_part_number_mirror_fields)
+# because the Optional Item child table is now its own DocType (Step 4 of
+# the Optional Item migration). Report View can show per-table Part
+# Number columns directly without the collision the mirrors worked around.
 
 
 def sync_workflow_status(doc, method=None):

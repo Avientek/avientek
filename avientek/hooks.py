@@ -534,11 +534,15 @@ doc_events = {
             "avientek.events.quotation.validate_total_discount",
             # Sridhar 2026-05-06 — lock fields when probability >= 75.
             "avientek.api.quotation_high_probability.before_save",
-            # Sridhar/Rahul 2026-05-29 — copy items[0].part_number to the
-            # parent Quotation.first_item_part_number so Report View can
-            # surface part number without hitting the child-table column
-            # collision between `items` and `custom_service_items`.
-            "avientek.events.quotation.copy_first_item_part_number",
+            # Sridhar 2026-06-05 — removed copy_first_item_part_number
+            # hook. The parent-level mirror fields (first_item_part_number
+            # and optional_item_part_numbers) are now redundant because
+            # the Optional Item table is its own DocType (Step 4 of the
+            # Optional Item migration). Report View can show per-table
+            # Part Number columns directly without the child-table column
+            # collision the mirror originally worked around. The fields +
+            # function are removed in patch drop_quotation_part_number_
+            # mirror_fields.
         ],
         "before_cancel":
             "avientek.api.quotation_high_probability.before_cancel",
