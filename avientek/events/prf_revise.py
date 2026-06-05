@@ -33,10 +33,22 @@ def send_for_revise(prf_name: str, reason: str):
 
 	doc = frappe.get_doc("Payment Request Form", prf_name)
 
-	if doc.workflow_state != "Authorised":
+	# Sridhar ERP-TKT-18 2026-06-05: was hard-coded to "Authorised" only,
+	# but the V3 workflow seeder (`create_payment_request_workflow.py`)
+	# ALREADY exposes `Rejected → Revise → Draft` as a legal transition
+	# (role=All). The customer wants Rejected docs to also use the same
+	# reason-popup flow so the creator gets an explanatory ToDo + email
+	# (matches the original Sridhar BRD from 2026-05-27, which only
+	# covered Authorised at the time). Allow both — same downstream
+	# logic (audit Comment + creator notification + workflow apply
+	# transitions to Draft regardless of which source state). If new
+	# source states are added to the workflow later they should also be
+	# whitelisted here.
+	REVISE_ALLOWED_STATES = {"Authorised", "Rejected"}
+	if doc.workflow_state not in REVISE_ALLOWED_STATES:
 		frappe.throw(
-			_("PRF must be in 'Authorised' state to be sent for revision. Current state: {0}").format(
-				doc.workflow_state
+			_("PRF must be in {0} to be sent for revision. Current state: {1}").format(
+				" or ".join(sorted(REVISE_ALLOWED_STATES)), doc.workflow_state
 			)
 		)
 
