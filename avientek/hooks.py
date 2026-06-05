@@ -579,6 +579,23 @@ doc_events = {
             # For Approval) fire from on_update below. Gated by
             # `enable_workflow_state_notifications` toggle.
             "avientek.events.quotation_notifications.on_state_change",
+            # Sridhar ERP-TKT-7 2026-06-05: validate-only sync_workflow_status
+            # missed transitions that bypass validate (workflow apply for
+            # docstatus 1→1 sometimes uses db.set_value directly, and
+            # docstatus 1→2 cancels use doc.cancel which skips validate).
+            # 21 drift rows accumulated on prod-copy within 24h of the
+            # 2026-06-02 deploy. Adding to on_update_after_submit catches
+            # the 1→1 case; on_cancel below catches the 1→2 case.
+            "avientek.events.quotation.sync_workflow_status",
+        ],
+        "on_cancel": [
+            # Sridhar ERP-TKT-7 2026-06-05: workflow_status sync on cancel.
+            # doc.cancel() doesn't fire validate, so the cancellation chain
+            # endings (workflow_state → Cancelled) left workflow_status
+            # stuck at "Cancellation Requested" or "Approved". This hook
+            # writes the post-cancel state via direct db.set_value (the
+            # in-memory assignment is too late at on_cancel time).
+            "avientek.events.quotation.sync_workflow_status",
         ],
         "on_update": [
             # Pre-submit state transitions (e.g. Draft → Pending For

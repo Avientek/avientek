@@ -508,3 +508,11 @@ avientek.patches.add_l1_direct_approve_v3
 # to block one user from rubber-stamping both gates (real incident:
 # QN-LTD-26-02159-1 approved by orders.mea who is in both pools).
 avientek.patches.add_quotation_l1_approver_audit_field
+# Sridhar ERP-TKT-7 2026-06-05 — v2 backfill of workflow_status drift.
+# Original sync hook on `validate` only missed Cancel transitions
+# (doc.cancel doesn't fire validate) and some direct db.set_value
+# paths, allowing 21 drift rows in 24h on prod-copy. Companion code
+# fix wires sync_workflow_status on on_update_after_submit + on_cancel
+# events with a direct db.set_value fallback. This patch cleans the
+# existing drift. Idempotent.
+avientek.patches.backfill_quotation_workflow_status_drift_v2

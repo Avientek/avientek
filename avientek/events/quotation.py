@@ -1274,14 +1274,44 @@ def sync_workflow_status(doc, method=None):
     (e.g. quote moved Pending For Approval -> Approved but filter still
     counted it as Pending For Approval).
 
-    Explicit sync on every validate keeps both fields aligned. Cheap
-    Python assignment, no DB roundtrip — fires regardless of how the
-    save was triggered (workflow action, direct save, API, etc.).
+    Sridhar ERP-TKT-7 2026-06-05: the hook was wired ONLY on `validate`
+    initially. That missed two real paths in prod that produced 21 drift
+    rows in 24h after the 2026-06-02 deploy:
+      - Cancel transitions (docstatus 1→2): doc.cancel() does NOT fire
+        validate in Frappe v15, only on_cancel. So Cancellation chain
+        endings left workflow_status stale at "Cancellation Requested".
+      - on_update_after_submit transitions (docstatus 1→1 between
+        Approved/Rejected/Pending L2 Approval): in some flows the
+        workflow apply uses direct db.set_value bypassing validate.
+
+    Now wired on validate + on_update_after_submit + on_cancel. The
+    function is idempotent (only writes when values differ) so multiple
+    events on the same save are harmless.
+
+    For docstatus=2 cancel path: doc.workflow_status assignment alone
+    doesn't persist (the row is being cancelled, no .save call follows).
+    For that case the function ALSO writes directly to DB via
+    frappe.db.set_value when method == "on_cancel".
     """
     current_state = doc.get("workflow_state") or ""
     current_status = doc.get("workflow_status") or ""
-    if current_state != current_status:
-        doc.workflow_status = current_state
+    if current_state == current_status:
+        return
+    # In-memory update (caught by the subsequent save/submit write)
+    doc.workflow_status = current_state
+    # on_cancel runs after the cancel has already been written, so a
+    # plain field assignment doesn't persist. Force a direct DB write
+    # for the cancel path. Same fallback for on_update_after_submit
+    # paths that don't trigger a full save afterwards.
+    if method in ("on_cancel", "on_update_after_submit"):
+        try:
+            frappe.db.set_value(
+                "Quotation", doc.name, "workflow_status", current_state,
+                update_modified=False,
+            )
+        except Exception:
+            # Don't let a sync failure block the workflow transition.
+            pass
 
 
 def get_overall_margin(salesperson, brand):
