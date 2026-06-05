@@ -245,20 +245,43 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 	// rv.start + rv.page_length so we accumulate ALL matching rows.
 	// Soft cap at 100,000 rows total per export (browser memory + Excel
 	// practicality); warn if hit.
+	//
+	// Sridhar ERP-TKT-3 2026-06-05: original implementation capped at
+	// 5000 rows due to a misread of Frappe's base_list refresh contract.
+	// base_list's `before_refresh` does:
+	//     this.page_length = this.page_length + this.start;
+	//     this.start = 0;
+	// So setting rv.start=5000, rv.page_length=5000 + calling refresh()
+	// becomes internally `start=0, page_length=10000` — Frappe REPLACES
+	// rv.data with the full 0..9999 set (not 5000..9999), and resets
+	// rv.start to 0. The old `fetched_offsets[rv.start]` guard then fired
+	// on chunk 2 (rv.start was 0 again) → loop bailed → only 5000 rows
+	// exported.
+	//
+	// Correct contract:
+	//   - Each iteration: set rv.start = current accumulator length, set
+	//     rv.page_length = CHUNK. Frappe's refresh fetches from 0 up to
+	//     (accumulator + CHUNK), and rv.data ends up being the FULL
+	//     cumulative dataset of all rows fetched so far.
+	//   - So all_data = (rv.data || []).slice() — full replace, not
+	//     concat.
+	//   - Continue while the accumulator grew by ≥ CHUNK rows since the
+	//     previous iteration. When growth < CHUNK, we've reached the end
+	//     of the dataset (or the safety cap).
 	var prev_pl = rv.page_length;
 	var prev_start = rv.start;
 	var CHUNK = 5000;
 	var MAX_ROWS = 100000;
 
 	var all_data = [];
-	var fetched_offsets = {};  // guard against runaway loops
 
 	function next_chunk() {
+		var requested_start = all_data.length;
+		rv.start = requested_start;
 		rv.page_length = CHUNK;
-		rv.start = all_data.length;
 		frappe.show_alert({
 			message: __("Fetching rows {0}–{1} for export…",
-				[rv.start + 1, rv.start + CHUNK]),
+				[requested_start + 1, requested_start + CHUNK]),
 			indicator: "blue",
 		}, 5);
 
@@ -268,18 +291,20 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 			: new Promise(function (resolve) { setTimeout(resolve, 1500); });
 
 		return p.then(function () {
-			var batch = (rv.data || []).slice();
-			if (fetched_offsets[rv.start]) {
-				// Same offset returned twice — refresh didn't paginate;
-				// stop to avoid infinite loop.
+			// Frappe accumulates into rv.data on its own (base_list
+			// behavior described above). Use the cumulative buffer
+			// directly — DO NOT concat, that would duplicate.
+			var prev_count = all_data.length;
+			all_data = (rv.data || []).slice();
+			var added = all_data.length - prev_count;
+
+			// Stop when growth < CHUNK (end of dataset) or we hit the
+			// safety cap. `added <= 0` is the explicit no-progress case
+			// (would have been an infinite loop in the old code).
+			if (added < CHUNK || all_data.length >= MAX_ROWS) {
 				return;
 			}
-			fetched_offsets[rv.start] = true;
-			all_data = all_data.concat(batch);
-			// Continue if batch was full AND we haven't hit the safety cap.
-			if (batch.length >= CHUNK && all_data.length < MAX_ROWS) {
-				return next_chunk();
-			}
+			return next_chunk();
 		});
 	}
 
