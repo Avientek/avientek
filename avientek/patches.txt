@@ -522,3 +522,10 @@ avientek.patches.backfill_quotation_workflow_status_drift_v2
 # doc migration + V3 re-seed. Other workflows that share the OLD state
 # (PO, SO, legacy V2 Quotation DocFlow) are intentionally untouched.
 avientek.patches.rename_quotation_pending_for_approval_to_l1
+# Sridhar ERP-TKT-10 2026-06-05 — normalize duplicate L2 state names.
+# 13 docs on legacy V2 "Pending Level 2 Approval" (no style) coexisted
+# with V3 canonical "Pending L2 Approval" (Warning yellow), showing as
+# two different rows in filter dropdown + different badge styles in
+# list view. Migrate the 13 docs to the V3 name. V3 bridge transitions
+# for the legacy name become dormant but stay intact.
+avientek.patches.normalize_quotation_pending_l2_state
