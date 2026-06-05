@@ -178,9 +178,10 @@ def run():
         )
         frappe.db.commit()
 
-        # Simulate a Draft → Pending For Approval transition.
+        # Simulate a Draft → Pending L1 Approval transition.
+        # (ERP-TKT-9 2026-06-05 — V3 L1 state renamed for clarity.)
         original_state = doc.workflow_state
-        doc.workflow_state = "Pending For Approval"
+        doc.workflow_state = "Pending L1 Approval"
         before = frappe._dict({"workflow_state": "Draft"})
         doc._doc_before_save = before
 
@@ -197,10 +198,10 @@ def run():
         new_queue = queue_count_after - queue_count_before
 
         check(new_todos > 0,
-              "ToDos created on Pending For Approval transition",
+              "ToDos created on Pending L1 Approval transition",
               f"+{new_todos} rows")
         check(new_queue > 0,
-              "Email Queue row created on Pending For Approval transition",
+              "Email Queue row created on Pending L1 Approval transition",
               f"+{new_queue} rows")
 
         # Verify the Email Queue actually carries our template content

@@ -516,3 +516,9 @@ avientek.patches.add_quotation_l1_approver_audit_field
 # events with a direct db.set_value fallback. This patch cleans the
 # existing drift. Idempotent.
 avientek.patches.backfill_quotation_workflow_status_drift_v2
+# Sridhar ERP-TKT-9 2026-06-05 — Quotation V3 L1 state rename:
+# "Pending For Approval" → "Pending L1 Approval" (mirrors "Pending L2
+# Approval" naming for symmetry). New Workflow State record + Quotation
+# doc migration + V3 re-seed. Other workflows that share the OLD state
+# (PO, SO, legacy V2 Quotation DocFlow) are intentionally untouched.
+avientek.patches.rename_quotation_pending_for_approval_to_l1

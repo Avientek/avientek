@@ -1210,6 +1210,10 @@ def validate_margin_approval_required(doc, method=None):
 
     # Approval path is intact (or already approved) — let it through
     APPROVAL_PATH_STATES = {
+        # ERP-TKT-9 2026-06-05: renamed V3 state to clarify it's L1.
+        # Kept old "Pending For Approval" + V2 legacy names for any
+        # pre-migration rows lingering on disk.
+        "Pending L1 Approval",
         "Pending For Approval",
         "Pending L2 Approval",
         "Pending Level 1 Approval",

@@ -261,7 +261,7 @@ def validate_quotation_approved(doc, method=None):
 					"Source Quotation <b>{0}</b> is in <b>{1}</b> state — "
 					"Sales Order can only be created after the quote reaches "
 					"<b>Approved</b>. Please complete the workflow approval "
-					"(Pending For Approval → Level 1 → Level 2) first."
+					"(Pending L1 Approval → L1 → L2) first."
 				).format(qn, ws),
 				title=frappe._("Quotation Not Yet Approved"),
 			)

@@ -51,6 +51,9 @@ def _sales_person_email(sp_name):
 
 
 _TEMPLATE_FOR_STATE = {
+    # ERP-TKT-9 2026-06-05: V3 L1 state renamed; legacy kept for any
+    # in-flight rows from before the migration patch ran.
+    "Pending L1 Approval": "Quotation Approval Required",
     "Pending For Approval": "Quotation Approval Required",
     "Pending L2 Approval": "Quotation Approval Required",
     "Approved": "Quotation Approved",
@@ -86,7 +89,7 @@ def on_state_change(doc, method=None):
         return  # no transition
 
     try:
-        if new_state in ("Pending For Approval",):
+        if new_state in ("Pending L1 Approval", "Pending For Approval"):
             _notify_approval_required(doc, stage="L1")
         elif new_state == "Pending L2 Approval":
             _notify_approval_required(doc, stage="L2")

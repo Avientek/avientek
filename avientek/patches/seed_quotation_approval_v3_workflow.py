@@ -34,9 +34,9 @@ STATES = [
     ("Submitted",              "1", "Primary"),
     ("Requested for update",   "1", "Warning"),
     ("Approved for Update",    "1", "Warning"),
-    ("Pending For Approval",   "1", "Warning"),
+    ("Pending L1 Approval",   "1", "Warning"),
     # Rahul 2026-05-14 BRD: high-prob revisions go through L1 -> L2
-    # chain. After L1 approves "Pending For Approval" the doc moves
+    # chain. After L1 approves "Pending L1 Approval" the doc moves
     # here for the L2 approver to make the final call. Same pattern
     # for Cancellation -> "Cancellation L2 Pending".
     ("Pending L2 Approval",    "1", "Warning"),
@@ -128,7 +128,7 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         ("Draft",                  "Submit",                "Approved",               "All",         1, AUTO_OK),
 
         # Low-margin route — Draft must enter the L1 approval chain.
-        ("Draft",                  "Send for Approval",     "Pending For Approval",   "All",         1, NEEDS_APPROVAL),
+        ("Draft",                  "Send for Approval",     "Pending L1 Approval",   "All",         1, NEEDS_APPROVAL),
 
         # Document Approval: user ticks one of the checkboxes + saves.
         # Rahul 2026-05-15 — same transitions must fire from `Submitted`
@@ -165,9 +165,9 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         ("Requested for update",   "Cancel Request",        "Approved",               "creator",     1, "not doc.custom_request_for_update"),
 
         # User edits in Approved for Update -> sends back for approval
-        ("Approved for Update",    "Send for Approval",     "Pending For Approval",   "creator",     1, ""),
+        ("Approved for Update",    "Send for Approval",     "Pending L1 Approval",   "creator",     1, ""),
 
-        # BRD 2026-05-14: Pending For Approval is the L1 stage of the
+        # BRD 2026-05-14: Pending L1 Approval is the L1 stage of the
         # amend chain. L1 approves -> Pending L2 Approval. L2 approves
         # -> Approved.
         #
@@ -188,17 +188,17 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         # Workflow now supports L1 making edits, re-saving (re-runs
         # set_margin_flags), and either approving or escalating based on
         # the updated flag state.
-        ("Pending For Approval",   "Approve",               "Approved",               "l1_approver", 1, "doc.custom_level_1_approve_ok == 1"),
-        ("Pending For Approval",   "Approve Level 1",       "Pending L2 Approval",    "l1_approver", 0, ""),
-        ("Pending For Approval",   "Request Revision",      "Sent for Revision",      "l1_approver", 0, ""),
-        ("Pending For Approval",   "Reject",                "Rejected",               "l1_approver", 0, ""),
+        ("Pending L1 Approval",   "Approve",               "Approved",               "l1_approver", 1, "doc.custom_level_1_approve_ok == 1"),
+        ("Pending L1 Approval",   "Approve Level 1",       "Pending L2 Approval",    "l1_approver", 0, ""),
+        ("Pending L1 Approval",   "Request Revision",      "Sent for Revision",      "l1_approver", 0, ""),
+        ("Pending L1 Approval",   "Reject",                "Rejected",               "l1_approver", 0, ""),
         ("Pending L2 Approval",    "Approve Level 2",       "Approved",               "l2_approver", 0, ""),
         ("Pending L2 Approval",    "Request Revision",      "Sent for Revision",      "l2_approver", 0, ""),
         ("Pending L2 Approval",    "Reject",                "Rejected",               "l2_approver", 0, ""),
 
         # Sent for Revision -- user can save freely (handled by validator state-allow)
         # then re-submit for approval (re-enters the L1 stage).
-        ("Sent for Revision",      "Send for Approval",     "Pending For Approval",   "creator",     1, ""),
+        ("Sent for Revision",      "Send for Approval",     "Pending L1 Approval",   "creator",     1, ""),
 
         # BRD 2026-05-14: Cancellation also goes through L1 -> L2.
         # Cancellation Requested -> L1 -> Cancellation L2 Pending -> L2 -> Cancelled.

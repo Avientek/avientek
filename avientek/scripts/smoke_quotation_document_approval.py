@@ -82,7 +82,8 @@ def run():
                      wf.document_type)
     expected_states = {
         "Draft", "Submitted", "Requested for update", "Approved for Update",
-        "Pending For Approval", "Approved", "Sent for Revision",
+        # ERP-TKT-9 2026-06-05: L1 state renamed from "Pending For Approval"
+        "Pending L1 Approval", "Approved", "Sent for Revision",
         "Cancellation Requested", "Cancelled",
     }
     have_states = {s.state for s in wf.states}

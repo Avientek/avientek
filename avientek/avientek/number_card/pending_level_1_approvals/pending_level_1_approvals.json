@@ -4,7 +4,7 @@
  "docstatus": 0,
  "doctype": "Number Card",
  "document_type": "Quotation",
- "filters_json": "[[\"Quotation\",\"workflow_state\",\"in\",[\"Pending For Approval\",\"Pending Level 1 Approval\"],false]]",
+ "filters_json": "[[\"Quotation\",\"workflow_state\",\"in\",[\"Pending L1 Approval\",\"Pending For Approval\",\"Pending Level 1 Approval\"],false]]",
  "function": "Count",
  "idx": 0,
  "is_public": 1,
