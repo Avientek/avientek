@@ -503,3 +503,8 @@ avientek.patches.drop_quotation_part_number_mirror_fields
 # (gated by doc.custom_level_1_approve_ok == 1) instead of being forced
 # to escalate. Idempotent (seeder wipes + rebuilds transitions).
 avientek.patches.add_l1_direct_approve_v3
+# Sridhar ERP-TKT-6 2026-06-05 — adds Quotation.custom_l1_approved_by
+# Custom Field. Audit field used by the L1/L2 dual-approval validator
+# to block one user from rubber-stamping both gates (real incident:
+# QN-LTD-26-02159-1 approved by orders.mea who is in both pools).
+avientek.patches.add_quotation_l1_approver_audit_field

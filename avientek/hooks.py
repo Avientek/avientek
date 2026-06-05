@@ -528,6 +528,15 @@ doc_events = {
             # left the mirror stale and the list-view filter on
             # workflow_status returned wrong rows.
             "avientek.events.quotation.sync_workflow_status",
+            # Sridhar ERP-TKT-6 2026-06-05 — block one user from approving
+            # at both L1 and L2 (or both Cancellation L1 + L2). Captures
+            # the L1 approver into Quotation.custom_l1_approved_by on
+            # transition into Pending L2 Approval / Cancellation L2 Pending,
+            # then throws on the L2 transition if frappe.session.user
+            # matches. Sibling to allow_self_approval=0 (which blocks
+            # creator vs approver — this blocks one approver from doing
+            # both gates).
+            "avientek.api.quotation_dual_approval_block.enforce_l1_l2_different_users",
         ],
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
