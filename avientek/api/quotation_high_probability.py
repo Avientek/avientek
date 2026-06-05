@@ -302,13 +302,30 @@ def on_update_after_submit(doc, method=None):
     db_prob = _effective_probability(doc.name)
 
     if db_prob < HIGH_PROB_THRESHOLD:
-        # Inline probability edit is the only allow_on_submit path.
+        # Inline probability edit is the always-allowed path.
         if not _changed_fields(doc, exclude={"probability"}):
+            return
+        # Sridhar ERP-TKT-4 2026-06-05: same carve-outs as the high-prob
+        # branch below — ticking custom_request_for_update or
+        # custom_cancellation_check is a workflow action, not an
+        # arbitrary field edit. Pre-fix this branch threw before the
+        # workflow transition could fire, so low-prob approved quotes
+        # were impossible to cancel or amend. The high-prob branch
+        # already permits these checkbox saves (see lines below) — the
+        # low-prob branch must too.
+        if doc.get("custom_request_for_update") or doc.get("custom_cancellation_check"):
+            return
+        ws = (doc.get("workflow_state") or "").strip()
+        if ws in ("Approved for Update", "Sent for Revision"):
+            return
+        if _changed_only_special_prices(doc):
             return
         frappe.throw(
             _("Submitted Quotation: only the Probability field can be "
-              "updated inline. To change other fields, use Cancel + "
-              "Amend."),
+              "updated inline. To change other fields, scroll to the "
+              "<b>Document Approval</b> section, tick "
+              "<i>Request for Update</i> or <i>Cancellation Check</i>, "
+              "fill the note, and Save."),
             title=_("Edit Restricted"),
         )
         return
