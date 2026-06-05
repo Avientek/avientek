@@ -1439,6 +1439,19 @@ def set_margin_flags(doc, method=None):
         level_2_required = True
         warnings.append(_("Level 2 approval required: {0}").format(prob_reason))
 
+    # ERP-TKT-2 (Sridhar/Rahul 2026-06-05, Option A confirmed):
+    # Incentive applied → force Level 2 regardless of margin.
+    # Pre-fix, set_margin_flags only inspected margin% / probability —
+    # never the three incentive fields — so a healthy-margin quote
+    # with a large incentive auto-approved silently, bypassing both
+    # L1 and L2. Now: any of `custom_apply_incentive`,
+    # `custom_incentive_amount > 0`, or any item with
+    # `custom_incentive_ > 0` routes to L2.
+    incentive_reason = _incentive_applied_reason(doc)
+    if incentive_reason:
+        level_2_required = True
+        warnings.append(_("Level 2 approval required: {0}").format(incentive_reason))
+
     # Worst case wins
     if level_2_required:
         doc.custom_auto_approve_ok = 0
@@ -1451,6 +1464,47 @@ def set_margin_flags(doc, method=None):
     if warnings:
         msg = "<br><br>".join(warnings)
         frappe.msgprint(msg, title=_("Margin Warning"), indicator="orange", alert=True)
+
+
+def _incentive_applied_reason(doc):
+    """Detect ANY incentive applied on the quotation.
+
+    Returns a human-readable reason string if incentive is applied,
+    else None. Caller (set_margin_flags) forces Level 2 approval when
+    a reason is returned.
+
+    Sridhar/Rahul 2026-06-05 — Option A confirmed for ERP-TKT-2.
+
+    Three USER-INPUT avenues are checked. Any one triggers L2:
+      1. Parent `custom_incentive_` > 0     (parent-level percentage)
+      2. Parent `custom_incentive_amount` > 0  (parent-level lump-sum)
+      3. Any items[*].custom_incentive_ > 0    (per-item percentage)
+
+    Note: `custom_apply_incentive` is a BUTTON field (action trigger,
+    no stored value) — cannot be inspected. `custom_total_incentive_new`
+    is a calculated field populated by distribute_incentive_server()
+    which runs AFTER set_margin_flags in run_calculation_pipeline,
+    so it's not reliable at routing time either. Only the three
+    user-input avenues above are checked.
+
+    flt() is used so blank/null resolves to 0 without raising. The
+    `> 0` comparison ignores negative incentives if anyone ever uses
+    them — incentive is defined as a positive concession to the
+    customer.
+    """
+    parent_pct = flt(doc.get("custom_incentive_"))
+    if parent_pct > 0:
+        return _("Parent-level incentive percent {0}% applied.").format(parent_pct)
+    parent_amt = flt(doc.get("custom_incentive_amount"))
+    if parent_amt > 0:
+        return _("Parent-level incentive amount {0} applied.").format(parent_amt)
+    item_count = 0
+    for it in (doc.get("items") or []):
+        if flt(it.get("custom_incentive_")) > 0:
+            item_count += 1
+    if item_count:
+        return _("Per-item incentive applied on {0} row(s).").format(item_count)
+    return None
 
 
 def _probability_change_requires_level_2(doc):
