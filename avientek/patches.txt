@@ -497,3 +497,9 @@ avientek.patches.backfill_prf_reference_fc_amounts
 # Settings + Property Setters. Companion to hook + function removal in
 # the same commit.
 avientek.patches.drop_quotation_part_number_mirror_fields
+# Sridhar/Rahul/Jithin ERP-TKT-2 2026-06-05 — bridge patch: re-run the
+# V3 Quotation Approval workflow seeder so existing sites pick up the
+# new "Approve" transition that lets L1 approve directly to Approved
+# (gated by doc.custom_level_1_approve_ok == 1) instead of being forced
+# to escalate. Idempotent (seeder wipes + rebuilds transitions).
+avientek.patches.add_l1_direct_approve_v3

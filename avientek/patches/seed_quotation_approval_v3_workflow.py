@@ -179,6 +179,16 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         #     audit closure with no return path)
         # Both L1 and L2 approvers see all three buttons (Approve /
         # Request Revision / Reject) on their respective queue states.
+        #
+        # Sridhar/Rahul/Jithin ERP-TKT-2 2026-06-05: NEW "Approve" action
+        # lets L1 approve straight to "Approved" when L1 alone is
+        # sufficient (no L2 needed). Condition `custom_level_1_approve_ok
+        # == 1` hides this button when conditions still warrant L2 — in
+        # that case only "Approve Level 1" (escalate) is visible.
+        # Workflow now supports L1 making edits, re-saving (re-runs
+        # set_margin_flags), and either approving or escalating based on
+        # the updated flag state.
+        ("Pending For Approval",   "Approve",               "Approved",               "l1_approver", 1, "doc.custom_level_1_approve_ok == 1"),
         ("Pending For Approval",   "Approve Level 1",       "Pending L2 Approval",    "l1_approver", 0, ""),
         ("Pending For Approval",   "Request Revision",      "Sent for Revision",      "l1_approver", 0, ""),
         ("Pending For Approval",   "Reject",                "Rejected",               "l1_approver", 0, ""),
