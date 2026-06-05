@@ -1116,7 +1116,12 @@ def get_prf_apply_data(prf_names):
 			if not frappe.db.exists(ref_dt, ref_name):
 				skipped.append({"prf": doc.name, "idx": row.idx, "reason": f"{ref_dt} {ref_name} not found"})
 				continue
-			amt = flt(row.outstanding_amount)
+			# Sridhar 2026-06-05: prefer grand_total over outstanding_amount
+			# for the same reason as the print fix (033a05b) and report fix:
+			# historical rows have corrupt outstanding_amount (AED stored as
+			# if FC). grand_total is reliably populated in FC by every JS
+			# mapper path.
+			amt = flt(row.grand_total) or flt(row.outstanding_amount)
 			if amt <= 0:
 				skipped.append({"prf": doc.name, "idx": row.idx, "reason": "zero net payment"})
 				continue

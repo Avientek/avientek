@@ -715,6 +715,17 @@ doc_events = {
         "before_save": "avientek.stock.sbb_batch_no_enforcer.enforce_sbb_null_batch_no",
         "before_insert": "avientek.stock.sbb_batch_no_enforcer.enforce_sbb_null_batch_no",
     },
+    # Sridhar 2026-06-05 — dynamic FC/base consistency for PRF reference
+    # rows. Companion to print fix (033a05b) and report/apply-data fixes.
+    # Whenever a Payment Request Reference is saved, detect if its
+    # outstanding_amount appears to be in company currency (base) rather
+    # than the row's transaction currency, and re-pull the correct FC
+    # value from the source doc. Protects against the legacy JS mapper
+    # bug where PI/SI rows had base-AED stored in the FC field.
+    "Payment Request Reference": {
+        "before_save": "avientek.prf.reference_currency_enforcer.enforce_fc_consistency",
+        "before_insert": "avientek.prf.reference_currency_enforcer.enforce_fc_consistency",
+    },
 }
 
 

@@ -483,3 +483,9 @@ avientek.patches.repost_ghost_vouchers_bulk
 # the DN appears as a 'ghost'. Patch submits the Draft, auto-aligns DN
 # vs SI rate mismatches. Idempotent.
 avientek.patches.fix_non_stock_dn_drafts
+# Sridhar 2026-06-05 — backfill historical PRF reference rows where
+# outstanding_amount was corrupted by the legacy JS mapper bug (PI/SI
+# single-picker stored base-AED in the FC field). Detects rows where
+# outstanding_amount ≈ base_grand_total but ≠ grand_total, replaces
+# with grand_total (always FC). Idempotent.
+avientek.patches.backfill_prf_reference_fc_amounts

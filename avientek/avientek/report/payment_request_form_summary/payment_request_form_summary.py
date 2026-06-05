@@ -109,11 +109,18 @@ def _data(filters):
 
             /* PRF Amount — Jithin 2026-05-23: for IT this is the
                RECEIVING side (destination bank's deposit amount); for
-               non-IT it sums the child outstanding amounts. */
+               non-IT it sums the child outstanding amounts.
+               Sridhar 2026-06-05: prefer grand_total over
+               outstanding_amount. grand_total is reliably populated in
+               FC by every JS mapper path; outstanding_amount had a
+               legacy bug where PI/SI single-picker rows stored AED
+               equivalents (see commit 1b36c43). NULLIF guards against
+               legitimate zero-value grand_totals (e.g. manual rows
+               where only outstanding was set). */
             CASE
                 WHEN prf.payment_type = 'Internal Transfer' THEN prf.receiving_amount
                 ELSE IFNULL((
-                    SELECT SUM(pr.outstanding_amount)
+                    SELECT SUM(IFNULL(NULLIF(pr.grand_total, 0), pr.outstanding_amount))
                     FROM `tabPayment Request Reference` pr
                     WHERE pr.parent = prf.name
                 ), 0)
@@ -161,7 +168,7 @@ def _data(filters):
                         ELSE NULL
                     END
                 ELSE IFNULL((
-                    SELECT SUM(pr.base_outstanding_amount)
+                    SELECT SUM(IFNULL(NULLIF(pr.base_grand_total, 0), pr.base_outstanding_amount))
                     FROM `tabPayment Request Reference` pr
                     WHERE pr.parent = prf.name
                 ), 0)
