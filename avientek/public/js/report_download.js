@@ -185,17 +185,97 @@ function _rd_coerce_value(raw, ftype) {
 
 
 /**
+ * Extract a human-readable error message from whatever frappe.call
+ * rejects with. The rejection shape varies — sometimes a string,
+ * sometimes a jqXHR-like object with responseJSON / responseText,
+ * sometimes a Frappe error response with _server_messages /
+ * exception. Without this helper, the error reaches the UI as
+ * "[object Object]" — Sridhar reported exactly this on chunk 85
+ * of a Sales Order export on avientekv21.frappe.cloud.
+ */
+function _rd_format_error(err) {
+	if (!err) return "unknown error";
+	if (typeof err === "string") return err;
+	// Frappe-style: _server_messages is a JSON string of JSON strings
+	if (err._server_messages) {
+		try {
+			var msgs = JSON.parse(err._server_messages);
+			if (Array.isArray(msgs) && msgs.length) {
+				return msgs.map(function (m) {
+					try { return JSON.parse(m).message || m; } catch (e) { return m; }
+				}).join("; ");
+			}
+		} catch (e) { /* fall through */ }
+	}
+	if (err.exception) return String(err.exception);
+	if (err.responseJSON && err.responseJSON.exception) {
+		return String(err.responseJSON.exception);
+	}
+	if (err.responseText) return String(err.responseText).slice(0, 200);
+	if (err.statusText) {
+		return err.statusText + (err.status ? " (HTTP " + err.status + ")" : "");
+	}
+	if (err.message) return String(err.message);
+	try { return JSON.stringify(err).slice(0, 200); } catch (e) { return String(err); }
+}
+
+
+/**
+ * Wrap frappe.call with exponential-backoff retry. Used by the
+ * chunked Excel export so a transient 500 / network blip on a single
+ * chunk doesn't abort the entire upload — common for long exports
+ * (Sridhar's 42K-row Sales Order export failed on chunk 85 of ~85,
+ * almost certainly transient since chunks 1-84 succeeded).
+ *
+ * Up to MAX_ATTEMPTS tries. Backoff: attempt 1 immediate, attempt 2
+ * after 2s, attempt 3 after 4s. Total worst-case wait per chunk = 6s.
+ */
+function _rd_call_with_retry(call_args, max_attempts) {
+	max_attempts = max_attempts || 3;
+	var attempt = 0;
+	function try_once() {
+		attempt++;
+		return frappe.call(call_args).catch(function (err) {
+			if (attempt < max_attempts) {
+				var backoff_ms = attempt * 2000;
+				if (window.console && console.warn) {
+					console.warn("[Avientek Export] attempt " + attempt + " failed: "
+						+ _rd_format_error(err) + " — retrying in " + backoff_ms + "ms");
+				}
+				return new Promise(function (resolve) {
+					setTimeout(resolve, backoff_ms);
+				}).then(try_once);
+			}
+			// Re-throw the LAST error so the caller's .catch sees it.
+			throw err;
+		});
+	}
+	return try_once();
+}
+
+
+/**
  * POST the assembled rows (header + data rows, each row is an array of
  * cell values) to the server in chunks of 500. Server accumulates them
  * in cache keyed by session_token; the final chunk triggers workbook
  * build + returns the file as base64. Client decodes + downloads ONE
  * .xlsx file.
  *
- * Sridhar 2026-06-05: avoids the 413 Request Entity Too Large error
+ * Sridhar 2026-06-05 (v3): avoids the 413 Request Entity Too Large error
  * on Frappe Cloud nginx for exports > ~2K rows (default
  * client_max_body_size ≈ 1MB; a 6800-row Quotation export was ~3-5MB
  * in a single POST). Chunks of 500 keep each request well under any
  * reasonable body limit.
+ *
+ * Sridhar 2026-06-05 (v4): added retry-with-backoff per chunk +
+ * better error messages. A 42K-row Sales Order export on
+ * avientekv21.frappe.cloud failed on chunk 85 of 85 with "[object
+ * Object]" — caused by my old catch handler stringifying the
+ * rejection object naively. Now each chunk gets up to 3 attempts
+ * (immediate, +2s, +4s) before bailing, and failures show the real
+ * error text. Almost all real-world chunk failures are transient
+ * (rate limit / brief Redis spike / network blip) so retry recovers
+ * silently.
  */
 function _rd_chunked_excel_post(rows, doctype, col_types, col_options) {
 	var BATCH = 500;
@@ -214,7 +294,7 @@ function _rd_chunked_excel_post(rows, doctype, col_types, col_options) {
 			indicator: "blue",
 		}, 3);
 
-		return frappe.call({
+		var call_args = {
 			method: "avientek.api.quotation_access.export_report_as_excel_chunked",
 			args: {
 				session_token: session_token,
@@ -228,7 +308,9 @@ function _rd_chunked_excel_post(rows, doctype, col_types, col_options) {
 				col_options: JSON.stringify(col_options || []),
 			},
 			type: "POST",
-		}).then(function (r) {
+		};
+
+		return _rd_call_with_retry(call_args, 3).then(function (r) {
 			var msg = r && r.message;
 			if (is_last) {
 				if (msg && msg.complete && msg.filecontent_base64) {
@@ -248,7 +330,19 @@ function _rd_chunked_excel_post(rows, doctype, col_types, col_options) {
 				return send(i + 1);
 			}
 		}).catch(function (err) {
-			frappe.msgprint(__("Export failed on chunk {0}: {1}", [i + 1, err || "unknown error"]));
+			var reason = _rd_format_error(err);
+			frappe.msgprint({
+				title: __("Export Failed"),
+				message: __(
+					"Chunk {0} of {1} failed after 3 retries.<br><br>"
+					+ "<b>Server says:</b> {2}<br><br>"
+					+ "<i>Cause is usually a transient Frappe Cloud rate-limit or "
+					+ "session expiry on very long exports. Try clicking "
+					+ "Report Download again — it will start a fresh session.</i>",
+					[i + 1, total_chunks, reason]
+				),
+				indicator: "red",
+			});
 		});
 	}
 	return send(0);
