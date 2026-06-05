@@ -241,67 +241,73 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 
 	// Rahul 2026-06-02: previously hard-capped at 9999 rows per export.
 	// Item / Item Price / Sales Order have 10k–160k rows on prod, so users
-	// only ever got the first 9999. Switch to chunked pagination via
-	// rv.start + rv.page_length so we accumulate ALL matching rows.
-	// Soft cap at 100,000 rows total per export (browser memory + Excel
-	// practicality); warn if hit.
+	// only ever got the first 9999. Switch to chunked pagination so we
+	// accumulate ALL matching rows. Soft cap at 100,000 rows total per
+	// export (browser memory + Excel practicality); warn if hit.
 	//
-	// Sridhar ERP-TKT-3 2026-06-05: original implementation capped at
-	// 5000 rows due to a misread of Frappe's base_list refresh contract.
-	// base_list's `before_refresh` does:
-	//     this.page_length = this.page_length + this.start;
-	//     this.start = 0;
-	// So setting rv.start=5000, rv.page_length=5000 + calling refresh()
-	// becomes internally `start=0, page_length=10000` — Frappe REPLACES
-	// rv.data with the full 0..9999 set (not 5000..9999), and resets
-	// rv.start to 0. The old `fetched_offsets[rv.start]` guard then fired
-	// on chunk 2 (rv.start was 0 again) → loop bailed → only 5000 rows
-	// exported.
+	// Sridhar ERP-TKT-3 2026-06-05 (v1, e0782f5): used rv.refresh() and
+	// read rv.data after each call. Hit a wall on Quotation report views
+	// with child-table columns picked: Frappe base_list's `update_data`
+	// applies `this.data.uniqBy((d) => d.name)` after every refresh.
+	// Child-expanded responses collapse to one-row-per-parent in rv.data
+	// even though the server returned thousands of expanded rows. My
+	// growth-delta check saw added=0 and bailed. Rahul's Quotation export
+	// landed at exactly 5000 rows because chunk 2's 10K-row server
+	// response uniqBy'd back to the same 5K set chunk 1 returned.
 	//
-	// Correct contract:
-	//   - Each iteration: set rv.start = current accumulator length, set
-	//     rv.page_length = CHUNK. Frappe's refresh fetches from 0 up to
-	//     (accumulator + CHUNK), and rv.data ends up being the FULL
-	//     cumulative dataset of all rows fetched so far.
-	//   - So all_data = (rv.data || []).slice() — full replace, not
-	//     concat.
-	//   - Continue while the accumulator grew by ≥ CHUNK rows since the
-	//     previous iteration. When growth < CHUNK, we've reached the end
-	//     of the dataset (or the safety cap).
-	var prev_pl = rv.page_length;
-	var prev_start = rv.start;
+	// Sridhar ERP-TKT-3 2026-06-05 (v2): bypass rv.refresh() entirely
+	// and call the server method directly via frappe.call with explicit
+	// start + page_length per chunk. That skips uniqBy, the
+	// page_length+=start mutation in before_refresh, and any other
+	// list-view post-processing. We concat raw response rows into our
+	// own buffer. Stop when a chunk returns < CHUNK rows (end of dataset)
+	// or we hit MAX_ROWS.
+	//
+	// rv.method + rv.get_call_args() give us the exact method and args
+	// the list view would use for its own refresh — same filters, same
+	// fields, same group_by — so the export matches what the user sees.
 	var CHUNK = 5000;
 	var MAX_ROWS = 100000;
-
 	var all_data = [];
+
+	var base_call_args = (rv.get_call_args && rv.get_call_args()) || null;
+	if (!base_call_args || !base_call_args.method) {
+		frappe.msgprint(__("Cannot determine list view server endpoint — export aborted."));
+		return;
+	}
 
 	function next_chunk() {
 		var requested_start = all_data.length;
-		rv.start = requested_start;
-		rv.page_length = CHUNK;
+		var chunk_args_obj = Object.assign({}, base_call_args.args, {
+			start: requested_start,
+			page_length: CHUNK,
+		});
+		var call_args = {
+			method: base_call_args.method,
+			args: chunk_args_obj,
+		};
 		frappe.show_alert({
 			message: __("Fetching rows {0}–{1} for export…",
 				[requested_start + 1, requested_start + CHUNK]),
 			indicator: "blue",
 		}, 5);
 
-		var refresh_result = rv.refresh();
-		var p = (refresh_result && typeof refresh_result.then === "function")
-			? refresh_result
-			: new Promise(function (resolve) { setTimeout(resolve, 1500); });
-
-		return p.then(function () {
-			// Frappe accumulates into rv.data on its own (base_list
-			// behavior described above). Use the cumulative buffer
-			// directly — DO NOT concat, that would duplicate.
-			var prev_count = all_data.length;
-			all_data = (rv.data || []).slice();
-			var added = all_data.length - prev_count;
-
-			// Stop when growth < CHUNK (end of dataset) or we hit the
-			// safety cap. `added <= 0` is the explicit no-progress case
-			// (would have been an infinite loop in the old code).
-			if (added < CHUNK || all_data.length >= MAX_ROWS) {
+		return frappe.call(call_args).then(function (r) {
+			var msg = r && r.message;
+			var rows = [];
+			if (msg && msg.keys && msg.values) {
+				// frappe.desk.reportview.get response shape — convert
+				// the parallel keys/values arrays to row dicts.
+				rows = frappe.utils.dict(msg.keys, msg.values);
+			} else if (Array.isArray(msg)) {
+				// frappe.client.get_list response shape — already an
+				// array of dicts.
+				rows = msg;
+			}
+			all_data = all_data.concat(rows);
+			// End of dataset = server returned fewer than CHUNK rows
+			// for this page. Safety cap as before.
+			if (rows.length < CHUNK || all_data.length >= MAX_ROWS) {
 				return;
 			}
 			return next_chunk();
@@ -309,8 +315,6 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 	}
 
 	next_chunk().then(function () {
-		rv.page_length = prev_pl;
-		rv.start = prev_start || 0;
 		if (all_data.length >= MAX_ROWS) {
 			frappe.msgprint(__(
 				"Export truncated at {0} rows. Apply narrower filters to export the remainder.",
@@ -323,8 +327,6 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 		}, 5);
 		proceed(all_data);
 	}).catch(function (err) {
-		rv.page_length = prev_pl;
-		rv.start = prev_start || 0;
 		frappe.msgprint(__("Failed to fetch all rows: {0}", [err || "unknown error"]));
 	});
 }
