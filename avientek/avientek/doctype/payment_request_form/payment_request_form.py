@@ -1082,8 +1082,29 @@ def get_prf_apply_data(prf_names):
 		"party_bank_account": first.supplier_bank_account,
 		"paid_from": first.account,
 		"paid_to": paid_to_acct,
-		"paid_from_account_currency": first.issued_currency,
-		"paid_to_account_currency": paid_to_currency,
+		# Sridhar ERP-TKT-12 2026-06-05: `issued_currency` is ONLY
+		# populated for payment_type == "Internal Transfer". For
+		# Pay / Receive (the common 95% case) it's empty, so the
+		# old `first.issued_currency` alone left paid_from_account_currency
+		# = "". Frappe then defaulted the PE form to company-default
+		# currency, which mismatched SAR-denominated references and
+		# triggered "Select Amount in SAR" validation errors. Fall back
+		# to (a) the `account` (paid_from) DB currency, then (b) the
+		# PRF's main `currency` field (fetched from company default).
+		"paid_from_account_currency": (
+			first.issued_currency
+			or (first.account and frappe.db.get_value(
+				"Account", first.account, "account_currency"
+			))
+			or first.currency
+		),
+		# Same fallback chain for paid_to. `paid_to_currency` was
+		# already partially derived above from the paid_to account but
+		# can still be empty if the account lookup failed.
+		"paid_to_account_currency": (
+			paid_to_currency
+			or first.currency
+		),
 	}
 
 	REF_MAP = {
@@ -2299,6 +2320,29 @@ def create_payment_entry(source_name, target_doc=None, args=None):
             if not target.get(fn):
                 target.set(fn, val)
 
+        # Sridhar ERP-TKT-12 2026-06-05: belt-and-suspenders currency
+        # backfill. The field_map maps PRF.issued_currency →
+        # paid_from_account_currency, but issued_currency is empty for
+        # non-Internal-Transfer payment types — so PE landed with an
+        # empty currency and Frappe defaulted to the wrong one, breaking
+        # reference validation ("Select Amount in SAR" etc.). This block
+        # forces a derive from the account row, then from PRF.currency,
+        # if the mapper + header step both left it empty. Idempotent.
+        if not target.get("paid_from_account_currency"):
+            target.paid_from_account_currency = (
+                (target.paid_from and frappe.db.get_value(
+                    "Account", target.paid_from, "account_currency"
+                ))
+                or source.get("currency")
+            )
+        if not target.get("paid_to_account_currency"):
+            target.paid_to_account_currency = (
+                (target.paid_to and frappe.db.get_value(
+                    "Account", target.paid_to, "account_currency"
+                ))
+                or source.get("currency")
+            )
+
         # References — clear whatever the mapper might have inserted
         # then re-append from the canonical payload.
         target.set("references", [])
@@ -3489,7 +3533,18 @@ def get_supplier_payment_history(supplier, company=None, limit=50):
             "beneficiary": pe.party_name or pe.party,
             "beneficiary_account": beneficiary_account,
             "debit_account": debit_account_no,
-            "currency": pe.paid_from_account_currency or "AED",
+            # Sridhar ERP-TKT-12 2026-06-05: was hardcoded "AED" fallback —
+            # wrong on KSA / Qatar / Bahrain PRFs which use SAR / QAR / BHD
+            # respectively. Fall back to paid_to currency, then to the PRF's
+            # company default currency.
+            "currency": (
+                pe.paid_from_account_currency
+                or pe.paid_to_account_currency
+                or (pe.company and frappe.db.get_value(
+                    "Company", pe.company, "default_currency"
+                ))
+                or ""
+            ),
             "amount": pe.paid_amount or 0,
             "source": "Payment Entry"
         })
