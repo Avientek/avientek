@@ -88,44 +88,83 @@ def _install_once():
 		# india_compliance not installed — nothing to patch.
 		return
 
-	# Sentinel bumped to v2 for ERP-TKT (Sridhar 2026-06-05): the
-	# 2026-05-13 patched_validate_items required `throw` as a positional
-	# arg with no default. After the india_compliance / ERPNext upgrade
-	# on Frappe Cloud, at least one caller now invokes validate_items
-	# WITHOUT `throw`, so Purchase Receipt save crashed with
-	#   TypeError: _install_once..patched_validate_items() missing 1
-	#   required positional argument: 'throw'
-	# Bumping the sentinel name forces workers that already loaded the
-	# v1 closure to install the new (`throw=True` default + **kwargs)
-	# version on the next before_validate without needing a full
-	# worker restart.
-	if getattr(ic_tx, "_avtk_quotation_clubbing_patched_v2", False):
+	# Sentinel bumped to v3 (Sridhar 2026-06-05, 2nd iteration):
+	# v1 (2026-05-13) required `throw` as a positional arg with no
+	#   default. Broke when a caller stopped passing it.
+	# v2 (earlier today) made `throw=True` default + **kwargs to
+	#   absorb extras — but ALSO forwarded `throw=False` to the
+	#   original. That broke on Frappe Cloud's NEW india_compliance
+	#   where the upstream `validate_items(doc)` signature DROPPED
+	#   the throw parameter entirely:
+	#     TypeError: validate_items() got an unexpected keyword
+	#     argument 'throw'
+	# v3: introspect upstream signature once at install time and
+	#   adapt the delegation call. Works against both old IC (which
+	#   expects `validate_items(doc, throw)`) and new IC (just
+	#   `validate_items(doc)`).
+	if getattr(ic_tx, "_avtk_quotation_clubbing_patched_v3", False):
 		return
 
 	original_validate_items = ic_tx.validate_items
 
-	def patched_validate_items(doc, throw=True, *args, **kwargs):
-		"""For any doctype in _SUPPRESSED_DOCTYPES: force throw=False
-		so the clubbing rule returns False instead of raising. Result:
-		ignore_gst_validations returns True for that doc,
-		validate_transaction exits, save succeeds. All other doctypes
-		(notably Sales Invoice — the actual tax point) go through
-		unchanged.
+	# Inspect the upstream signature ONCE so we know whether to
+	# forward `throw` to it. Defaults to "no throw" on inspect
+	# failure since the newer IC is the more common case post-upgrade.
+	import inspect
+	_orig_accepts_throw = False
+	try:
+		_orig_sig = inspect.signature(original_validate_items)
+		_orig_accepts_throw = "throw" in _orig_sig.parameters
+	except (TypeError, ValueError):
+		_orig_accepts_throw = False
 
-		`throw` defaults to True (matches the upstream
-		`ignore_gst_validations(doc, throw=True)` default) so callers
-		that pass only `doc` don't crash. `*args, **kwargs` absorb any
-		additional params a future india_compliance upgrade may add."""
+	def patched_validate_items(doc, *args, **kwargs):
+		"""Multi-version-safe patch for india_compliance's validate_items.
+
+		Two upstream signatures exist in the wild:
+		  OLD: validate_items(doc, throw)         (throw positional)
+		  NEW: validate_items(doc)                (throw removed)
+
+		We absorb whatever the CALLER passes (any signature) via
+		`*args, **kwargs`, and we forward to the ORIGINAL using the
+		signature we detected at install time.
+
+		For doctypes in _SUPPRESSED_DOCTYPES (Quotation, SO, DN, PO,
+		PR, PI — everything except Sales Invoice, the actual tax
+		point), we return False directly without invoking the
+		original. That causes ignore_gst_validations to short-circuit
+		to True → validate_transaction exits → save succeeds. Skipping
+		the upstream call is also necessary because on the NEW
+		signature there's no `throw=False` knob to suppress raising.
+
+		For all other doctypes (notably Sales Invoice), forward to the
+		original. If the original accepts `throw`, pass either the
+		caller-provided value or default True. If not, just pass doc.
+		"""
 		if doc.doctype in _SUPPRESSED_DOCTYPES:
-			return original_validate_items(doc, throw=False)
-		return original_validate_items(doc, throw, *args, **kwargs)
+			return False
+
+		if _orig_accepts_throw:
+			# Forward throw from caller if they gave one, else
+			# default True (matches the old upstream default).
+			throw_val = (
+				args[0] if args
+				else kwargs.get("throw", True)
+			)
+			return original_validate_items(doc, throw_val)
+
+		# New upstream: signature is just (doc). Drop any extras
+		# the caller may have passed.
+		return original_validate_items(doc)
 
 	ic_tx.validate_items = patched_validate_items
-	# Keep the v1 sentinel set so we don't accidentally re-patch via the
-	# old name elsewhere, then set v2 as the live sentinel.
+	# Keep older-version sentinels set so any code path checking them
+	# doesn't re-patch over us.
 	ic_tx._avtk_quotation_clubbing_patched = True
 	ic_tx._avtk_quotation_clubbing_patched_v2 = True
+	ic_tx._avtk_quotation_clubbing_patched_v3 = True
 	print(
 		"[avientek.overrides.india_gst_quotation] validate_items "
-		f"patched v2 — clubbing rule suppressed for {sorted(_SUPPRESSED_DOCTYPES)}"
+		f"patched v3 — upstream accepts throw: {_orig_accepts_throw}; "
+		f"clubbing rule suppressed for {sorted(_SUPPRESSED_DOCTYPES)}"
 	)
