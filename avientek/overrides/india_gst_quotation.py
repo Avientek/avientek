@@ -88,29 +88,44 @@ def _install_once():
 		# india_compliance not installed — nothing to patch.
 		return
 
-	# Sentinel name kept the same so a process that already installed
-	# the 2026-05-13 (Quotation-only) version replaces the closure with
-	# the new multi-doctype one on the next call (only after a worker
-	# restart, which Frappe Cloud Update triggers).
-	if getattr(ic_tx, "_avtk_quotation_clubbing_patched", False):
+	# Sentinel bumped to v2 for ERP-TKT (Sridhar 2026-06-05): the
+	# 2026-05-13 patched_validate_items required `throw` as a positional
+	# arg with no default. After the india_compliance / ERPNext upgrade
+	# on Frappe Cloud, at least one caller now invokes validate_items
+	# WITHOUT `throw`, so Purchase Receipt save crashed with
+	#   TypeError: _install_once..patched_validate_items() missing 1
+	#   required positional argument: 'throw'
+	# Bumping the sentinel name forces workers that already loaded the
+	# v1 closure to install the new (`throw=True` default + **kwargs)
+	# version on the next before_validate without needing a full
+	# worker restart.
+	if getattr(ic_tx, "_avtk_quotation_clubbing_patched_v2", False):
 		return
 
 	original_validate_items = ic_tx.validate_items
 
-	def patched_validate_items(doc, throw):
+	def patched_validate_items(doc, throw=True, *args, **kwargs):
 		"""For any doctype in _SUPPRESSED_DOCTYPES: force throw=False
 		so the clubbing rule returns False instead of raising. Result:
 		ignore_gst_validations returns True for that doc,
 		validate_transaction exits, save succeeds. All other doctypes
-		(notably Purchase Invoice + Sales Invoice — the actual tax
-		points) go through unchanged."""
+		(notably Sales Invoice — the actual tax point) go through
+		unchanged.
+
+		`throw` defaults to True (matches the upstream
+		`ignore_gst_validations(doc, throw=True)` default) so callers
+		that pass only `doc` don't crash. `*args, **kwargs` absorb any
+		additional params a future india_compliance upgrade may add."""
 		if doc.doctype in _SUPPRESSED_DOCTYPES:
 			return original_validate_items(doc, throw=False)
-		return original_validate_items(doc, throw)
+		return original_validate_items(doc, throw, *args, **kwargs)
 
 	ic_tx.validate_items = patched_validate_items
+	# Keep the v1 sentinel set so we don't accidentally re-patch via the
+	# old name elsewhere, then set v2 as the live sentinel.
 	ic_tx._avtk_quotation_clubbing_patched = True
+	ic_tx._avtk_quotation_clubbing_patched_v2 = True
 	print(
 		"[avientek.overrides.india_gst_quotation] validate_items "
-		f"patched — clubbing rule suppressed for {sorted(_SUPPRESSED_DOCTYPES)}"
+		f"patched v2 — clubbing rule suppressed for {sorted(_SUPPRESSED_DOCTYPES)}"
 	)
