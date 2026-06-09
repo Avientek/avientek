@@ -94,6 +94,15 @@ frappe.ui.form.on('Sales Order',{
 	refresh:function(frm){
 		// ── Client Script: "SO Hide item" - control buttons ──
 		_control_so_buttons(frm);
+		// Sridhar 2026-06-09: ERPNext's native "Update Items" button (in
+		// apps/erpnext/.../sales_order.js refresh handler) is added only
+		// when per_delivered < 100 AND per_billed < 100. Once an SI is
+		// raised against the SO, the button disappears. But Avientek's
+		// "Approved for Update" / "Sent for Revision" workflow states
+		// explicitly authorise item modification (after manual SI cleanup
+		// by the user). Add a custom button so the modify dialog is
+		// reachable in those states regardless of billing percentage.
+		_ensure_update_items_button(frm);
 		if (frm.doc.docstatus===1){
 			frm.add_custom_button(__('Proforma Invoice'),() => {
 			frappe.model.open_mapped_doc({
@@ -319,6 +328,38 @@ frappe.ui.form.on('Sales Order',{
 // 		});
 // 		}
 // }
+
+// Sridhar 2026-06-09: Add an Avientek "Update Items" custom button when the
+// SO is in an Avientek update-authorised workflow state but ERPNext's native
+// button is gone (because per_billed / per_delivered hit 100%). Same dialog
+// (erpnext.utils.update_child_items), just side-stepping the native add
+// condition. Caller decides when this is appropriate via workflow_state.
+function _ensure_update_items_button(frm) {
+	var allowedStates = ["Approved for Update", "Sent for Revision"];
+	if (
+		frm.doc.docstatus !== 1 ||
+		frm.doc.status === "Closed" ||
+		!frm.has_perm("write") ||
+		allowedStates.indexOf(frm.doc.workflow_state) === -1
+	) {
+		return;
+	}
+	// frm.add_custom_button is idempotent on (label, group) so calling
+	// it on every refresh is safe — no duplicate button created.
+	frm.add_custom_button(__("Update Items"), function () {
+		if (!window.erpnext || !erpnext.utils || !erpnext.utils.update_child_items) {
+			frappe.msgprint(__("ERPNext update_child_items helper unavailable; please refresh."));
+			return;
+		}
+		erpnext.utils.update_child_items({
+			frm: frm,
+			child_docname: "items",
+			child_doctype: "Sales Order Detail",
+			cannot_add_row: false,
+			has_reserved_stock: frm.doc.__onload && frm.doc.__onload.has_reserved_stock,
+		});
+	});
+}
 
 // ── Client Script: "SO Hide item" - control Update Items / Status buttons ──
 var _so_button_observer = null;
