@@ -537,3 +537,9 @@ avientek.patches.normalize_quotation_pending_l2_state
 # 12-state set + migrates the last legacy "Pending Level 1 Approval"
 # doc. Idempotent.
 avientek.patches.clean_quotation_workflow_state_filter_dropdown
+# Sridhar 2026-06-09 — relax Document Approval section visibility on
+# Quotation so the Cancellation Check / Request for Update checkboxes
+# show for ALL submitted quotes (not just probability >= 75). Customer
+# reported low-probability Approved quotes couldn't be cancelled
+# because the section was hidden by the old probability gate.
+avientek.patches.relax_quotation_document_approval_visibility
