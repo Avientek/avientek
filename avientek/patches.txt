@@ -543,3 +543,12 @@ avientek.patches.clean_quotation_workflow_state_filter_dropdown
 # reported low-probability Approved quotes couldn't be cancelled
 # because the section was hidden by the old probability gate.
 avientek.patches.relax_quotation_document_approval_visibility
+# Sridhar/Rahul 2026-06-09 — Accounts.India user reported two issues
+# in the Quote Report Builder: (1) Customer Name field couldn't be
+# picked from "Pick Columns" (ERPNext ships it hidden=1, only
+# customer_address / customer_group surfaced); (2) Margin% and
+# Incentive% rows showed garbage like -3580.00% / 100.00% — caused
+# by historical Quotation Item rows with amount=0 that produced
+# divide-by-zero garbage before the v15 JS guard. Two patches:
+avientek.patches.expose_customer_name_in_quote_report
+avientek.patches.clamp_quotation_item_margin_garbage
