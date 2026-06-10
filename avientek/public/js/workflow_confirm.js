@@ -1,18 +1,3 @@
-// Sridhar/Rahul 2026-06-10: when a doctype controller already shows its own
-// confirmation/reason dialog for a specific workflow action (e.g. PRF "Revise"
-// which collects a mandatory reason via its own popup), the user was hit with
-// TWO dialogs back-to-back: the custom one + this generic one. Doctype
-// controllers register their custom-handled actions in this map so the
-// generic confirm dialog auto-skips them:
-//
-//   frappe.avientek_workflow_skip_actions = frappe.avientek_workflow_skip_actions || {};
-//   frappe.avientek_workflow_skip_actions['Payment Request Form'] = ['Revise'];
-//
-// The custom dialog remains the single point of confirmation for that action;
-// other actions on the same workflow still get the generic confirm.
-window.frappe = window.frappe || {};
-frappe.avientek_workflow_skip_actions = frappe.avientek_workflow_skip_actions || {};
-
 $(document).on('app_ready', function () {
 	const _registered = {};
 	const OrigShowActions = frappe.ui.form.States.prototype.show_actions;
@@ -28,17 +13,6 @@ $(document).on('app_ready', function () {
 				frappe.ui.form.on(frm.doctype, 'before_workflow_action', function (frm) {
 					let action = frm.selected_workflow_action;
 					let from_state = frm.doc.workflow_state || '';
-
-					// Skip the generic confirm dialog when this action has a
-					// doctype-specific custom dialog. Sridhar/Rahul 2026-06-10:
-					// before this guard, PRF "Revise" surfaced BOTH the custom
-					// reason popup AND this generic confirm — user had to
-					// confirm twice. The custom dialog is the single source
-					// of truth for those actions.
-					const skip = frappe.avientek_workflow_skip_actions[frm.doctype] || [];
-					if (skip.indexOf(action) !== -1) {
-						return;
-					}
 
 					// Find the to_state from workflow transitions
 					let to_state = '';

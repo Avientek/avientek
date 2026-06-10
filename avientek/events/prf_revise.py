@@ -17,40 +17,23 @@ from frappe import _
 from frappe.utils import now_datetime
 
 
-@frappe.whitelist()
-def send_for_revise(prf_name: str, reason: str):
-	"""Decorate the Revise transition with reason + audit + notification.
+REVISE_ALLOWED_FROM_STATES = {"Authorised", "Rejected"}
 
-	Called from the client-side popup BEFORE the workflow action is
-	dispatched. Saves reason on the doc and writes the audit Comment.
-	The JS then triggers the workflow transition itself.
+
+def _apply_revise_side_effects(doc, reason: str, by_user: str | None = None):
+	"""Run the three Revise side-effects on the PRF doc:
+
+	    1. Persist `revise_reason` field (creator sees it on form load)
+	    2. Add audit Comment with reason + approver + timestamp
+	    3. Email + ToDo to the original creator
+
+	Idempotency is enforced at the call site: callers check whether
+	revise_reason is already set before invoking this (and skip if so).
+
+	`by_user` defaults to `frappe.session.user` and identifies the
+	approver who triggered the Revise transition.
 	"""
-	if not prf_name:
-		frappe.throw(_("PRF name is required."))
-	reason = (reason or "").strip()
-	if not reason:
-		frappe.throw(_("Reason for revise is required."))
-
-	doc = frappe.get_doc("Payment Request Form", prf_name)
-
-	# Sridhar ERP-TKT-18 2026-06-05: was hard-coded to "Authorised" only,
-	# but the V3 workflow seeder (`create_payment_request_workflow.py`)
-	# ALREADY exposes `Rejected → Revise → Draft` as a legal transition
-	# (role=All). The customer wants Rejected docs to also use the same
-	# reason-popup flow so the creator gets an explanatory ToDo + email
-	# (matches the original Sridhar BRD from 2026-05-27, which only
-	# covered Authorised at the time). Allow both — same downstream
-	# logic (audit Comment + creator notification + workflow apply
-	# transitions to Draft regardless of which source state). If new
-	# source states are added to the workflow later they should also be
-	# whitelisted here.
-	REVISE_ALLOWED_STATES = {"Authorised", "Rejected"}
-	if doc.workflow_state not in REVISE_ALLOWED_STATES:
-		frappe.throw(
-			_("PRF must be in {0} to be sent for revision. Current state: {1}").format(
-				" or ".join(sorted(REVISE_ALLOWED_STATES)), doc.workflow_state
-			)
-		)
+	by_user = by_user or frappe.session.user
 
 	# 1. Capture reason on the doc
 	doc.db_set("revise_reason", reason, update_modified=False)
@@ -60,22 +43,106 @@ def send_for_revise(prf_name: str, reason: str):
 		"doctype": "Comment",
 		"comment_type": "Info",
 		"reference_doctype": "Payment Request Form",
-		"reference_name": prf_name,
+		"reference_name": doc.name,
 		"content": _(
 			"<b>Sent for Revise</b> by {0} at {1}.<br><b>Reason:</b> {2}"
 		).format(
-			frappe.session.user,
+			by_user,
 			now_datetime().strftime("%Y-%m-%d %H:%M"),
 			frappe.utils.escape_html(reason),
 		),
 	}).insert(ignore_permissions=True)
 
-	# 3. Notify creator (email + ToDo). Use existing Avientek notification
-	#    settings as a master switch — if workflow-state notifications are
-	#    disabled we still create the ToDo but skip the email.
+	# 3. Notify creator (email + ToDo).
 	_notify_creator(doc, reason)
 
+
+@frappe.whitelist()
+def send_for_revise(prf_name: str, reason: str):
+	"""Custom-dialog API entry. Called from the legacy JS popup BEFORE
+	the workflow action is dispatched (when custom_enable_confirmation=0
+	on the PRF workflow). Validates inputs + runs the shared side-effects.
+
+	When custom_enable_confirmation=1 on the PRF workflow, the JS dialog
+	auto-skips itself (see payment_request_form.js:before_workflow_action)
+	and this endpoint is not called — `fill_revise_side_effects` (the
+	on_update_after_submit hook below) covers the same side-effects
+	after the generic confirmation dialog confirms the transition.
+
+	Sridhar ERP-TKT-18 2026-06-05: REVISE_ALLOWED_FROM_STATES covers both
+	Authorised and Rejected source states (matches the V3 PRF workflow
+	seeder which exposes Rejected → Revise → Draft).
+	"""
+	if not prf_name:
+		frappe.throw(_("PRF name is required."))
+	reason = (reason or "").strip()
+	if not reason:
+		frappe.throw(_("Reason for revise is required."))
+
+	doc = frappe.get_doc("Payment Request Form", prf_name)
+
+	if doc.workflow_state not in REVISE_ALLOWED_FROM_STATES:
+		frappe.throw(
+			_("PRF must be in {0} to be sent for revision. Current state: {1}").format(
+				" or ".join(sorted(REVISE_ALLOWED_FROM_STATES)), doc.workflow_state
+			)
+		)
+
+	_apply_revise_side_effects(doc, reason)
 	return {"ok": True}
+
+
+def fill_revise_side_effects(doc, method=None):
+	"""doc_events on_update_after_submit hook for Payment Request Form.
+
+	Sridhar/Rahul 2026-06-10: when the PRF workflow has
+	custom_enable_confirmation=1, the JS-side custom Revise dialog skips
+	itself (payment_request_form.js:before_workflow_action) so the user
+	only sees ONE dialog — the generic workflow_confirm.js one. Without
+	this server-side fallback, the standard workflow transition would
+	land with no revise_reason saved, no audit Comment, and no creator
+	notification — a major regression vs the custom-dialog path.
+
+	This hook detects the post-transition state of a Revise action and
+	runs the same three side-effects `send_for_revise` does, pulling
+	the reason from whatever the user typed in the generic dialog's
+	"Remarks" textarea (logged into Workflow Action Log microseconds ago).
+
+	Idempotent: skipped when revise_reason is already populated, which
+	means the custom dialog already handled it via send_for_revise.
+	"""
+	# Cheap early-exit: only matters when the doc JUST transitioned to
+	# Draft (the to_state for every Revise transition in the V3 PRF
+	# workflow seeder).
+	if getattr(doc, "workflow_state", None) != "Draft":
+		return
+	if getattr(doc, "revise_reason", None):
+		# Custom dialog (send_for_revise) already ran. Don't double-notify.
+		return
+
+	# Find the most recent Workflow Action Log entry for Revise on this
+	# PRF — the generic dialog logged it microseconds ago. Filter
+	# action='Revise' so a subsequent action's remarks don't get picked
+	# up. Whitelist from_state to avoid notifying for any unrelated
+	# Draft transition (defence-in-depth).
+	log = frappe.db.get_value(
+		"Workflow Action Log",
+		{
+			"reference_doctype": "Payment Request Form",
+			"reference_name": doc.name,
+			"action": "Revise",
+		},
+		["remarks", "from_state", "owner"],
+		order_by="creation desc",
+		as_dict=True,
+	)
+	if not log:
+		return
+	if log.from_state not in REVISE_ALLOWED_FROM_STATES:
+		return
+
+	reason = (log.remarks or "").strip() or _("Sent back for revision (no remarks given).")
+	_apply_revise_side_effects(doc, reason, by_user=log.owner)
 
 
 def _notify_creator(doc, reason: str):

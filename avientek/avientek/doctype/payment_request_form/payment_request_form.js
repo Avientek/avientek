@@ -4,20 +4,6 @@
 frappe.provide("erpnext.accounts.dimensions");
 let is_updating_fields = false;
 
-// Sridhar/Rahul 2026-06-10: tell the global workflow_confirm.js hook NOT to
-// show its generic "Confirm Workflow Action" dialog for "Revise" on PRF —
-// our custom Revise dialog (defined in before_workflow_action below) already
-// collects a mandatory reason and is itself the confirmation step. Without
-// this skip-list entry the user gets hit with TWO dialogs in a row.
-// Every other PRF workflow action (Approve Level 1, Cancel, etc.) still
-// gets the generic confirm.
-frappe.avientek_workflow_skip_actions = frappe.avientek_workflow_skip_actions || {};
-if (!(frappe.avientek_workflow_skip_actions["Payment Request Form"] || []).includes("Revise")) {
-    frappe.avientek_workflow_skip_actions["Payment Request Form"] = (
-        frappe.avientek_workflow_skip_actions["Payment Request Form"] || []
-    ).concat(["Revise"]);
-}
-
 // ──────────────────────────────────────────────────────────────────────
 // Open Purchase Order picker — pulls a Supplier's open POs into the
 // Payment References child table for Advance Pay. Per Sridhar
@@ -3326,6 +3312,21 @@ frappe.ui.form.on('Payment Request Reference', {
 frappe.ui.form.on('Payment Request Form', {
     before_workflow_action(frm) {
         if (frm.selected_workflow_action !== 'Revise') return;
+
+        // Sridhar/Rahul 2026-06-10: when the PRF workflow has the global
+        // "Enable Confirmation Dialog" toggle ON (custom_enable_confirmation=1),
+        // workflow_confirm.js already shows a confirmation modal with a
+        // remarks textarea. Showing this custom dialog on TOP of that is
+        // friction. Skip this dialog in that case — the generic modal's
+        // remarks become the reason, and the server-side hook
+        // `avientek.events.prf_revise.fill_revise_side_effects` runs the
+        // notification + audit + revise_reason fields once the workflow
+        // transition lands.
+        const wf = frappe.workflow && frappe.workflow.workflows
+            && frappe.workflow.workflows['Payment Request Form'];
+        if (wf && wf.custom_enable_confirmation) {
+            return; // generic dialog takes over; server hook does the side-effects
+        }
 
         // Frappe v15 calls frappe.dom.freeze() BEFORE firing before_workflow_action
         // (frappe/public/js/frappe/form/workflow.js:107). That overlay covers our

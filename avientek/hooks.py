@@ -451,6 +451,18 @@ doc_events = {
         "on_submit": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
         "on_cancel": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
     },
+    "Payment Request Form": {
+        # Sridhar/Rahul 2026-06-10: when the PRF workflow has
+        # custom_enable_confirmation=1, the JS custom Revise dialog
+        # auto-skips itself so the user only sees the generic
+        # workflow_confirm.js confirmation. This hook runs the Revise
+        # side-effects (revise_reason save + audit Comment + creator
+        # email/ToDo) after the generic dialog confirms the
+        # Authorised/Rejected → Draft transition. Idempotent — skipped
+        # when revise_reason is already populated by the legacy
+        # custom-dialog path (custom_enable_confirmation=0).
+        "on_update_after_submit": "avientek.events.prf_revise.fill_revise_side_effects",
+    },
     "Purchase Order": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
