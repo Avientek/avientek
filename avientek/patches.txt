@@ -552,3 +552,4 @@ avientek.patches.relax_quotation_document_approval_visibility
 # divide-by-zero garbage before the v15 JS guard. Two patches:
 avientek.patches.expose_customer_name_in_quote_report
 avientek.patches.clamp_quotation_item_margin_garbage
+avientek.patches.dedupe_quotation_workflow_state_picker
