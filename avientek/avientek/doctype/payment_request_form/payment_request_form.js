@@ -1664,6 +1664,71 @@ frappe.ui.form.on('Payment Request Form', {
         setTimeout(apply_drilldown, 200);
         setTimeout(apply_drilldown, 800);
         setTimeout(apply_drilldown, 2000);
+
+        // Sridhar/Rahul 2026-06-10: AVFZC-02227 — when the payment_references
+        // child table paginates (50 rows per page, 8 pages on this doc),
+        // page 2+ rendered fresh DOM nodes that never received the click
+        // bindings — the Document Reference column lost its link styling
+        // and the View button disappeared. The three setTimeout calls
+        // above only fire ONCE after form load; pagination happens later.
+        //
+        // Fix: hook two re-trigger paths so apply_drilldown re-runs whenever
+        // the grid re-renders, not just on initial load:
+        //
+        //   1. Delegated click on the grid's pagination toolbar buttons
+        //      (First / prev / next / Last / numeric page numbers).
+        //   2. MutationObserver on the grid body — debounced so cell-level
+        //      edits don't spam re-renders.
+        //
+        // Both paths guard against re-binding via a single sentinel on the
+        // grid wrapper, so reopening the form doesn't stack observers.
+        const grid = frm.fields_dict.payment_references && frm.fields_dict.payment_references.grid;
+        if (grid && grid.wrapper) {
+            const $wrap = $(grid.wrapper);
+            if (!$wrap.data("drilldown-rerun-bound")) {
+                $wrap.data("drilldown-rerun-bound", true);
+
+                // (1) Pagination clicks — every button inside the paging
+                //     toolbar triggers a re-render. Allow the grid time to
+                //     swap DOM nodes before we re-apply.
+                $wrap.on(
+                    "click.drilldown-rerun",
+                    ".grid-paging-area button, .grid-pagination-controls button, " +
+                    ".grid-footer .btn-paging, .grid-footer button[data-page]",
+                    function () {
+                        setTimeout(apply_drilldown, 100);
+                        setTimeout(apply_drilldown, 400);
+                    }
+                );
+
+                // (2) MutationObserver on the grid body — catches any other
+                //     rerender path (sort, filter, programmatic refresh).
+                //     Debounced 80ms so a row-edit cell mutation doesn't
+                //     cascade into dozens of apply_drilldown runs.
+                try {
+                    const body =
+                        $wrap.find(".rows")[0] ||
+                        $wrap.find(".grid-body")[0] ||
+                        $wrap.find(".form-grid")[0];
+                    if (body && typeof MutationObserver === "function") {
+                        let pending = null;
+                        const obs = new MutationObserver(function () {
+                            if (pending) clearTimeout(pending);
+                            pending = setTimeout(function () {
+                                pending = null;
+                                apply_drilldown();
+                            }, 80);
+                        });
+                        obs.observe(body, { childList: true, subtree: false });
+                        $wrap.data("drilldown-observer", obs);
+                    }
+                } catch (e) {
+                    // MutationObserver path is purely additive — the
+                    // pagination click handler above already covers the
+                    // reported AVFZC-02227 case. Swallow + continue.
+                }
+            }
+        }
     },
 
     // Show preview popup triggered by View button click
