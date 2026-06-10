@@ -4,6 +4,20 @@
 frappe.provide("erpnext.accounts.dimensions");
 let is_updating_fields = false;
 
+// Sridhar/Rahul 2026-06-10: tell the global workflow_confirm.js hook NOT to
+// show its generic "Confirm Workflow Action" dialog for "Revise" on PRF —
+// our custom Revise dialog (defined in before_workflow_action below) already
+// collects a mandatory reason and is itself the confirmation step. Without
+// this skip-list entry the user gets hit with TWO dialogs in a row.
+// Every other PRF workflow action (Approve Level 1, Cancel, etc.) still
+// gets the generic confirm.
+frappe.avientek_workflow_skip_actions = frappe.avientek_workflow_skip_actions || {};
+if (!(frappe.avientek_workflow_skip_actions["Payment Request Form"] || []).includes("Revise")) {
+    frappe.avientek_workflow_skip_actions["Payment Request Form"] = (
+        frappe.avientek_workflow_skip_actions["Payment Request Form"] || []
+    ).concat(["Revise"]);
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Open Purchase Order picker — pulls a Supplier's open POs into the
 // Payment References child table for Advance Pay. Per Sridhar
