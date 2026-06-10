@@ -78,6 +78,56 @@ def _smoke_create_new_row_div_zero_path():
     _ok(f"div-zero guard yields 0 (not {-16915.20/(amount or 1)*100:.2f} unsafely)")
 
 
+def _check_excel_percent_export_render():
+    """Sridhar/Rahul 2026-06-10: Margin (%) column rendered as 1880%
+    in the downloaded xlsx when UI showed 18.80%. Root cause: Frappe
+    stores Percent as plain number, but Excel's 0.00% format expects
+    a fraction. The builder now divides by 100 before writing.
+
+    Build a 2-row synthetic xlsx through the real
+    `_build_xlsx_bytes_from_rows` helper and read it back via
+    openpyxl. The cell value for a Percent column must be the
+    fraction (0.188), not the plain percent (18.80) — that's what
+    makes Excel render '18.80%' instead of '1880.00%'.
+    """
+    print()
+    print("=== Bug: Excel Percent column renders 100x off ===")
+    from avientek.api.quotation_access import _build_xlsx_bytes_from_rows
+    from openpyxl import load_workbook
+    import io
+
+    rows = [
+        ["Quotation", "Margin (%)"],          # header
+        ["QN-TEST-001",  18.80],              # data: stored 18.80, want display "18.80%"
+        ["QN-TEST-002", -39.75],              # negative case
+        ["QN-TEST-003",   0.00],              # zero
+    ]
+    col_types = ["Data", "Percent"]
+    xlsx = _build_xlsx_bytes_from_rows(rows, "Quotation", col_types, [])
+    wb = load_workbook(io.BytesIO(xlsx))
+    ws = wb.active
+
+    cases = [
+        (2, 18.80,  0.188),
+        (3, -39.75, -0.3975),
+        (4, 0.00,   0.0),
+    ]
+    for row_idx, ui_value, expected_cell in cases:
+        cell = ws.cell(row=row_idx, column=2)
+        if cell.value is None:
+            _fail(f"row {row_idx} Percent cell is None")
+        diff = abs(float(cell.value) - expected_cell)
+        if diff > 1e-9:
+            _fail(f"row {row_idx} UI {ui_value}% → cell={cell.value} "
+                  f"(want {expected_cell} so Excel renders '{ui_value:.2f}%', "
+                  f"not '{float(cell.value)*100:.2f}%')")
+        if cell.number_format != "0.00%":
+            _fail(f"row {row_idx} number_format is {cell.number_format!r}, "
+                  f"want '0.00%'")
+    _ok(f"Percent column stored as fraction (18.80 → 0.188, -39.75 → -0.3975, "
+        f"0 → 0); Excel will render correctly")
+
+
 def _check_reject_path_not_blocked_by_margin_gate():
     """Manu/Sridhar 2026-06-09: validate_margin_approval_required must
     permit transitions to terminal-reject states even when the margin
@@ -104,5 +154,6 @@ def run():
     _check_no_margin_garbage()
     _smoke_create_new_row_div_zero_path()
     _check_reject_path_not_blocked_by_margin_gate()
+    _check_excel_percent_export_render()
     print()
     print("All smoke checks PASSED ✓")

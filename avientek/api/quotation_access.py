@@ -2283,6 +2283,16 @@ def _build_xlsx_bytes_from_rows(rows, doctype, col_types, col_options):
 			if ftype in NUMERIC_TYPES:
 				try:
 					n = float(val)
+					if ftype == "Percent":
+						# Sridhar/Rahul 2026-06-10: Frappe stores Percent as
+						# a plain number (18.80 means 18.80%), but Excel's
+						# 0.00% cell format multiplies the value by 100 for
+						# display. Without this divide, a stored 18.80
+						# rendered as "1880.00%" in the downloaded xlsx
+						# (and -39.75% rendered as "-3975.00%").
+						# Divide by 100 here so Excel's format produces
+						# the intended "18.80%" / "-39.75%" output.
+						n = n / 100.0
 					cell.value = n
 					cell.number_format = _number_format(ftype)
 				except Exception:
