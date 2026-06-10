@@ -131,8 +131,20 @@ function _rd_build_column_spec(rv) {
 		var child_dt = (c.docfield && c.docfield.parent) || null;
 		var is_child = child_dt && child_dt !== dt;
 
-		if (is_child && label && label.indexOf("(") === -1) {
-			label = label + " (" + child_dt + ")";
+		// Sridhar/Rahul 2026-06-10: previous guard was
+		//   label.indexOf("(") === -1
+		// which false-fired on labels that legitimately contain a "(",
+		// like "Margin (%)" / "Discount (%)" / "Rate (Q...". Result: in
+		// the downloaded xlsx, both Margin (%) columns (Quotation Item +
+		// Optional Item) showed up as plain "Margin (%)" with no
+		// child-table disambiguation — and the user couldn't tell them
+		// apart. Check for the SPECIFIC " (child_dt)" suffix instead so
+		// percent / rate labels still get disambiguated.
+		if (is_child && label) {
+			var disambig = " (" + child_dt + ")";
+			if (label.indexOf(disambig) === -1) {
+				label = label + disambig;
+			}
 		}
 
 		headers.push(label);
@@ -288,11 +300,14 @@ function _rd_chunked_excel_post(rows, doctype, col_types, col_options) {
 		var batch = rows.slice(start, end);
 		var is_last = (i === total_chunks - 1);
 
-		frappe.show_alert({
-			message: __("Uploading rows {0}–{1} of {2}…",
-				[start + 1, Math.min(end, rows.length), rows.length]),
-			indicator: "blue",
-		}, 3);
+		// Sridhar/Rahul 2026-06-10: silent uploads — was firing one
+		// "Uploading rows X–Y of Z…" toast per chunk, which for a 27K-row
+		// export meant 55+ toasts spamming the corner of the screen.
+		// The "Downloaded N rows" toast at the end (and the earlier
+		// "Exporting N rows…" once-only after fetch completes) carry
+		// enough signal. The user sees the work happening via the
+		// browser tab spinner and the fetch-step toast; the final
+		// success toast confirms completion.
 
 		var call_args = {
 			method: "avientek.api.quotation_access.export_report_as_excel_chunked",
@@ -475,11 +490,11 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 			method: base_call_args.method,
 			args: chunk_args_obj,
 		};
-		frappe.show_alert({
-			message: __("Fetching rows {0}–{1} for export…",
-				[requested_start + 1, requested_start + CHUNK]),
-			indicator: "blue",
-		}, 5);
+		// Sridhar/Rahul 2026-06-10: silent fetch — was firing one
+		// "Fetching rows X–Y for export…" toast per chunk, which on a
+		// 27K-row export stacked 50+ alerts in the corner of the screen.
+		// The post-fetch "Exporting N rows…" toast (once) and the final
+		// "Downloaded N rows" toast (once) carry enough signal.
 
 		return frappe.call(call_args).then(function (r) {
 			var msg = r && r.message;

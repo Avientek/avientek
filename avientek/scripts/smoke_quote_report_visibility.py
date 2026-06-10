@@ -128,6 +128,49 @@ def _check_excel_percent_export_render():
         f"0 → 0); Excel will render correctly")
 
 
+def _check_column_header_disambiguation_logic():
+    """Sridhar/Rahul 2026-06-10: downloaded xlsx showed both Margin (%)
+    columns (one from Quotation Item, one from Optional Item) with the
+    same plain "Margin (%)" header — no child-table disambiguation —
+    because the JS guard was `label.indexOf("(") === -1`, which
+    false-fired on labels that already contain a parenthesis like
+    "Margin (%)".
+
+    We can't run JavaScript from `bench execute`, so this check is a
+    source-level guard against the regression: assert the fixed
+    pattern is present and the broken one is not.
+    """
+    print()
+    print("=== Bug: Excel headers lose child-table disambiguation ===")
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    fp = os.path.join(here, "public", "js", "report_download.js")
+    src = open(fp, "r", encoding="utf-8").read()
+    # The broken pattern must be gone (except inside a comment that
+    # documents what it used to be — comments live on the // path).
+    code_lines = [
+        ln for ln in src.split("\n")
+        if "//" not in ln or ln.strip().split("//", 1)[0].strip()
+    ]
+    code_only = "\n".join(
+        ln.split("//", 1)[0] for ln in src.split("\n")
+    )
+    if 'label.indexOf("(") === -1' in code_only:
+        _fail("broken guard 'label.indexOf(\"(\") === -1' still in live "
+              "code — percent-labelled child columns will skip "
+              "disambiguation again")
+    if 'var disambig = " (" + child_dt + ")"' not in src:
+        _fail("fixed disambiguation suffix builder not found in "
+              "report_download.js — child-table column headers won't "
+              "include the source doctype")
+    if 'label.indexOf(disambig) === -1' not in src:
+        _fail("fixed disambig idempotency check not found — risk of "
+              "double-appending the suffix")
+    _ok("disambiguation guard now matches the SPECIFIC \" (child_dt)\" "
+        "suffix; 'Margin (%)' from Quotation Item / Optional Item will "
+        "export with their disambiguated headers")
+
+
 def _check_reject_path_not_blocked_by_margin_gate():
     """Manu/Sridhar 2026-06-09: validate_margin_approval_required must
     permit transitions to terminal-reject states even when the margin
@@ -155,5 +198,6 @@ def run():
     _smoke_create_new_row_div_zero_path()
     _check_reject_path_not_blocked_by_margin_gate()
     _check_excel_percent_export_render()
+    _check_column_header_disambiguation_logic()
     print()
     print("All smoke checks PASSED ✓")
