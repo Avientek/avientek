@@ -78,6 +78,24 @@ def _smoke_create_new_row_div_zero_path():
     _ok(f"div-zero guard yields 0 (not {-16915.20/(amount or 1)*100:.2f} unsafely)")
 
 
+def _check_reject_path_not_blocked_by_margin_gate():
+    """Manu/Sridhar 2026-06-09: validate_margin_approval_required must
+    permit transitions to terminal-reject states even when the margin
+    is below threshold. The whitelist must contain Rejected +
+    Cancelled (Rejected)."""
+    print()
+    print("=== Bug: Reject action blocked by margin gate ===")
+    import inspect
+    from avientek.events import quotation as q
+    src = inspect.getsource(q.validate_margin_approval_required)
+    for state in ("Rejected", "Cancelled (Rejected)"):
+        if f'"{state}"' not in src:
+            _fail(f"APPROVAL_PATH_STATES missing {state!r} — Reject workflow "
+                  f"action would be blocked on low-margin quotes")
+    _ok("APPROVAL_PATH_STATES includes Rejected + Cancelled (Rejected) — "
+        "Reject workflow action passes the margin gate")
+
+
 def run():
     print("=" * 64)
     print("Avientek smoke: Quote Report visibility + margin sanity")
@@ -85,5 +103,6 @@ def run():
     _check_customer_name_visibility()
     _check_no_margin_garbage()
     _smoke_create_new_row_div_zero_path()
+    _check_reject_path_not_blocked_by_margin_gate()
     print()
     print("All smoke checks PASSED ✓")

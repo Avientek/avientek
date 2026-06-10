@@ -1225,6 +1225,13 @@ def validate_margin_approval_required(doc, method=None):
         "Cancellation L2 Pending",
         "Sent for Revision",
         "Cancelled",
+        # Manu/Sridhar 2026-06-09 — QN-LTD-26-01884: user clicked Reject
+        # on a low-margin quote and the validator (intended for direct
+        # Submit) wrongly blocked the Reject workflow action because
+        # "Rejected" wasn't whitelisted. Reject (and its cancel-chain
+        # sibling) are explicit refusals — never need an approval gate.
+        "Rejected",
+        "Cancelled (Rejected)",
     }
     ws = (doc.workflow_state or "").strip()
     if ws in APPROVAL_PATH_STATES:
