@@ -555,3 +555,4 @@ avientek.patches.clamp_quotation_item_margin_garbage
 avientek.patches.dedupe_quotation_workflow_state_picker
 avientek.patches.enable_v3_self_approval_and_confirmation_dialog
 avientek.patches.normalize_freeze_setting_nones
+avientek.patches.enable_allow_negative_stock_for_batch
