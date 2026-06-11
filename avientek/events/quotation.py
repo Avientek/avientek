@@ -217,13 +217,28 @@ def get_company_stock(item_code):
     companies = frappe.get_all("Company", pluck="name")
 
     for company in companies:
-        warehouses = frappe.get_all(
-            "Warehouse",
-            filters={
-                "company": company,
-                "is_group": 0
-            },
-            pluck="name"
+        # Venkatesh/Rahul 2026-06-11 ERP-TKT-29: RMA / Demo / Service /
+        # Repair warehouses (21 of them on prod as of 2026-06-11) carry
+        # inventory that's NOT available for sale — replacement units,
+        # demo loans, FOC stock. Avientek's convention is to tag those
+        # with `Warehouse.warehouse_type = "Freezed Items"`. Excluding
+        # them here makes the Quote line-item stock indicator reflect
+        # what the sales rep can actually quote against.
+        #
+        # The `IS NULL OR != 'Freezed Items'` clause is deliberate —
+        # `["!=", "Freezed Items"]` via Frappe's filter dict would
+        # SQL-translate to `<> 'Freezed Items'` which excludes NULL
+        # rows too (NULL != X is NULL in SQL). We want NULL-typed
+        # warehouses INCLUDED (they're regular inventory warehouses
+        # the user just hasn't tagged with a warehouse_type).
+        warehouses = frappe.db.sql_list(
+            """
+            SELECT name FROM `tabWarehouse`
+            WHERE company = %s
+              AND is_group = 0
+              AND (warehouse_type IS NULL OR warehouse_type != 'Freezed Items')
+            """,
+            (company,),
         )
 
         if not warehouses:

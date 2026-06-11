@@ -8,6 +8,9 @@ Covers:
     approvers, global for approvers)
   - ERP-TKT-38: PRF cheque_date editable post-submit by Finance
     Controller (allow_on_submit on the field + EDITABLE list extended)
+  - ERP-TKT-29: get_company_stock excludes RMA / Demo / Service /
+    Repair warehouses (Avientek convention: warehouse_type='Freezed Items')
+    so the Quote line-item stock indicator reflects sellable stock only
 
 Each check is independent; the runner prints a summary and exits
 non-zero on first failure so CI / a wrapper shell script can fail a
@@ -280,6 +283,73 @@ def _check_tkt38_cheque_date_post_submit():
     _ok("FC banner mentions Cheque Date")
 
 
+# ---------- ERP-TKT-29 ---------------------------------------------
+
+
+def _check_tkt29_freezed_warehouses_excluded():
+    """get_company_stock excludes RMA / Demo / Service / Repair
+    warehouses (warehouse_type='Freezed Items') from the count."""
+    print()
+    print("=== ERP-TKT-29: Quote stock excludes Freezed Items warehouses ===")
+
+    # Source-level: the SQL must filter on warehouse_type
+    src = _read("events/quotation.py")
+    if "warehouse_type IS NULL OR warehouse_type != 'Freezed Items'" not in src:
+        _fail("events/quotation.py get_company_stock does not exclude "
+              "warehouse_type='Freezed Items' warehouses")
+    _ok("get_company_stock SQL excludes warehouse_type='Freezed Items' "
+        "(NULL-safe via OR clause)")
+
+    # Behaviour-level: pick an item that has stock in BOTH a real and
+    # a Freezed Items warehouse; assert the count drops the Freezed
+    # rows. Falls back to a structural check if no such item exists
+    # on the local site.
+    rows = frappe.db.sql(
+        """
+        SELECT b.item_code,
+               SUM(CASE WHEN w.warehouse_type='Freezed Items'
+                        THEN b.actual_qty ELSE 0 END) AS frozen,
+               SUM(CASE WHEN w.warehouse_type IS NULL
+                        OR w.warehouse_type != 'Freezed Items'
+                        THEN b.actual_qty ELSE 0 END) AS live
+        FROM `tabBin` b
+        INNER JOIN `tabWarehouse` w ON w.name = b.warehouse
+        WHERE w.is_group = 0
+        GROUP BY b.item_code
+        HAVING frozen > 0 AND live > 0
+        LIMIT 1
+        """,
+        as_dict=True,
+    )
+    if not rows:
+        _ok("No item with stock in BOTH real + Freezed warehouses on "
+            "local — behavioural assertion skipped, structural check "
+            "above is sufficient")
+        return
+
+    item_code = rows[0]["item_code"]
+    frozen = float(rows[0]["frozen"])
+    live = float(rows[0]["live"])
+    print(f"  test item: {item_code} (frozen={frozen} live={live})")
+
+    from avientek.events import quotation as q
+    import importlib
+    importlib.reload(q)
+    result = q.get_company_stock(item_code)
+    total_returned = sum(float(r["actual_stock"]) for r in result)
+
+    # If the bug were present, total_returned would include `frozen`.
+    # With the fix, it should equal `live` (within rounding tolerance).
+    drift = abs(total_returned - live)
+    if drift > 0.5:
+        _fail(f"get_company_stock returned actual_stock={total_returned} "
+              f"for {item_code}, but the LIVE (non-frozen) total is "
+              f"{live}. Frozen stock ({frozen}) appears to be leaking "
+              f"into the count. Drift={drift}")
+    _ok(f"get_company_stock({item_code}) returned {total_returned} — "
+        f"matches LIVE total {live} (excluded {frozen} frozen units)")
+
+
 # ---------- runner --------------------------------------------------
 
 
@@ -291,5 +361,6 @@ def run():
     _check_tkt31_client_helper()
     _check_tkt32_helpers_and_wiring()
     _check_tkt38_cheque_date_post_submit()
+    _check_tkt29_freezed_warehouses_excluded()
     print()
     print("All smoke checks PASSED ✓")
