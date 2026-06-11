@@ -452,3 +452,62 @@ try:
 except Exception:
 	pass
 
+
+def _patch_safer_get_meta_v15_111():
+	"""Sridhar/Venkatesh 2026-06-11: Frappe v15.111.0 added
+	`safer_get_meta` in frappe/utils/safe_exec.py and registered it as
+	the `frappe.get_meta` shadow inside the sandboxed Jinja env used by
+	Print Format rendering. Unfortunately the wrapper returns
+	`doc.as_dict()` (a `frappe._dict`) instead of the Meta object:
+
+	    def safer_get_meta(doctype, cached=True):
+	        assert isinstance(doctype, str)
+	        assert isinstance(cached, bool)
+	        doc = frappe.get_meta(doctype, cached=cached)
+	        return doc.as_dict() if doc else None
+
+	But ERPNext's standard print template `standard_macros.html` does:
+
+	    {%- set table_meta = frappe.get_meta(df.options) -%}
+	    ...
+	    docfield = table_meta.get_field(col_df.get("fieldname"))
+
+	With `table_meta` now a `_dict`, `table_meta.get_field` is
+	`_dict.get('get_field')` which is None. Calling None(...) raises
+	`'NoneType' object is not callable`, and EVERY Print Format with
+	a visible_columns child-table block (e.g. Avientek's "Quote print
+	2026") errors at line 19 of `print_formats/standard.html`.
+
+	This was reported on prod within hours of the Bench Update bumping
+	Frappe 15.109 → 15.111 (commit hash on prod showed 15.111.0).
+
+	Fix: monkey-patch `safer_get_meta` to keep the assertions (input-
+	type safety) but return the actual Meta object — the same object
+	the unwrapped `frappe.get_meta` returns, which has the `get_field`
+	method consumers rely on.
+
+	Idempotent. Safe on older Frappe (the module attribute won't exist
+	pre-15.111.0 and we skip silently).
+	"""
+	try:
+		import frappe
+		from frappe.utils import safe_exec
+	except Exception:
+		return
+
+	if not hasattr(safe_exec, "safer_get_meta"):
+		return  # pre-15.111.0 Frappe — no patch needed
+
+	def _patched_safer_get_meta(doctype, cached=True):
+		assert isinstance(doctype, str)
+		assert isinstance(cached, bool)
+		return frappe.get_meta(doctype, cached=cached)
+
+	safe_exec.safer_get_meta = _patched_safer_get_meta
+
+
+try:
+	_patch_safer_get_meta_v15_111()
+except Exception:
+	pass
+
