@@ -39,19 +39,28 @@ def validate_item_tax_template(doc, method=None):
 # Fix: on PI validate, for any row that has pr_detail set, force the
 # rate and pricing fields back to what the source PR row has stored.
 # Idempotent — re-running yields the same values.
+# Sridhar/Rahul 2026-06-11 (continuation of TSK-2026-00319): the first
+# version of this list included base_rate / base_price_list_rate /
+# base_net_rate / net_rate. Those are stored in COMPANY currency at PR
+# time — when the PI's PLE differs, copying them in produces an
+# inconsistent state. ERPNext's recalc then resolves the inconsistency
+# by deriving `rate = base_rate / current_conversion_rate`, which
+# silently overrode our USD-side lock (row 1 ended at $664.94 instead
+# of $665.00) and on at least one row produced $0.00 from a net_rate
+# clamp.
+#
+# Keep ONLY the doc-currency (and currency-neutral) fields. ERPNext's
+# calculate_taxes_and_totals will derive every base_* / net_* field
+# from these plus the PI's current conversion_rate, so the maths is
+# always coherent regardless of PLE drift.
 _PR_PRICING_FIELDS = [
-    "rate",
-    "price_list_rate",
-    "discount_percentage",
-    "discount_amount",
-    "margin_type",
-    "margin_rate_or_amount",
-    "rate_with_margin",
-    "base_rate",
-    "base_price_list_rate",
-    "base_rate_with_margin",
-    "net_rate",
-    "base_net_rate",
+    "rate",                  # doc currency — primary lock
+    "price_list_rate",       # doc currency
+    "discount_percentage",   # %, currency-neutral
+    "discount_amount",       # doc currency on Purchase Receipt Item
+    "margin_type",            # enum
+    "margin_rate_or_amount",  # mixed; ERPNext uses it with margin_type
+    "rate_with_margin",      # doc currency
 ]
 
 
