@@ -10,3 +10,5 @@ def validate_item_tax_template(doc, method=None):
     from avientek.events.utils import autofill_item_tax_template
     required = "Avientek Electronics Trading PVT. LTD" if doc.company == "Avientek Electronics Trading PVT. LTD" else None
     autofill_item_tax_template(doc, required_company=required)
+
+

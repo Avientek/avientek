@@ -81,3 +81,49 @@ def promote_all_negative_batches_ready():
 	""")
 	frappe.db.commit()
 	return {"ready": frappe.db.count("Negative Batch Cleanup Plan", {"status": "Ready"})}
+
+
+@frappe.whitelist()
+def fix_corrupted_freeze_settings():
+	"""Sridhar/Venkatesh 2026-06-11: live-fix corrupted None values on
+	the Single-doctype date / link fields that ERPNext's frozen-date
+	guards compare against. Sister API to the
+	`normalize_freeze_setting_nones` patch that runs on every migrate;
+	this lets us unblock prod without waiting for the next deploy if
+	the same corruption recurs.
+
+	The crash mode it prevents:
+	    erpnext/stock/doctype/stock_ledger_entry/stock_ledger_entry.py:252
+	    `getdate(self.posting_date) <= getdate(stock_settings.stock_frozen_upto)`
+	    TypeError: '<=' not supported between instances of
+	               'datetime.date' and 'NoneType'
+
+	Sets `stock_frozen_upto` / `stock_auth_role` / `acc_frozen_upto` /
+	`frozen_accounts_modifier` to '' when their stored value is None.
+	Empty string is unambiguous — every Frappe and ERPNext guard treats
+	it as falsy and short-circuits before any date comparison.
+
+	System Manager only. Idempotent. Read-only diagnostic field
+	included in the response so the caller can confirm.
+	"""
+	_ensure_system_manager()
+	targets = [
+		("Stock Settings",    "stock_frozen_upto"),
+		("Stock Settings",    "stock_auth_role"),
+		("Accounts Settings", "acc_frozen_upto"),
+		("Accounts Settings", "frozen_accounts_modifier"),
+	]
+	fixed = []
+	for doctype, field in targets:
+		cur = frappe.db.get_single_value(doctype, field)
+		if cur is None:
+			frappe.db.set_single_value(doctype, field, "")
+			fixed.append({"doctype": doctype, "field": field})
+	if fixed:
+		frappe.db.commit()
+		for doctype, _ in targets:
+			try:
+				frappe.clear_cache(doctype=doctype)
+			except Exception:
+				pass
+	return {"fixed": fixed, "count": len(fixed)}
