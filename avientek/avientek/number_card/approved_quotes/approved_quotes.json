@@ -10,7 +10,8 @@
  "is_public": 1,
  "is_standard": 1,
  "label": "Approved Quotes",
- "modified": "2026-06-01 13:06:44.650476",
+ "method": "avientek.api.quotation_cards.count_approved_quotes",
+ "modified": "2026-06-11 21:55:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Approved Quotes",
@@ -18,5 +19,5 @@
  "show_full_number": 0,
  "show_percentage_stats": 1,
  "stats_time_interval": "Daily",
- "type": "Document Type"
+ "type": "Custom"
 }

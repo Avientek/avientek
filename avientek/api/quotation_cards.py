@@ -82,3 +82,42 @@ def count_cancellation_requests(filters=None):
     'Quotes Requested for Update' card but for cancellation flow.
     Jithin/Rahul 2026-05-19."""
     return _count_by_state(["Cancellation Requested", "Cancellation L2 Pending"])
+
+
+# Venkatesh/Rahul 2026-06-11 ERP-TKT-32: Approved Quotes and Open
+# Quotations cards used to count globally — noisy for individual sales
+# reps. Extend the same role-aware pattern (Jithin 2026-05-18) to these
+# two. Approvers / System Manager / Administrator keep the global count;
+# everyone else is scoped to their own owner.
+def _count_by_quotation_filters(extra_filters: dict) -> dict:
+    """Count Quotations matching `extra_filters`, scoped to the current
+    user unless they are an approver. Generic version of
+    `_count_by_state` for cards that filter on something other than
+    workflow_state.
+    """
+    filters = dict(extra_filters)
+    route_options = dict(extra_filters)
+    if not _user_can_see_all_quotations():
+        filters["owner"] = frappe.session.user
+        route_options["owner"] = frappe.session.user
+    value = frappe.db.count("Quotation", filters=filters)
+    return {
+        "value": value,
+        "fieldtype": "Int",
+        "route": ["List", "Quotation"],
+        "route_options": route_options,
+    }
+
+
+@frappe.whitelist()
+def count_approved_quotes(filters=None):
+    """Approved Quotes card — workflow_state == "Approved" scoped to
+    the current user unless they're an approver."""
+    return _count_by_quotation_filters({"workflow_state": "Approved"})
+
+
+@frappe.whitelist()
+def count_open_quotations(filters=None):
+    """Open Quotations card — status == "Open" scoped to the current
+    user unless they're an approver."""
+    return _count_by_quotation_filters({"status": "Open"})

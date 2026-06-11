@@ -499,7 +499,11 @@ frappe.ui.form.on('Payment Request Form', {
             const has_other = (owner_roles[ws] || []).some(r => roles.indexOf(r) >= 0);
             if (has_other) return;
 
-            const EDITABLE = ["issued_bank", "payment_mode"];
+            // Venkatesh/Jithin 2026-06-11 ERP-TKT-38: also let Finance
+            // Controller correct `cheque_date` after L2 approval — Frappe
+            // honours this because allow_on_submit=1 is set on the field
+            // in the doctype JSON.
+            const EDITABLE = ["issued_bank", "payment_mode", "cheque_date"];
 
             // Step 1: lock the whole form (parent-level fields). Walk
             // df list and set read_only=1 on everything not in the
@@ -545,7 +549,7 @@ frappe.ui.form.on('Payment Request Form', {
                     const el = document.createElement("div");
                     el.className = "prf-fc-edit-banner";
                     el.style.cssText = "margin:8px 0; padding:10px 14px; background:#fff3cd; border-left:4px solid #d39e00; border-radius:4px; font-size:12px;";
-                    el.innerHTML = __("You are authorised to update <b>Issued Bank</b> and <b>Payment Mode</b> on this PRF until it is Released. All other fields are locked.");
+                    el.innerHTML = __("You are authorised to update <b>Issued Bank</b>, <b>Payment Mode</b>, and <b>Cheque Date</b> on this PRF until it is Released. All other fields are locked.");
                     $(mount).prepend(el);
                     frm._fc_edit_banner_el = el;
                 }

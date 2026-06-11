@@ -144,6 +144,60 @@ function _toggle_create_button_visibility(frm) {
 }
 
 
+// Venkatesh/Rahul 2026-06-11 ERP-TKT-31: Quote print should be gated
+// on Approval — users keep generating PDFs of draft/pending quotes and
+// share them with customers, then the price changes on L2 approval and
+// the customer was quoted the wrong number. Server-side `before_print`
+// hook is the hard backstop (avientek.events.quotation
+// .block_print_unless_approved); this is the UX layer so the user
+// doesn't see the option at all until the quote is Approved.
+const _QN_PRINT_ALLOWED_STATES = new Set([
+    "Approved",          // V3 terminal-approved
+    "Submitted",         // legacy
+    "Order Placed",      // post-conversion to SO
+    "Quotation Closed",  // post-conversion / explicit close
+]);
+function _strip_print_buttons_unless_approved(frm) {
+    if (frm.is_new()) { return; }
+    const ws = frm.doc.workflow_state || "";
+    if (_QN_PRINT_ALLOWED_STATES.has(ws)) { return; }
+
+    // System Manager / Administrator can always print — audit trail.
+    const roles = frappe.user_roles || [];
+    if (roles.indexOf("System Manager") >= 0 || frappe.session.user === "Administrator") {
+        return;
+    }
+
+    // Frappe v15 renders Print / Email / PDF as menu items under the
+    // "..." dropdown. The DOM hooks are stable across v15 minor
+    // versions; the data-label attribute makes the selector resilient.
+    // Run inside requestAnimationFrame so we win the race with
+    // Frappe's own menu population.
+    const hide_print_menu_items = () => {
+        try {
+            const $menu = (frm.page && frm.page.menu) ? frm.page.menu : null;
+            if (!$menu || !$menu.length) { return; }
+            // Match labels with translation safety — Frappe uses __()
+            // so the label DOM text may be translated. Match against
+            // the original English token too as a fallback.
+            const labels_to_hide = ["Print", __("Print"), "Email", __("Email"), "PDF", __("PDF")];
+            $menu.find('a.dropdown-item, .dropdown-item, a').each(function () {
+                const txt = ($(this).text() || "").trim();
+                if (labels_to_hide.indexOf(txt) >= 0) {
+                    $(this).closest("li, .dropdown-item-wrap").hide();
+                }
+            });
+        } catch (e) {
+            console.warn("strip_print_buttons:", e);
+        }
+    };
+    requestAnimationFrame(hide_print_menu_items);
+    // Run twice — once after the next paint, once after Frappe's
+    // own menu repopulation. Cheap and idempotent.
+    setTimeout(hide_print_menu_items, 200);
+}
+
+
 function _strip_create_buttons_unless_approved(frm) {
     // Round-4 legacy interceptor still removes the SO/SI custom-button
     // registration as a defensive secondary layer. The primary defence
@@ -251,6 +305,12 @@ frappe.ui.form.on('Quotation', {
         // future Client Script using a different button API) this
         // reactive strip catches the leak.
         _strip_create_buttons_unless_approved(frm);
+        // Venkatesh/Rahul 2026-06-11 ERP-TKT-31: hide Print / Email /
+        // PDF menu items unless the Quotation is Approved (or a
+        // downstream state). Server-side `before_print` hook on
+        // Quotation throws as a hard backstop — this is the UX layer
+        // so the user doesn't even see the option pre-approval.
+        _strip_print_buttons_unless_approved(frm);
     },
 
     probability(frm) {

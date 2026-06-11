@@ -615,6 +615,11 @@ doc_events = {
             # on submitted docs.
             "avientek.events.quotation_notifications.on_state_change",
         ],
+        # Venkatesh/Rahul 2026-06-11 ERP-TKT-31: gate Quotation print on
+        # Approval. Server-side throw covers PDF API + email-with-print
+        # paths; client-side button hide is the UX layer in
+        # quotation.js refresh.
+        "before_print": "avientek.events.quotation.block_print_unless_approved",
     },
     "Purchase Receipt": {
         "before_validate": [

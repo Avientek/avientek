@@ -2354,3 +2354,47 @@ def update_special_price(quotation_name, items):
     frappe.db.commit()
 
     return {"message": "Special Price updated successfully"}
+
+
+# Venkatesh/Rahul 2026-06-11 ERP-TKT-31: Quote print should be gated
+# on Approval — users keep generating PDFs of draft/pending quotes and
+# share them with customers, then the price changes on L2 approval and
+# the customer was already quoted the wrong number. Block server-side
+# so PDF API + email-with-print can't sneak past the JS button hide.
+_PRINT_ALLOWED_STATES = frozenset({
+    "Approved",         # V3 terminal-approved
+    "Submitted",        # legacy
+    "Order Placed",     # post-conversion to SO
+    "Quotation Closed", # post-conversion / explicit close
+    # Note: Cancellation Requested / Cancelled / Rejected are NOT here
+    # — once Rejected/Cancelled the print is also blocked (those quotes
+    # shouldn't go out as PDFs either).
+})
+
+
+def block_print_unless_approved(doc, method=None):
+    """`before_print` hook on Quotation. Sales/Accounts/CS staff stay
+    blocked; System Manager / Administrator can always print (audit /
+    historical record).
+
+    Hooked via doc_events["Quotation"]["before_print"] in hooks.py.
+    """
+    ws = (getattr(doc, "workflow_state", None) or "").strip()
+    if ws in _PRINT_ALLOWED_STATES:
+        return
+
+    user = frappe.session.user
+    if user == "Administrator":
+        return
+    roles = set(frappe.get_roles(user))
+    if "System Manager" in roles:
+        return
+
+    frappe.throw(
+        _(
+            "This Quotation is in <b>{0}</b> state. Printing is only "
+            "permitted once the Quotation reaches <b>Approved</b>. "
+            "Please complete the approval workflow first."
+        ).format(ws or "Draft"),
+        title=_("Print Not Allowed"),
+    )
