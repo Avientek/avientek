@@ -39,6 +39,40 @@ def validate_item_tax_template(doc, method=None):
 # Fix: on PI validate, for any row that has pr_detail set, force the
 # rate and pricing fields back to what the source PR row has stored.
 # Idempotent — re-running yields the same values.
+_PR_PRICING_FIELDS = [
+    "rate",
+    "price_list_rate",
+    "discount_percentage",
+    "discount_amount",
+    "margin_type",
+    "margin_rate_or_amount",
+    "rate_with_margin",
+    "base_rate",
+    "base_price_list_rate",
+    "base_rate_with_margin",
+    "net_rate",
+    "base_net_rate",
+]
+
+
+def _fetch_pr_pricing(pr_details):
+    """Bulk-read pricing fields for a list of Purchase Receipt Item names.
+
+    Returns {pr_detail_name: {field: value}}. Missing PR rows are silently
+    skipped. Shared between the server-side validate hook and the
+    client-side whitelisted endpoint so both paths produce the same
+    locked values.
+    """
+    if not pr_details:
+        return {}
+    rows = frappe.get_all(
+        "Purchase Receipt Item",
+        filters={"name": ("in", list(pr_details))},
+        fields=["name"] + _PR_PRICING_FIELDS,
+    )
+    return {r["name"]: {k: r[k] for k in _PR_PRICING_FIELDS} for r in rows}
+
+
 def preserve_pr_rate(doc, method=None):
     """Lock PI item rate (and pricing fields) to the source PR row.
 
@@ -51,36 +85,54 @@ def preserve_pr_rate(doc, method=None):
     if doc.is_return:
         return
 
-    pricing_fields = [
-        "rate",
-        "price_list_rate",
-        "discount_percentage",
-        "discount_amount",
-        "margin_type",
-        "margin_rate_or_amount",
-        "rate_with_margin",
-        "base_rate",
-        "base_price_list_rate",
-        "base_rate_with_margin",
-        "net_rate",
-        "base_net_rate",
-    ]
+    pr_details = [it.pr_detail for it in (doc.items or []) if it.get("pr_detail")]
+    if not pr_details:
+        return
+    pricing = _fetch_pr_pricing(pr_details)
 
     for item in (doc.items or []):
-        if not item.get("pr_detail"):
-            continue
-        pr_row = frappe.db.get_value(
-            "Purchase Receipt Item", item.pr_detail,
-            pricing_fields, as_dict=True,
-        )
+        pr_row = pricing.get(item.get("pr_detail"))
         if not pr_row:
             continue
         for k, v in pr_row.items():
             if v is None:
                 continue
-            current = item.get(k)
-            if current != v:
+            if item.get(k) != v:
                 item.set(k, v)
+
+
+@frappe.whitelist()
+def get_pr_locked_pricing(pr_details):
+    """Client-side companion to preserve_pr_rate.
+
+    Sridhar/Rahul 2026-06-10: even with the validate hook restoring rates
+    on save, the UI between PR→PI conversion and save showed scrambled
+    rates (sometimes negative — e.g. row 1 $-164.00, row 2 $570.00 from
+    a PR where both rows were $665.00). Cause: changing `posting_date`
+    on the new PI fires ERPNext's posting_date → set_exchange_rate chain
+    which recomputes per-row rate using the *new* PLE plus any cached
+    discount_amount, producing nonsense numbers in the grid.
+
+    The PI's purchase_invoice.js calls this on posting_date /
+    conversion_rate / currency / bill_date change so the locked rates
+    are restored in the UI instantly — matching what the validate hook
+    would store on save.
+
+    Args:
+        pr_details: JSON-encoded list of Purchase Receipt Item names
+                    (or a Python list; auto-decode for safety).
+
+    Returns:
+        Dict {pr_detail_name: {pricing_field: value}}. Missing/stale
+        pr_details are silently dropped.
+    """
+    if isinstance(pr_details, str):
+        try:
+            pr_details = frappe.parse_json(pr_details) or []
+        except Exception:
+            pr_details = []
+    pr_details = [d for d in (pr_details or []) if d]
+    return _fetch_pr_pricing(pr_details)
 
 
 @frappe.whitelist()
