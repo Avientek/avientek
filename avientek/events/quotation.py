@@ -2387,12 +2387,22 @@ _PRINT_ALLOWED_STATES = frozenset({
 })
 
 
-def block_print_unless_approved(doc, method=None):
+def block_print_unless_approved(doc, method=None, *args, **kwargs):
     """`before_print` hook on Quotation. Sales/Accounts/CS staff stay
     blocked; System Manager / Administrator can always print (audit /
     historical record).
 
     Hooked via doc_events["Quotation"]["before_print"] in hooks.py.
+
+    Signature note: Frappe's `run_method("before_print", print_settings)`
+    routes through Document.hook's composer at `model/document.py:1374`
+    which calls `composed(self, method, *args, **kwargs)`. The third
+    positional arg (`print_settings`) blew up the 2-arg signature on
+    prod after the 2026-06-11 Bench Update (TypeError: takes from 1 to
+    2 positional arguments but 3 were given — Quotation print
+    completely broken). `*args, **kwargs` here absorbs `print_settings`
+    + any future positional args Frappe adds. We don't USE
+    print_settings; the gate only cares about workflow_state + roles.
     """
     ws = (getattr(doc, "workflow_state", None) or "").strip()
     if ws in _PRINT_ALLOWED_STATES:

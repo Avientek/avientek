@@ -96,20 +96,31 @@ def _check_tkt31_server_hook():
 
     # Administrator (default in bench console) always bypasses — that's
     # the audit / historical-record exemption.
+    #
+    # CALL SHAPE: Frappe's `run_method("before_print", print_settings)`
+    # routes through Document.hook's composer
+    # (frappe/model/document.py:1374) which calls
+    # `composed(self, method, *args, **kwargs)`. So before_print hooks
+    # actually receive THREE positional args: (doc, method,
+    # print_settings). The smoke deliberately exercises that exact
+    # shape — the 2-arg call shape blew the function up on prod
+    # 2026-06-12 because the smoke had been calling it with one
+    # positional only. Don't regress.
     fd = _FakeDoc()
+    fake_print_settings = {"letter_head": "AVN - India"}  # ← Frappe's 3rd arg
     fd.workflow_state = "Draft"
     try:
-        q.block_print_unless_approved(fd)
+        q.block_print_unless_approved(fd, "before_print", fake_print_settings)
     except Exception as e:
         _fail(f"Administrator should bypass the print block; got {type(e).__name__}: {e}")
-    _ok("Draft + Administrator: bypassed (audit exemption)")
+    _ok("Draft + Administrator + 3-arg call: bypassed (audit exemption)")
 
     fd.workflow_state = "Approved"
     try:
-        q.block_print_unless_approved(fd)
+        q.block_print_unless_approved(fd, "before_print", fake_print_settings)
     except Exception as e:
         _fail(f"Approved state should never block; got {type(e).__name__}: {e}")
-    _ok("Approved + any user: allowed")
+    _ok("Approved + any user + 3-arg call: allowed")
 
     # The non-admin Draft block path requires a non-Administrator user;
     # we DO NOT mutate frappe.session.user in this smoke (it breaks the
@@ -122,7 +133,7 @@ def _check_tkt31_server_hook():
         ms.user = "alice@example.com"
         fd.workflow_state = "Draft"
         try:
-            q.block_print_unless_approved(fd)
+            q.block_print_unless_approved(fd, "before_print", fake_print_settings)
             _fail("Draft + Sales User should be blocked; nothing was thrown")
         except frappe.ValidationError:
             pass
@@ -131,17 +142,41 @@ def _check_tkt31_server_hook():
                 pass
             else:
                 _fail(f"Wrong exception type from block: {type(e).__name__}: {e}")
-    _ok("Draft + Sales User (non-admin): blocked")
+    _ok("Draft + Sales User (non-admin) + 3-arg call: blocked")
 
     with mock.patch.object(frappe, "session", create=True) as ms, \
          mock.patch.object(frappe, "get_roles", return_value=["Sales User", "System Manager"]):
         ms.user = "manager@example.com"
         fd.workflow_state = "Draft"
         try:
-            q.block_print_unless_approved(fd)
+            q.block_print_unless_approved(fd, "before_print", fake_print_settings)
         except Exception as e:
             _fail(f"Draft + System Manager should bypass; got {type(e).__name__}: {e}")
-    _ok("Draft + System Manager: bypassed (admin override)")
+    _ok("Draft + System Manager + 3-arg call: bypassed (admin override)")
+
+    # Hard regression check — the function MUST accept Frappe's
+    # before_print call shape (doc, method, print_settings). The
+    # previous 2-arg signature compiled fine and the old smoke
+    # passed, but every Quotation print on prod crashed with
+    # "TypeError: takes from 1 to 2 positional arguments but 3 were
+    # given". Introspect the signature directly so the smoke catches
+    # it even if a future refactor drops the inline call test.
+    import inspect
+    sig = inspect.signature(q.block_print_unless_approved)
+    # Either explicit (doc, method, print_settings) OR (doc, method, *args).
+    params = list(sig.parameters.values())
+    accepts_3_positional = (
+        len([p for p in params if p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)]) >= 3
+        or any(p.kind == p.VAR_POSITIONAL for p in params)
+    )
+    if not accepts_3_positional:
+        _fail(
+            f"block_print_unless_approved signature {sig!s} accepts "
+            f"only {len(params)} positional args — Frappe's before_print "
+            f"composer passes (doc, method, print_settings). 2-arg "
+            f"signature broke prod prints on 2026-06-12."
+        )
+    _ok("Signature accepts (doc, method, print_settings) — Frappe's before_print shape")
 
 
 def _check_tkt31_client_helper():
