@@ -489,6 +489,14 @@ doc_events = {
     "Sales Order": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
+            # Sridhar/Jithin 2026-06-12: India SOs saved without
+            # taxes_and_charges trigger india_compliance's
+            # set_for_no_taxes → 'Nil-Rated' override → 0% GST.
+            # Auto-pick AETPL's In-state or Out-state template based
+            # on GSTIN state codes BEFORE normalize_gst_treatment
+            # so the taxes table is populated when india_compliance's
+            # later hook checks it.
+            "avientek.events.utils.autofill_india_sales_taxes_template",
             "avientek.events.utils.normalize_gst_treatment_from_template",
             # Symmetry with Quotation / PO / DN / PR (2026-05-22):
             # SO is a commercial agreement, not the tax point — the
@@ -515,6 +523,9 @@ doc_events = {
     "Quotation": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
+            # Sridhar/Jithin 2026-06-12: see Sales Order block above —
+            # auto-pick AETPL's GST template before normalize.
+            "avientek.events.utils.autofill_india_sales_taxes_template",
             "avientek.events.utils.normalize_gst_treatment_from_template",
             # Sammish 2026-05-13: monkey-patch india_compliance's
             # validate_items so mixed Non-GST + Taxable rows on a
@@ -673,6 +684,15 @@ doc_events = {
     "Sales Invoice": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
+            # Sridhar/Jithin 2026-06-12: India SIs saved without
+            # taxes_and_charges produce ₹0 GST (LTD-26-27-00382).
+            # Root cause: india_compliance's set_for_no_taxes()
+            # overwrites every item.gst_treatment to "Nil-Rated"
+            # when doc.taxes is empty. Auto-pick AETPL's In-state or
+            # Out-state template before normalize so the taxes child
+            # is populated and india_compliance routes through
+            # set_default_treatment instead.
+            "avientek.events.utils.autofill_india_sales_taxes_template",
             "avientek.events.utils.normalize_gst_treatment_from_template",
         ],
         "validate": [

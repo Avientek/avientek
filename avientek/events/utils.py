@@ -238,6 +238,116 @@ def normalize_gst_treatment_from_template(doc, method=None):
             row.gst_treatment = tpl_treatment
 
 
+# Sridhar/Jithin 2026-06-12: India Sales Invoices, Quotations and SOs
+# saved without picking a `taxes_and_charges` template come out with
+# Total Taxes = 0 — Customer-visible bug: LTD-26-27-00382 (In-Sync
+# Solutions) saved with grand_total=₹5,700 and ZERO GST.
+#
+# Root cause is upstream in india_compliance:
+#   gst_india/overrides/transaction.py:1640 ItemGSTTreatment.set()
+#       has_gst_accounts = any(row.gst_tax_type in TAX_TYPES
+#                              for row in self.doc.taxes)
+#       if not has_gst_accounts:
+#           self.set_for_no_taxes()
+#       ...
+#   set_for_no_taxes() forces EVERY item.gst_treatment = "Nil-Rated"
+#   (line 1653). Nil-Rated → 0% regardless of the item_tax_template
+#   ("GST 18% - AETPL" with gst_treatment='Taxable' in our case).
+#
+# Our `normalize_gst_treatment_from_template` (earlier in this file)
+# correctly sets gst_treatment='Taxable' on before_validate. But
+# india_compliance's hook runs LATER and overrides it because the
+# taxes table is empty.
+#
+# Avientek has 0 Tax Rules configured for the India company, so
+# ERPNext's standard auto-resolution from tax_category never fires.
+# Without a template, the taxes child stays empty, india_compliance
+# stamps Nil-Rated, GST = 0. This hook is the missing layer: when an
+# India-company sales doc is saved without taxes_and_charges, pick
+# the right template based on intra-state vs inter-state, populate
+# the taxes child from the template's rows. india_compliance then
+# sees real GST accounts on doc.taxes and lets our Taxable treatment
+# survive.
+_AETPL_INDIA = "Avientek Electronics Trading PVT. LTD"
+_AETPL_INSTATE_TEMPLATE = "Output GST In-state - AETPL"
+_AETPL_OUTSTATE_TEMPLATE = "Output GST Out-state - AETPL"
+_INDIA_GST_DOCTYPES = {"Quotation", "Sales Order", "Sales Invoice"}
+
+
+def autofill_india_sales_taxes_template(doc, method=None):
+    """Auto-pick AETPL's GST In-state vs Out-state template when an
+    India sales doc is saved without taxes_and_charges set.
+
+    Wired on before_validate for Quotation / Sales Order / Sales
+    Invoice via hooks.py. NO-OP for every other company.
+    """
+    if doc.doctype not in _INDIA_GST_DOCTYPES:
+        return
+    if doc.get("company") != _AETPL_INDIA:
+        return
+    if doc.get("taxes_and_charges"):
+        return  # user / mapper already picked a template — respect it
+    if doc.get("taxes"):
+        return  # taxes already populated some other way — don't disturb
+
+    # Intra-state vs inter-state via GSTIN state codes (first 2 chars
+    # of GSTIN are the state code; place_of_supply also encodes it as
+    # "NN-State Name").
+    company_state = (doc.get("company_gstin") or "")[:2]
+    pos_state = (doc.get("place_of_supply") or "")[:2]
+    billing_state = (doc.get("billing_address_gstin") or "")[:2]
+
+    # Prefer billing GSTIN over place_of_supply when both are set —
+    # the billing address is the customer's actual registration; pos
+    # can be overridden by users.
+    customer_state = billing_state or pos_state
+    if not company_state or not customer_state:
+        # Missing data — can't decide. Don't guess; let downstream
+        # validation flag the missing GSTIN.
+        return
+
+    template_name = (
+        _AETPL_INSTATE_TEMPLATE if company_state == customer_state
+        else _AETPL_OUTSTATE_TEMPLATE
+    )
+
+    # Make sure the template exists — config drift on prod has burnt
+    # us before. Skip gracefully if it's gone instead of crashing the
+    # save.
+    if not frappe.db.exists("Sales Taxes and Charges Template", template_name):
+        return
+
+    doc.taxes_and_charges = template_name
+
+    # Populate doc.taxes from the template's child rows directly
+    # rather than calling Frappe's set_taxes (which sometimes bails
+    # mid-validate). Each row carries the GST account + rate;
+    # india_compliance's TAX_TYPES check now sees real GST accounts
+    # on the doc and routes through set_default_treatment instead of
+    # set_for_no_taxes — so Taxable survives.
+    #
+    # Field-list note: we read via `frappe.get_doc(...).taxes` rather
+    # than `frappe.get_all("Sales Taxes and Charges", fields=...)`
+    # because the named-field list silently breaks across Frappe
+    # versions (e.g. `category` was dropped at some point on local;
+    # smoke caught it 2026-06-12). Reading the doc gives us whatever
+    # fields exist on this version; we just copy the safe subset.
+    template_doc = frappe.get_doc("Sales Taxes and Charges Template", template_name)
+    _SAFE_TAX_ROW_FIELDS = (
+        "charge_type", "account_head", "description", "rate",
+        "row_id", "included_in_print_rate", "cost_center",
+        "add_deduct_tax",
+    )
+    for row in (template_doc.get("taxes") or []):
+        new_row = {}
+        for k in _SAFE_TAX_ROW_FIELDS:
+            v = row.get(k)
+            if v is not None:
+                new_row[k] = v
+        if new_row.get("account_head"):
+            doc.append("taxes", new_row)
+
+
 # @frappe.whitelist()
 # def get_previous_doc_rate_and_currency(doctype, child):
 # 	po_details = []
