@@ -649,9 +649,25 @@ def _build_brand_summary_html(quotation_name):
 			)
 		standalone_html += "</table>"
 
+	# Sridhar 2026-06-13 (AVFZC-02239 preview review): even with the
+	# currency-symbol removal, 13 columns are tight on portrait A4.
+	# Wrap the main table in an overflow-x:auto div so the browser
+	# preview gets a horizontal scrollbar within the Brand Summary
+	# section — user can scan all the way to Customs (%) without the
+	# preview being clipped. The wrapper uses `display:block` +
+	# `overflow-x:auto` + `width:100%` and the inner table uses
+	# `width:max-content` so columns size to their content rather
+	# than being squeezed.
+	#
+	# Note on PDF rendering: wkhtmltopdf ignores overflow:auto (no
+	# scrollbar in a PDF). If the printed PDF still gets cropped on
+	# the right after the Bench Update, follow-up levers are: drop
+	# padding 3px 6px → 2px 4px, drop font 8.5pt → 7.5pt, or move
+	# the PRF print format to landscape orientation.
 	return (
-		f'<div class="quotation-brand-summary">'
-		f'<table style="border-collapse:collapse;width:100%;">'
+		f'<div class="quotation-brand-summary" '
+		f'style="overflow-x:auto;width:100%;display:block;">'
+		f'<table style="border-collapse:collapse;width:max-content;min-width:100%;">'
 		f'<thead><tr>{thead_html}</tr></thead>'
 		f'<tbody>{tbody_html}{footer_row}</tbody>'
 		f'</table>'
