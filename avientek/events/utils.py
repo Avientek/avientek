@@ -271,73 +271,96 @@ def normalize_gst_treatment_from_template(doc, method=None):
 _AETPL_INDIA = "Avientek Electronics Trading PVT. LTD"
 _AETPL_INSTATE_TEMPLATE = "Output GST In-state - AETPL"
 _AETPL_OUTSTATE_TEMPLATE = "Output GST Out-state - AETPL"
+_AETPL_TEMPLATES = (_AETPL_INSTATE_TEMPLATE, _AETPL_OUTSTATE_TEMPLATE)
 _INDIA_GST_DOCTYPES = {"Quotation", "Sales Order", "Sales Invoice"}
 
+# Fields safe to copy from a Sales Taxes and Charges template row across
+# Frappe versions. `category` was dropped on some versions — exclude
+# the auto-set audit fields and any unknown-future fields. Smoke
+# 2026-06-12 caught the version-drift on `category`.
+_SAFE_TAX_ROW_FIELDS = (
+    "charge_type", "account_head", "description", "rate",
+    "row_id", "included_in_print_rate", "cost_center",
+    "add_deduct_tax",
+)
 
-def autofill_india_sales_taxes_template(doc, method=None):
-    """Auto-pick AETPL's GST In-state vs Out-state template when an
-    India sales doc is saved without taxes_and_charges set.
 
-    Wired on before_validate for Quotation / Sales Order / Sales
-    Invoice via hooks.py. NO-OP for every other company.
+def _resolve_aetpl_state_pair(doc):
+    """Return (company_state_code, customer_state_code) — both two-char
+    strings or '' if undeterminable.
+
+    Resilient to the `before_validate` race: at hook firing time the
+    Sales Invoice / Quotation may not yet have GSTIN-related fields
+    populated (the form posts a doc dict where client-side fetches
+    haven't completed, OR set_missing_values hasn't run yet on this
+    code path). When that happens, call _get_party_details ourselves to
+    derive company_gstin, billing_address_gstin and place_of_supply
+    from the chosen customer + address. Stamp them on the doc so
+    downstream validators see them too.
     """
-    if doc.doctype not in _INDIA_GST_DOCTYPES:
-        return
-    if doc.get("company") != _AETPL_INDIA:
-        return
-    if doc.get("taxes_and_charges"):
-        return  # user / mapper already picked a template — respect it
-    if doc.get("taxes"):
-        return  # taxes already populated some other way — don't disturb
+    company_gstin = doc.get("company_gstin") or ""
+    billing_gstin = doc.get("billing_address_gstin") or ""
+    pos = doc.get("place_of_supply") or ""
 
-    # Intra-state vs inter-state via GSTIN state codes (first 2 chars
-    # of GSTIN are the state code; place_of_supply also encodes it as
-    # "NN-State Name").
-    company_state = (doc.get("company_gstin") or "")[:2]
-    pos_state = (doc.get("place_of_supply") or "")[:2]
-    billing_state = (doc.get("billing_address_gstin") or "")[:2]
+    needs_fetch = (not company_gstin) or (not billing_gstin and not pos)
+    if needs_fetch and doc.get("customer"):
+        try:
+            from erpnext.accounts.party import _get_party_details
+
+            pd = _get_party_details(
+                party=doc.customer,
+                party_type="Customer",
+                company=doc.company,
+                posting_date=doc.get("posting_date"),
+                doctype=doc.doctype,
+                party_address=doc.get("customer_address"),
+                shipping_address=doc.get("shipping_address_name"),
+                ignore_permissions=True,
+            ) or {}
+
+            if not company_gstin:
+                company_gstin = pd.get("company_gstin") or ""
+                if company_gstin and not doc.get("company_gstin"):
+                    doc.company_gstin = company_gstin
+            if not billing_gstin:
+                billing_gstin = pd.get("billing_address_gstin") or ""
+                if billing_gstin and not doc.get("billing_address_gstin"):
+                    doc.billing_address_gstin = billing_gstin
+            if not pos:
+                pos = pd.get("place_of_supply") or ""
+                if pos and not doc.get("place_of_supply"):
+                    doc.place_of_supply = pos
+            if not doc.get("customer_address") and pd.get("customer_address"):
+                doc.customer_address = pd.get("customer_address")
+        except Exception:
+            # _get_party_details can fail mid-form-build (e.g. customer
+            # not saved, address pending). Don't crash the save —
+            # fall through and let the early-return below trigger.
+            pass
 
     # Prefer billing GSTIN over place_of_supply when both are set —
-    # the billing address is the customer's actual registration; pos
-    # can be overridden by users.
-    customer_state = billing_state or pos_state
-    if not company_state or not customer_state:
-        # Missing data — can't decide. Don't guess; let downstream
-        # validation flag the missing GSTIN.
-        return
+    # billing address is the customer's actual registration; pos can be
+    # overridden by users.
+    customer_state = (billing_gstin or "")[:2] or (pos or "")[:2]
+    return (company_gstin or "")[:2], customer_state
 
-    template_name = (
-        _AETPL_INSTATE_TEMPLATE if company_state == customer_state
-        else _AETPL_OUTSTATE_TEMPLATE
-    )
 
-    # Make sure the template exists — config drift on prod has burnt
-    # us before. Skip gracefully if it's gone instead of crashing the
-    # save.
-    if not frappe.db.exists("Sales Taxes and Charges Template", template_name):
-        return
+def _apply_template_rows(doc, template_name):
+    """Replace doc.taxes with rows copied from the named template.
 
-    doc.taxes_and_charges = template_name
-
-    # Populate doc.taxes from the template's child rows directly
-    # rather than calling Frappe's set_taxes (which sometimes bails
-    # mid-validate). Each row carries the GST account + rate;
-    # india_compliance's TAX_TYPES check now sees real GST accounts
-    # on the doc and routes through set_default_treatment instead of
-    # set_for_no_taxes — so Taxable survives.
-    #
-    # Field-list note: we read via `frappe.get_doc(...).taxes` rather
-    # than `frappe.get_all("Sales Taxes and Charges", fields=...)`
-    # because the named-field list silently breaks across Frappe
-    # versions (e.g. `category` was dropped at some point on local;
-    # smoke caught it 2026-06-12). Reading the doc gives us whatever
-    # fields exist on this version; we just copy the safe subset.
+    Reads via frappe.get_doc(...).taxes (not get_all with explicit
+    fields) so the copy survives Frappe field-list drift (`category`
+    field dropped on some versions). Audit fields (name, idx, parent,
+    creation, etc.) are NOT copied — Frappe stamps fresh ones on save.
+    """
     template_doc = frappe.get_doc("Sales Taxes and Charges Template", template_name)
-    _SAFE_TAX_ROW_FIELDS = (
-        "charge_type", "account_head", "description", "rate",
-        "row_id", "included_in_print_rate", "cost_center",
-        "add_deduct_tax",
-    )
+    # Clear in-place rather than `doc.taxes = []` so both real Frappe
+    # Documents AND test fakes that proxy reads through `.get("taxes")`
+    # see the empty state. Frappe Document.taxes IS the list, so
+    # `[:] = []` is a legitimate clear.
+    existing = doc.get("taxes")
+    if isinstance(existing, list):
+        existing[:] = []
     for row in (template_doc.get("taxes") or []):
         new_row = {}
         for k in _SAFE_TAX_ROW_FIELDS:
@@ -346,6 +369,111 @@ def autofill_india_sales_taxes_template(doc, method=None):
                 new_row[k] = v
         if new_row.get("account_head"):
             doc.append("taxes", new_row)
+
+
+def autofill_india_sales_taxes_template(doc, method=None, *args, **kwargs):
+    """Auto-pick + auto-correct AETPL's GST In-state vs Out-state
+    template on India sales docs. Resilient across all save paths.
+
+    Wired on before_validate for Quotation / Sales Order / Sales
+    Invoice via hooks.py. NO-OP for every other company.
+
+    Three-layer defense — designed so a user can never end up with the
+    "Cannot charge CGST/SGST for inter-state supplies" india_compliance
+    error or with ₹0 GST on an AETPL sale:
+
+    Layer 1 (fresh fill): doc has no template set → resolve state pair
+        (lazy-fetch GSTINs via _get_party_details if missing) → pick
+        In-state for matching state codes, Out-state otherwise → copy
+        template rows into doc.taxes.
+
+    Layer 2 (auto-correct WRONG AETPL pick): doc already has one of
+        the AETPL templates but it's the WRONG direction for the
+        resolved state pair (user picked In-state on an inter-state
+        sale, or vice-versa, or a mapper from PI/SO carried over
+        across a state-mismatched company) → swap to the correct
+        template + msgprint(orange) so the user sees what changed and
+        why. india_compliance's downstream validate then sees a
+        matching template + GSTIN pair and passes.
+
+    Layer 3 (respect): doc has a NON-AETPL template (custom Export
+        GST, SEZ, Reverse Charge, etc.) → no-op. Trust the user's
+        explicit pick; india_compliance's own validation will catch
+        misuse.
+
+    Hook signature is `(doc, method=None, *args, **kwargs)` to absorb
+    Frappe's Document.hook composer extras — see
+    [[feedback-frappe-doc-hook-composer-3arg-shape]].
+    """
+    if doc.doctype not in _INDIA_GST_DOCTYPES:
+        return
+    if doc.get("company") != _AETPL_INDIA:
+        return
+
+    company_state, customer_state = _resolve_aetpl_state_pair(doc)
+    if not company_state or not customer_state:
+        # Genuinely no GSTIN data — let india_compliance flag the
+        # missing GSTIN rather than guessing.
+        return
+
+    is_intra_state = company_state == customer_state
+    correct_template = (
+        _AETPL_INSTATE_TEMPLATE if is_intra_state else _AETPL_OUTSTATE_TEMPLATE
+    )
+
+    if not frappe.db.exists("Sales Taxes and Charges Template", correct_template):
+        # Template config drift — skip gracefully rather than crashing
+        # the save. Will surface as ₹0 GST and our smoke catches it.
+        return
+
+    current = doc.get("taxes_and_charges")
+
+    if current and current not in _AETPL_TEMPLATES:
+        # Layer 3 — user explicitly picked a non-AETPL template
+        # (Export GST, SEZ, etc.). Trust them; do nothing.
+        return
+
+    if current == correct_template:
+        # Layer 1 already done on a previous save / already correct.
+        # If somehow taxes child is empty (mapper edge case), refill.
+        if not doc.get("taxes"):
+            _apply_template_rows(doc, correct_template)
+        return
+
+    if current in _AETPL_TEMPLATES and current != correct_template:
+        # Layer 2 — WRONG AETPL template picked. Auto-correct.
+        _apply_template_rows(doc, correct_template)
+        doc.taxes_and_charges = correct_template
+        try:
+            frappe.msgprint(
+                frappe._(
+                    "GST template auto-corrected: <b>{0}</b> → <b>{1}</b>. "
+                    "Reason: detected <b>{2}-state</b> supply "
+                    "(company GSTIN state code <b>{3}</b>, "
+                    "customer GSTIN / place-of-supply state code <b>{4}</b>). "
+                    "The wrong template would have raised "
+                    "“Cannot charge CGST/SGST for inter-state supplies”."
+                ).format(
+                    current, correct_template,
+                    "intra" if is_intra_state else "inter",
+                    company_state, customer_state,
+                ),
+                indicator="orange",
+                title=frappe._("Auto-corrected GST template"),
+                alert=True,
+            )
+        except Exception:
+            pass
+        return
+
+    # Layer 1 — fresh fill: no template, no taxes child rows.
+    if doc.get("taxes"):
+        # Some other hook populated taxes without a template — leave
+        # alone, don't disturb their intentional setup.
+        return
+
+    doc.taxes_and_charges = correct_template
+    _apply_template_rows(doc, correct_template)
 
 
 # @frappe.whitelist()
