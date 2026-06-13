@@ -398,6 +398,7 @@ permission_query_conditions = {
     "Avientek Proforma Invoice": "avientek.api.quotation_access.proforma_invoice_permission_query",
     "Existing Quotation": "avientek.api.quotation_access.existing_quotation_permission_query",
     "Sales Person Target": "avientek.api.quotation_access.sales_person_target_permission_query",
+    "Payment Request Form": "avientek.avientek.doctype.payment_request_form.prf_permissions.get_permission_query_conditions",
 }
 
 has_permission = {
@@ -417,6 +418,7 @@ has_permission = {
     # link autocomplete from other forms) — list view already enforced via
     # customer_permission_query.
     "Customer": "avientek.api.quotation_access.has_permission_check",
+    "Payment Request Form": "avientek.avientek.doctype.payment_request_form.prf_permissions.has_permission",
 }
 
 # DocType Class
