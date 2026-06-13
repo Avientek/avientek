@@ -1,0 +1,66 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"2qYseQaf3K\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Tasks</span>\",\"col\":12}},{\"id\":\"AgzX6gggqk\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Approval Pending-PO\",\"col\":4}},{\"id\":\"GQFpSfeZrf\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PO-GRN Pending\",\"col\":4}},{\"id\":\"lwwLqRF_CD\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Approval Pending-SO\",\"col\":4}},{\"id\":\"UxXrXFV0pj\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"My Open ToDos\",\"col\":4}},{\"id\":\"8PwsqT050GI\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PRF Pending Authorization\",\"col\":4}},{\"id\":\"3blixraVCk4\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PRF Pending Approval (Fin. Manager)\",\"col\":4}},{\"id\":\"l91CyGqFuyo\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PRF Pending Approval (Director)\",\"col\":4}},{\"id\":\"fs7uQE11Ee\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PRF PENDING RELEASE\",\"col\":4}},{\"id\":\"QKwkDjFmDf\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PRF-Rejected\",\"col\":4}}]",
+ "creation": "2026-02-12 20:35:57.239660",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "folder-normal-large",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "Tasks",
+ "links": [],
+ "modified": "2026-06-13 12:23:36.848290",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Tasks",
+ "number_cards": [
+  {
+   "label": "PRF PENDING RELEASE",
+   "number_card_name": "PRF Pending Release"
+  },
+  {
+   "label": "PRF-Rejected",
+   "number_card_name": "PRF-Rejected"
+  },
+  {
+   "label": "My Open ToDos",
+   "number_card_name": "My Open ToDos"
+  },
+  {
+   "label": "Approval Pending-PO",
+   "number_card_name": "PO Approval Pending"
+  },
+  {
+   "label": "PO-GRN Pending",
+   "number_card_name": "Open PO-GRN Pending"
+  },
+  {
+   "label": "Approval Pending-SO",
+   "number_card_name": "SO Approval Pending"
+  },
+  {
+   "label": "PRF Pending Authorization",
+   "number_card_name": "PRF Pending Authorization"
+  },
+  {
+   "label": "PRF Pending Approval (Fin. Manager)",
+   "number_card_name": "PRF Pending Approval (Fin. Manager)"
+  },
+  {
+   "label": "PRF Pending Approval (Director)",
+   "number_card_name": "PRF Pending Approval (Director)"
+  }
+ ],
+ "owner": "accounts@avientek.com",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 7.0,
+ "shortcuts": [],
+ "title": "Tasks"
+}
