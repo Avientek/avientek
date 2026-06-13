@@ -526,11 +526,24 @@ def _build_brand_summary_html(quotation_name):
 	rows = data["rows"]
 	totals = data["totals"]
 
-	def _fmt(value, fieldtype):
+	def _fmt(value, fieldtype, with_symbol=True):
+		"""Sridhar 2026-06-13 (AVFZC-02239 preview review): repeating
+		the currency symbol on every brand row pushed the 13-column
+		table past the page width; the user asked to keep the symbol
+		only on the TOTAL row. `with_symbol=False` formats Currency
+		fields as a bare locale-style number; `with_symbol=True` keeps
+		the original fmt_money behaviour for the footer and any
+		standalone totals.
+		"""
 		if value is None or value == "":
 			return ""
 		if fieldtype == "Currency":
-			return fmt_money(flt(value), currency=currency)
+			if with_symbol:
+				return fmt_money(flt(value), currency=currency)
+			# Same separator / precision as fmt_money but no symbol —
+			# matches the visual style of the totals row exactly minus
+			# the prefix.
+			return f"{flt(value):,.2f}"
 		if fieldtype == "Percent":
 			return f"{flt(value):.2f}%"
 		if fieldtype == "Float":
@@ -584,7 +597,7 @@ def _build_brand_summary_html(quotation_name):
 			align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
 			tds.append(
 				f'<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:{align};">'
-				f'{_fmt(r.get(c["fieldname"]), ft)}</td>'
+				f'{_fmt(r.get(c["fieldname"]), ft, with_symbol=False)}</td>'
 			)
 		tbody_rows.append(f'<tr>{"".join(tds)}</tr>')
 	tbody_html = "".join(tbody_rows)
