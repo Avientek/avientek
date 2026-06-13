@@ -511,3 +511,115 @@ try:
 except Exception:
 	pass
 
+
+def _patch_pr_dashboard_lcv_count():
+	"""Show submitted Landed Cost Voucher names + count in the Purchase
+	Receipt 'Connections' panel.
+
+	Sridhar 2026-06-13 via WhatsApp on GRN-FZCO-26-00448 — the form's
+	Connections section listed the label "Landed Cost Voucher" but with
+	no badge / count, leaving the user with no clickable path to the
+	LCV that posted the freight & documentation GL lines (the very lines
+	Sridhar flagged as "not showing on PR").
+
+	Root cause in ERPNext's standard PR dashboard config
+	(erpnext/stock/doctype/purchase_receipt/purchase_receipt_dashboard.get_data):
+
+	    non_standard_fieldnames["Landed Cost Voucher"] = "receipt_document"
+	    transactions += [{"label": "Related",
+	                      "items": [..., "Landed Cost Voucher", ...]}]
+
+	The mapping is wrong — `receipt_document` is a field on the CHILD
+	doctype `Landed Cost Purchase Receipt`, not on the LCV parent. So
+	Frappe's get_external_links runs
+
+	    frappe.db.count("Landed Cost Voucher",
+	                    {"receipt_document": pr_name})
+
+	→ SQL: "Unknown column 'receipt_document' in 'WHERE'". The error is
+	swallowed inside get_doc_count → count = 0 → badge is empty.
+
+	Meanwhile Frappe's `internal_links` mechanism only walks fields on
+	the CURRENT doc (a parent field or [child_table, link_field] within
+	the current doc) — it cannot reverse-resolve through a foreign
+	child table.
+
+	Fix: monkey-patch `frappe.desk.notifications._get_linked_document_counts`
+	to detect PR doctype and append a properly-formed `internal_links_found`
+	entry for Landed Cost Voucher with both `count` AND clickable `names`.
+
+	Idempotent. Hasattr-guarded — silently skips on Frappe versions
+	that don't have the function under this name (forward-compat). On
+	any per-call error inside the patch body the original result is
+	returned unmodified — never regresses other Connections badges.
+	"""
+	try:
+		from frappe.desk import notifications
+	except Exception:
+		return
+
+	if not hasattr(notifications, "_get_linked_document_counts"):
+		return
+
+	_original = notifications._get_linked_document_counts
+
+	def _patched(doctype, name, items=None):
+		import frappe
+
+		out = _original(doctype, name, items=items)
+
+		if doctype != "Purchase Receipt":
+			return out
+
+		try:
+			inner = out.get("count") or {}
+			external = inner.get("external_links_found") or []
+			internal = inner.get("internal_links_found") or []
+
+			external = [
+				e for e in external if e.get("doctype") != "Landed Cost Voucher"
+			]
+			already = any(
+				e.get("doctype") == "Landed Cost Voucher" for e in internal
+			)
+
+			if not already:
+				rows = frappe.db.sql(
+					"""
+					SELECT DISTINCT lcv.name
+					FROM `tabLanded Cost Voucher` lcv
+					INNER JOIN `tabLanded Cost Purchase Receipt` lpr
+					    ON lpr.parent = lcv.name
+					WHERE lpr.receipt_document = %s
+					  AND lcv.docstatus < 2
+					ORDER BY lcv.name
+					""",
+					(name,),
+				)
+				names = [r[0] for r in rows]
+				if names:
+					internal.append(
+						{
+							"doctype": "Landed Cost Voucher",
+							"count": len(names),
+							"open_count": 0,
+							"names": names,
+						}
+					)
+
+			inner["external_links_found"] = external
+			inner["internal_links_found"] = internal
+			out["count"] = inner
+		except Exception:
+			pass
+
+		return out
+
+	notifications._get_linked_document_counts = _patched
+
+
+try:
+	_patch_pr_dashboard_lcv_count()
+except Exception:
+	pass
+
