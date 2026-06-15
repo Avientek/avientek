@@ -503,7 +503,19 @@ frappe.ui.form.on('Payment Request Form', {
             // Controller correct `cheque_date` after L2 approval — Frappe
             // honours this because allow_on_submit=1 is set on the field
             // in the doctype JSON.
-            const EDITABLE = ["issued_bank", "payment_mode", "cheque_date"];
+            //
+            // Sridhar 2026-06-15 (PRF Enhancement doc §3): expand to
+            // include Party Bank Account ("Party Account Details" in
+            // the doc) + Party Address ("Address" in the doc). All
+            // amount/line-item/tax fields stay locked via doctype
+            // allow_on_submit=0 + the existing
+            // _PRF_LOCKED_FIELDS_AFTER_SUBMIT server-side guard. Audit
+            // trail is automatic via Frappe's track_changes on the
+            // PRF doctype.
+            const EDITABLE = [
+                "issued_bank", "payment_mode", "cheque_date",
+                "supplier_bank_account", "supplier_address",
+            ];
 
             // Step 1: lock the whole form (parent-level fields). Walk
             // df list and set read_only=1 on everything not in the
@@ -549,7 +561,7 @@ frappe.ui.form.on('Payment Request Form', {
                     const el = document.createElement("div");
                     el.className = "prf-fc-edit-banner";
                     el.style.cssText = "margin:8px 0; padding:10px 14px; background:#fff3cd; border-left:4px solid #d39e00; border-radius:4px; font-size:12px;";
-                    el.innerHTML = __("You are authorised to update <b>Issued Bank</b>, <b>Payment Mode</b>, and <b>Cheque Date</b> on this PRF until it is Released. All other fields are locked.");
+                    el.innerHTML = __("You are authorised to update <b>Issued Bank</b>, <b>Payment Mode</b>, <b>Cheque Date</b>, <b>Party Bank Account</b>, and <b>Party Address</b> on this PRF until it is Released. All other fields are locked. Every edit is captured in the Change Log.");
                     $(mount).prepend(el);
                     frm._fc_edit_banner_el = el;
                 }
@@ -583,7 +595,16 @@ frappe.ui.form.on('Payment Request Form', {
                 grid.cannot_add_rows = false;
                 grid.cannot_delete_rows = false;
             }
-            const TO_LOCK = ["supplier_bank_account", "additional_documents", "supplier_balance"];
+            // Sridhar 2026-06-15 (PRF Enhancement doc): once Released
+            // (or any terminal state) freeze every FC-editable field
+            // too — not just the original 3. Otherwise the
+            // apply_fc_field_unlock banner would still unlock them on
+            // re-open of a Released doc.
+            const TO_LOCK = [
+                "issued_bank", "payment_mode", "cheque_date",
+                "supplier_address",
+                "supplier_bank_account", "additional_documents", "supplier_balance",
+            ];
             TO_LOCK.forEach(function (fn) {
                 if (frm.fields_dict[fn]) {
                     frm.set_df_property(fn, "read_only", 0);

@@ -49,6 +49,16 @@ _PRF_LOCKED_FIELDS_AFTER_SUBMIT = (
 )
 _PRF_BANK_EDIT_ROLES = {"Finance Manager", "Finance Controller", "System Manager"}
 
+# Workflow states where the PRF is considered "paid / closed" — even
+# privileged roles (Finance Manager / Finance Controller) MUST NOT
+# touch the locked fields. Break-glass: System Manager still bypasses.
+# Sridhar 2026-06-15 enhancement-doc note: "when document status as
+# payment release freeze all field should not be editable".
+_PRF_TERMINAL_FROZEN_STATES = {
+	"Released", "Processed", "Partially Processed",
+	"Cancelled", "Cancelled (Rejected)", "Rejected",
+}
+
 
 class PaymentRequestForm(Document):
 	def validate(self):
@@ -162,22 +172,46 @@ class PaymentRequestForm(Document):
 		if not before or getattr(before, "docstatus", 0) != 1:
 			return  # first-time submit, not an update-after-submit
 		user_roles = set(frappe.get_roles(frappe.session.user))
-		if user_roles & _PRF_BANK_EDIT_ROLES:
-			return  # privileged — skip
+
+		# Collect changed locked-field set once — re-used by both
+		# branches below.
 		changed = []
 		for fn in _PRF_LOCKED_FIELDS_AFTER_SUBMIT:
 			before_val = before.get(fn) or ""
 			after_val = self.get(fn) or ""
 			if before_val != after_val:
 				changed.append(fn)
-		if changed:
+		if not changed:
+			return
+
+		# Sridhar 2026-06-15 (PRF Enhancement doc): once the PRF is in
+		# a terminal state — Released / Processed / Partially Processed
+		# / Cancelled / Rejected — even Finance Manager / Finance
+		# Controller must NOT edit the locked fields. Only System
+		# Manager bypasses (break-glass for genuine data correction).
+		# This is the server-side mirror of apply_released_lock() in
+		# the JS — without it, an API client / direct frappe.db.set_value
+		# would still allow FC edits past Release.
+		ws = (self.workflow_state or "").strip()
+		if ws in _PRF_TERMINAL_FROZEN_STATES:
+			if "System Manager" in user_roles:
+				return  # break-glass
 			frappe.throw(
-				_("Only Finance Manager or Finance Controller can change {0} "
-				  "on a submitted Payment Request Form. "
-				  "Cancel and Amend the document to revise these fields.").format(
-					", ".join(changed)
+				_("Payment Request Form {0} is in <b>{1}</b> state — "
+				  "{2} cannot be modified. Use Amend if a correction is required.").format(
+					self.name, ws, ", ".join(changed)
 				)
 			)
+
+		if user_roles & _PRF_BANK_EDIT_ROLES:
+			return  # privileged — skip
+		frappe.throw(
+			_("Only Finance Manager or Finance Controller can change {0} "
+			  "on a submitted Payment Request Form. "
+			  "Cancel and Amend the document to revise these fields.").format(
+				", ".join(changed)
+			)
+		)
 
 
 @frappe.whitelist()
