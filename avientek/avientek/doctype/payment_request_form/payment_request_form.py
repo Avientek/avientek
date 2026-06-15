@@ -734,19 +734,30 @@ def _resolve_quotation_print_format():
 def _get_quotation_for_po(po_name):
 	"""Trace a Purchase Order back to its originating Sales Quotation.
 
-	Chain: PO.items[0].sales_order → Sales Order.items[0].prevdoc_docname
-	→ Quotation (the standard ERPNext sales-side prev-doc chain used
-	on every Avientek Pay flow that originates from a customer
-	Quotation).
+	Two flow shapes are supported:
 
-	Returns the Quotation name, or None if any link in the chain is
-	missing. Safe to call with empty/None input.
+	  1) STANDARD (single-company): Customer Quote → SO → PO (at the
+	     same company, e.g. customer's purchasing entity for a vendor
+	     bill). The chain is PO.items[0].sales_order →
+	     SO.items[0].prevdoc_docname → Quotation. This was the
+	     original Rahul 2026-05-22 implementation.
 
-	Rahul Avientek 2026-05-22: surfaces the Sales Quotation's
-	new-quote-module costing block on the Payment Voucher's row
-	attachment section + the row View popup — replacing the manual
-	costing_sheet_attachment when a Quotation is in the chain, OR
-	rendered alongside the manual sheet (Q1=(c) policy).
+	  2) INTERCOMPANY (Sridhar/Jithin 2026-06-15, PRF Enhancement doc
+	     §2 "Intracompany Quote Traceability Chain"): A customer
+	     Quote is fulfilled across multiple Avientek group entities.
+	     The first hop's SO has NO `prevdoc_docname` (it was created
+	     from a sibling-company PO via intercompany flow, not from a
+	     Quotation) — instead it carries the ORIGINAL SO's name in
+	     its `po_no` field. So we recurse: SO.po_no → another SO →
+	     try prevdoc_docname again → Quotation.
+
+	The resolver returns the Quotation name as soon as ANY hop's
+	prevdoc_docname yields one — so the standard 1-hop chain
+	short-circuits without paying the recursion cost.
+
+	Safe to call with empty/None input. Bounded recursion (depth=5)
+	prevents infinite loops on corrupt prod data with circular
+	po_no references.
 	"""
 	if not po_name:
 		return None
@@ -759,21 +770,55 @@ def _get_quotation_for_po(po_name):
 		)
 		if not so:
 			return None
-		qn = frappe.db.get_value(
-			"Sales Order Item",
-			{"parent": so},
-			"prevdoc_docname",
-			order_by="idx asc",
-		)
-		if not qn:
-			return None
-		# Sanity check — make sure the linked Quotation still exists
-		# (deleted/cancelled docs return a name but no record).
-		if not frappe.db.exists("Quotation", qn):
-			return None
-		return qn
+		return _resolve_quotation_through_so_chain(so)
 	except Exception:
 		return None
+
+
+def _resolve_quotation_through_so_chain(so_name, _depth=0, _seen=None):
+	"""Walk an SO back to its Quotation, recursing through SO.po_no
+	for intercompany chains.
+
+	Returns the Quotation name or None. Depth-bounded + cycle-bounded.
+
+	The shape of the walk per the enhancement doc:
+	    Linked SO  --(prevdoc_docname)--> Quotation       (terminate)
+	    Linked SO  --(po_no)-->          Original SO      (recurse)
+	    Original SO --(prevdoc_docname)--> Original Quote (terminate)
+	"""
+	if not so_name:
+		return None
+	if _depth > 5:
+		return None  # corrupt po_no cycle — bail
+	if not frappe.db.exists("Sales Order", so_name):
+		return None
+	seen = _seen if _seen is not None else set()
+	if so_name in seen:
+		return None
+	seen = seen | {so_name}
+
+	# Hop A — direct Quotation reference via prevdoc_docname
+	qn = frappe.db.get_value(
+		"Sales Order Item",
+		{"parent": so_name},
+		"prevdoc_docname",
+		order_by="idx asc",
+	)
+	if qn and frappe.db.exists("Quotation", qn):
+		return qn
+
+	# Hop B — intercompany: follow SO.po_no if it points to another SO.
+	# Avientek's convention per Sridhar 2026-06-15: a Linked SO created
+	# from a sibling-company PO stamps the ORIGINAL SO's name into
+	# `po_no` (a Data field on Sales Order — repurposed from its
+	# stock ERPNext semantic of "customer's external PO number").
+	po_no_value = frappe.db.get_value("Sales Order", so_name, "po_no")
+	if po_no_value and frappe.db.exists("Sales Order", po_no_value):
+		return _resolve_quotation_through_so_chain(
+			po_no_value, _depth=_depth + 1, _seen=seen,
+		)
+
+	return None
 
 
 @frappe.whitelist()
