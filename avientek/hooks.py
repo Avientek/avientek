@@ -830,7 +830,11 @@ scheduler_events = {
 # Testing
 # -------
 
-# before_tests = "avientek.install.before_tests"
+# Sammish 2026-06-15: seed test masters that the stock Frappe / ERPNext
+# bootstrap can't auto-create due to Avientek custom-field mandatoriness
+# (Holiday List for _Test Company.default_holiday_list, Item with our
+# mandatory part_number Custom Field, etc).
+before_tests = "avientek.tests.bootstrap.before_tests"
 
 # Overriding Methods
 # ------------------------------
