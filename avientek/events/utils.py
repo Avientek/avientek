@@ -491,6 +491,96 @@ def autofill_india_sales_taxes_template(doc, method=None, *args, **kwargs):
 # 					''', as_dict=1)
 # 	return po_details
 
+# ---------------------------------------------------------------------
+# Date sanity validator
+# ---------------------------------------------------------------------
+#
+# Sridhar / Jithin 2026-06-12 + 2026-06-15: SO-LTD-25-00302 was saved
+# with transaction_date = '0205-03-31' (year 205 CE instead of 2025).
+# Standard ERPNext + Frappe accept any Python-valid date (years 1 to
+# 9999) so a single dropped digit slipped through every layer. This
+# validator rejects any year < 1900 or > 2100 on common parent-level
+# date fields. No false positives — no legitimate Avientek doc has a
+# year outside this range.
+#
+# Wired on `before_save` for Quotation / Sales Order / Sales Invoice /
+# Purchase Order / Purchase Receipt / Purchase Invoice / Delivery
+# Note / Payment Entry / Journal Entry via hooks.py.
+
+_DATE_SANITY_MIN_YEAR = 1900
+_DATE_SANITY_MAX_YEAR = 2100
+
+# Date-shape fields that show up across the wired doctypes. Each
+# doctype only has SOME of these; non-existent fields are skipped
+# silently via `doc.get` returning None.
+_DATE_SANITY_FIELDS = (
+	"transaction_date",
+	"delivery_date",
+	"posting_date",
+	"due_date",
+	"schedule_date",
+	"po_date",
+	"bill_date",
+	"reference_date",
+	"cheque_date",
+	"valid_till",
+	# Avientek custom date fields we routinely touch:
+	"custom_sales_order_confirmation_date",
+)
+
+
+def validate_date_sanity(doc, method=None, *args, **kwargs):
+	"""Reject documents where any parent-level date field has a year
+	outside the [_DATE_SANITY_MIN_YEAR, _DATE_SANITY_MAX_YEAR] range.
+
+	Catches the dropped-digit class of typo (e.g. 0205 instead of 2025,
+	0225 instead of 2025) that Frappe + Python datetime accept silently
+	because year-205 IS a valid date in pure datetime terms.
+
+	Idempotent — calling on a doc with all-valid dates is a no-op.
+	Signature widened with *args/**kwargs for forward-compat with Frappe
+	doc_event composer extras (see
+	[[feedback-frappe-doc-hook-composer-3arg-shape]]).
+	"""
+	from frappe.utils import getdate
+
+	bad = []
+	for fn in _DATE_SANITY_FIELDS:
+		val = doc.get(fn)
+		if not val:
+			continue
+		try:
+			d = getdate(val)
+		except Exception:
+			# Frappe will reject unparseable dates with its own error
+			# before this hook fires. If we get here on something
+			# unparseable, let Frappe handle it — don't pile on.
+			continue
+		if d is None:
+			continue
+		year = d.year
+		if year < _DATE_SANITY_MIN_YEAR or year > _DATE_SANITY_MAX_YEAR:
+			bad.append((fn, val, year))
+
+	if not bad:
+		return
+
+	# Build a clear, actionable error. Include EVERY bad field at once
+	# so the user fixes them in one save round-trip.
+	lines = [
+		frappe._("{0} = <b>{1}</b> (year {2}) is outside the valid range "
+		         "<b>{3}–{4}</b>. Looks like a digit typo on the year — "
+		         "please correct before saving.").format(
+		           frappe.unscrub(fn), val, year,
+		           _DATE_SANITY_MIN_YEAR, _DATE_SANITY_MAX_YEAR)
+		for fn, val, year in bad
+	]
+	frappe.throw(
+		"<br>".join(lines),
+		title=frappe._("Invalid date — year out of range"),
+	)
+
+
 @frappe.whitelist()
 def get_previous_doc_rate_and_currency(item_list):
 	item_list = json.loads(item_list)

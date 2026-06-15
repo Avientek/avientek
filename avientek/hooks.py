@@ -451,6 +451,7 @@ doc_events = {
         "validate": "avientek.events.bank_account.auto_link_internal_company_account",
     },
     "Payment Entry": {
+        "before_save": "avientek.events.utils.validate_date_sanity",
         "on_submit": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
         "on_cancel": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
     },
@@ -477,6 +478,7 @@ doc_events = {
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
         "before_update_after_submit": "avientek.events.purchase_order.po_validate",
+        "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": [
             "avientek.events.purchase_order.check_exchange_rate",
             "avientek.events.purchase_order.validate_supplier_company",
@@ -519,6 +521,11 @@ doc_events = {
             "avientek.events.sales_order.strip_quotation_optional_items",
             "avientek.events.sales_order.carry_forward_quotation_fields",
             "avientek.events.sales_order.validate_item_tax_template",
+            # Sridhar/Jithin 2026-06-15: catches the dropped-digit year
+            # typo class of bug (SO-LTD-25-00302 transaction_date saved
+            # as 0205-03-31 instead of 2025-03-31). Rejects any year
+            # outside [1900, 2100] on parent date fields.
+            "avientek.events.utils.validate_date_sanity",
         ],
         "after_save": "avientek.events.sales_order.sync_delivery_date_to_items",
         "on_submit": "avientek.events.sales_order.set_sales_order_confirmation_date",
@@ -578,6 +585,7 @@ doc_events = {
             # collision the mirror originally worked around. The fields +
             # function are removed in patch drop_quotation_part_number_
             # mirror_fields.
+            "avientek.events.utils.validate_date_sanity",
         ],
         "before_cancel":
             "avientek.api.quotation_high_probability.before_cancel",
@@ -644,6 +652,7 @@ doc_events = {
             # shared with Quotation / SO / DN / PO.
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
+        "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": [
             "avientek.events.purchase_receipt.validate_supplier_company",
             "avientek.events.purchase_receipt.validate_item_tax_template",
@@ -673,6 +682,7 @@ doc_events = {
             # because PI was deliberately outside the suppression set).
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
+        "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": [
             "avientek.events.purchase_invoice.validate_supplier_company",
             "avientek.events.purchase_invoice.validate_item_tax_template",
@@ -705,6 +715,7 @@ doc_events = {
         "before_save": [
             "avientek.events.sales_invoice.set_vat_emirate",
             "avientek.events.sales_invoice.sync_custom_sales_person",
+            "avientek.events.utils.validate_date_sanity",
         ],
         "before_submit": [
             # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
@@ -716,6 +727,12 @@ doc_events = {
         "on_submit": "avientek.events.sales_invoice_reward_incentive.book_reward_incentive_jv",
         "on_cancel": "avientek.events.sales_invoice_reward_incentive.cancel_reward_incentive_jv",
     },
+    "Journal Entry": {
+        # Sridhar/Jithin 2026-06-15: catch dropped-digit year typos on
+        # posting_date / due_date / cheque_date / reference_date before
+        # the JV hits the GL.
+        "before_save": "avientek.events.utils.validate_date_sanity",
+    },
     "Delivery Note": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
@@ -725,6 +742,7 @@ doc_events = {
             # india_compliance clubbing rule belongs at Sales Invoice.
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
+        "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": "avientek.events.delivery_note.validate_item_tax_template",
         "before_submit": [
             # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
