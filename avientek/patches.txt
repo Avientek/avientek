@@ -558,3 +558,4 @@ avientek.patches.normalize_freeze_setting_nones
 avientek.patches.enable_allow_negative_stock_for_batch
 avientek.patches.fix_aetpl_outstate_tax_category
 avientek.patches.allow_supplier_address_edit_after_submit
+avientek.patches.add_prf_on_hold_workflow_state
