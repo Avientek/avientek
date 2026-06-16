@@ -70,6 +70,7 @@ def execute():
     _ensure_workflow_document_state()
     _ensure_transitions()
     _ensure_number_card()
+    _ensure_number_card_on_tasks_workspace()
 
     frappe.clear_cache(doctype="Payment Request Form")
     # bench execute's NameError fallback path doesn't always commit
@@ -154,6 +155,72 @@ def _ensure_transitions():
     if added:
         wf.save(ignore_permissions=True)
         print(f"  + {added} workflow transitions inserted")
+
+
+def _ensure_number_card_on_tasks_workspace():
+    """Register the 'PRF On Hold' card on the Tasks workspace so it
+    actually shows up alongside the existing 5 PRF cards.
+
+    Sridhar 2026-06-16 (TSK-00342 subtask 1.4): the original patch
+    (commit f77a716) created the Number Card but DIDN'T add it to the
+    Tasks workspace's content / Workspace Number Card child table.
+    Result: card invisible on the dashboard.
+
+    Two writes needed (modern Frappe workspaces use both):
+      1. tabWorkspace Number Card (legacy explicit child table)
+      2. tabWorkspace.content (v15 JSON layout grid)
+
+    Idempotent — every insert / append gated on existence check.
+    """
+    WORKSPACE = "Tasks"
+    CARD_LABEL = "PRF On Hold"
+    CARD_NAME = "PRF On Hold"
+
+    if not frappe.db.exists("Workspace", WORKSPACE):
+        return
+
+    ws = frappe.get_doc("Workspace", WORKSPACE)
+
+    # (1) Workspace Number Card child table — add the row if missing
+    has_child = any(
+        (row.number_card_name or "") == CARD_NAME
+        for row in (ws.get("number_cards") or [])
+    )
+    if not has_child:
+        ws.append("number_cards", {
+            "label": CARD_LABEL,
+            "number_card_name": CARD_NAME,
+        })
+        print(f"  + Workspace Number Card row appended on {WORKSPACE!r}")
+
+    # (2) Workspace.content JSON — append a `number_card` block if
+    # missing. Frappe parses this JSON to render the grid layout.
+    try:
+        content = json.loads(ws.content or "[]")
+    except Exception:
+        content = []
+    has_block = any(
+        isinstance(b, dict)
+        and b.get("type") == "number_card"
+        and (b.get("data") or {}).get("number_card_name") == CARD_NAME
+        for b in content
+    )
+    if not has_block:
+        # Random Frappe-style ID (10 chars). Doesn't need to be globally
+        # unique — only unique within this content array.
+        import secrets
+        block_id = secrets.token_urlsafe(8)[:10]
+        content.append({
+            "id": block_id,
+            "type": "number_card",
+            "data": {"number_card_name": CARD_NAME, "col": 4},
+        })
+        ws.content = json.dumps(content)
+        print(f"  + Workspace.content JSON gained number_card block")
+
+    if not has_child or not has_block:
+        ws.save(ignore_permissions=True)
+        frappe.clear_cache(doctype="Workspace")
 
 
 def _ensure_number_card():

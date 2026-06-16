@@ -459,6 +459,12 @@ frappe.ui.form.on('Payment Request Form', {
                 "Approved Level 1",
                 "Pending L2 Approval",
                 "Approved Level 2",
+                // Sridhar 2026-06-16 (TSK-00342 subtask 1.6): On Hold
+                // should behave identically to Approved Level 2 — same
+                // 5 FC-editable fields, everything else locked
+                // (including supplier_balance which was leaking
+                // through Frappe's default allow_on_submit=1 path).
+                "On Hold",
             ]);
             if (!PRE_RELEASED_STATES.has(ws)) return;
 
@@ -495,6 +501,11 @@ frappe.ui.form.on('Payment Request Form', {
                 "Approved Level 1": ["Finance Manager"],
                 "Pending L2 Approval": ["General Manager", "Director"],
                 "Approved Level 2": ["General Manager", "Director"],
+                // Sridhar 2026-06-16 (TSK-00342 subtask 1.6): keep
+                // GM/Director with full edit on On Hold (same as L2),
+                // but everyone else (incl FC) gets the EDITABLE list
+                // restriction.
+                "On Hold": ["General Manager", "Director"],
             };
             const has_other = (owner_roles[ws] || []).some(r => roles.indexOf(r) >= 0);
             if (has_other) return;
