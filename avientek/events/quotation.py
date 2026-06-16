@@ -621,7 +621,41 @@ def recalc_doc_totals(doc):
     total_taxes = 0
     for tax_row in (doc.get("taxes") or []):
         if tax_row.charge_type == "On Net Total":
-            tax_row.tax_amount = flt(flt(tax_row.rate) * net_after_discount / 100, 4)
+            # Rahul Avientek 2026-06-16 (QN-LTD-26-02267): Draft showed
+            # ₹11,939 tax, Submit jumped to ₹18,572. Root cause was THIS
+            # line previously doing `tax_row.rate × net_after_discount`
+            # which ignored each item's `item_tax_rate` JSON.
+            #
+            # Items can carry per-row GST classification via
+            # `item_tax_template` → `item_tax_rate` (e.g. one line at
+            # GST 18%, another at GST 28%). ERPNext's server-side
+            # `calculate_taxes_and_totals` honors this; our pipeline
+            # was overriding with a flat parent rate, so Draft saved a
+            # wrong total. On Submit `run_calculation_pipeline` is
+            # gated by `docstatus != 0` so the correct value re-emerged
+            # — same doc, two answers.
+            #
+            # Fix: mirror ERPNext's per-item logic. For each item, look
+            # up its rate for THIS tax row's account_head in
+            # `item_tax_rate`. Fall back to `tax_row.rate` if not
+            # present (single-rate quotes behave identically to before).
+            account = tax_row.account_head
+            tax_for_row = 0.0
+            for it in (doc.get("items") or []):
+                amount = flt(it.amount)
+                if not amount:
+                    continue
+                rate_for_item = flt(tax_row.rate)
+                try:
+                    itax = it.get("item_tax_rate") or "{}"
+                    if isinstance(itax, str):
+                        itax = json.loads(itax) if itax else {}
+                    if account in itax:
+                        rate_for_item = flt(itax[account])
+                except Exception:
+                    pass
+                tax_for_row += amount * rate_for_item / 100
+            tax_row.tax_amount = flt(tax_for_row, 4)
         elif tax_row.charge_type == "On Previous Row Total" and tax_row.row_id:
             prev_idx = cint(tax_row.row_id) - 1
             prev_rows = doc.get("taxes") or []
