@@ -576,4 +576,4 @@ avientek.patches.drop_quotation_request_cancellation_from_approved
 # out clearly.
 avientek.patches.fix_reward_payable_account_type_drift
 avientek.patches.backfill_failed_reward_incentive_jvs
-avientek.patches.purge_error_log_preserve_24h
+avientek.patches.purge_error_log_full_wipe
