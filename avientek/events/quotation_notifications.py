@@ -330,13 +330,21 @@ def _assign_todo(doc, user, description):
         return
     try:
         from frappe.desk.form.assign_to import add as add_assign
-        add_assign({
-            "doctype": "Quotation",
-            "name": doc.name,
-            "assign_to": [user],
-            "description": description,
-            "notify": 0,  # we send our own templated email
-        })
+        # ignore_permissions=True: assignments are system-driven (workflow
+        # routing). The calling user often lacks read access to the target
+        # Quotation under PRF role-based perms, which would fire
+        # PermissionError inside add_assign's check_permission and spam
+        # Error Log on every save (73 prod fails / 7 days before this guard).
+        add_assign(
+            {
+                "doctype": "Quotation",
+                "name": doc.name,
+                "assign_to": [user],
+                "description": description,
+                "notify": 0,
+            },
+            ignore_permissions=True,
+        )
     except Exception:
         # ToDo creation failure shouldn't block the save.
         frappe.log_error(

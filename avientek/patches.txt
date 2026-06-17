@@ -562,3 +562,18 @@ avientek.patches.add_prf_on_hold_workflow_state
 avientek.patches.add_quotation_direct_cancel_from_approved
 avientek.patches.add_prf_on_hold_card_to_tasks_workspace
 avientek.patches.drop_quotation_request_cancellation_from_approved
+# Sammish 2026-06-17 — production-ready sweep. Error log audit on
+# avientekv21.frappe.cloud revealed:
+#   (a) 17 Reward & Incentive JV failures (4 companies, 3 days) —
+#       Reward Payable accounts drifted to account_type=Payable which
+#       triggers ERPNext's party-required validation. Incentive
+#       Payable accounts are correctly blank — match them.
+#   (b) 73 quotation_notifications._assign_todo PermissionError log
+#       spams — fixed in code with ignore_permissions=True on
+#       add_assign (no patch needed).
+# Patch order matters: (1) heal accounts → (2) backfill failed JVs →
+# (3) purge legacy Error Log noise so post-deploy regressions stand
+# out clearly.
+avientek.patches.fix_reward_payable_account_type_drift
+avientek.patches.backfill_failed_reward_incentive_jvs
+avientek.patches.purge_error_log_preserve_24h
