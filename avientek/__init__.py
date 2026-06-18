@@ -437,6 +437,60 @@ def _patch_batch_valuation_get_sle_for_batches():
 	dsb.DeprecatedBatchNoValuation.get_sle_for_batches = _patched_get_sle_for_batches
 
 
+def _patch_validate_negative_batch_respect_setting():
+	"""Sammish 2026-06-18 (DN-LLC-26-00687) — fourth patch in the
+	negative-batch family.
+
+	Background: ERPNext's SerialAndBatchBundle has TWO places that throw
+	BatchNegativeStockError when computed batch availability < 0:
+	  1. validate_batch_inventory (line 1474) — calls validate_negative_batch
+	     INSIDE a block that already short-circuits when
+	     Stock Settings.allow_negative_stock_for_batch is enabled. Path
+	     respects the setting.
+	  2. set_incoming_rate_for_outward_transaction (line 633) — calls
+	     validate_negative_batch DIRECTLY, gated only by the doc-level
+	     `allow_negative_stock` flag (not the batch-level setting).
+
+	Path 2 is the one that fires today on DN-LLC-26-00687 with the
+	phantom error "negative stock of quantity -2.0 in Stores - AETL"
+	even though Bin shows +5 and SBE ledger sums to +5. The
+	available_qty computed by BatchNoValuation +
+	DeprecatedBatchNoValuation legacy walker disagrees with the SQL
+	ground truth — same class of double-count we patched in three other
+	functions above, but in a NEW code path that the prior patches
+	don't reach. Could not reproduce on local v15.109.1 (same code
+	exists, but the data shape on prod triggers the bug uniquely).
+
+	Fix: make validate_negative_batch ALSO honor
+	`Stock Settings.allow_negative_stock_for_batch=1` (which Avientek's
+	`enable_allow_negative_stock_for_batch` patch already ensures). When
+	the setting is enabled, this method short-circuits — leaving
+	Avientek's `batch_negative_guard` (before_submit hook on DN/SI/SE/PR)
+	as the SOLE per-batch validator. The guard uses correct SBE-aware
+	SQL and won't false-positive.
+
+	Same idempotent pattern as the other 3 patches in this file.
+	"""
+	from erpnext.stock.doctype.serial_and_batch_bundle import serial_and_batch_bundle as sbb_mod
+
+	import frappe
+
+	_original_validate_negative_batch = sbb_mod.SerialandBatchBundle.validate_negative_batch
+
+	def _patched_validate_negative_batch(self, batch_no, available_qty):
+		# Honor Stock Settings.allow_negative_stock_for_batch at THIS
+		# call site too (the other call site in validate_batch_inventory
+		# already does so). Avientek's batch_negative_guard remains the
+		# sole per-batch validator when this is enabled.
+		if frappe.db.get_single_value(
+			"Stock Settings", "allow_negative_stock_for_batch"
+		):
+			return
+		return _original_validate_negative_batch(self, batch_no, available_qty)
+
+	sbb_mod.SerialandBatchBundle.validate_negative_batch = _patched_validate_negative_batch
+
+
 _apply_patches()
 _patch_qb_get_query()
 try:
@@ -449,6 +503,10 @@ except Exception:
 	pass
 try:
 	_patch_batch_valuation_get_sle_for_batches()
+except Exception:
+	pass
+try:
+	_patch_validate_negative_batch_respect_setting()
 except Exception:
 	pass
 
