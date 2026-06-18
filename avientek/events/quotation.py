@@ -608,11 +608,30 @@ def recalc_doc_totals(doc):
     total_qty = sum(max(cint(it.qty), 1) for it in doc.items)
     item_amount_sum = sum(flt(it.amount) for it in doc.items)
 
+    # Sammish 2026-06-18 (QN-KSA-26-00169): user reported "Net Total field
+    # equals Total even when Additional Discount is set". Root cause was
+    # this block ALWAYS writing net_total = item_amount_sum regardless of
+    # doc.apply_discount_on. ERPNext semantics:
+    #   apply_on = "Net Total"  → discount reduces net_total; taxes on
+    #                              the discounted base. (KSA VAT / India
+    #                              GST default — discount lowers the
+    #                              taxable supply value.)
+    #   apply_on = "Grand Total" → net_total stays at item_amount_sum;
+    #                              discount comes off at grand_total
+    #                              after tax. (Mostly cash-discount or
+    #                              "rounding adjustment" use cases.)
+    # Bug surface verified on prod 2026-06-18: 301 Quotations with
+    # apply_on=Net Total + discount>0 had grand_total inflated by
+    # tax × discount (e.g. QN-KSA-26-00169 stored 113,640.74 vs correct
+    # 113,490.74 — 150 SAR overcharge from 15% × 1000 discount).
+    apply_on_net_total = (doc.apply_discount_on or "Grand Total") == "Net Total"
+    discounted_total = flt(item_amount_sum - addl_discount, 4) if apply_on_net_total else flt(item_amount_sum, 4)
+
     doc.total_qty      = flt(total_qty, 4)
     doc.total          = flt(item_amount_sum, 4)
-    doc.net_total      = flt(item_amount_sum, 4)
+    doc.net_total      = discounted_total
     doc.base_total     = flt(item_amount_sum * conversion_rate, 4)
-    doc.base_net_total = flt(item_amount_sum * conversion_rate, 4)
+    doc.base_net_total = flt(discounted_total * conversion_rate, 4)
 
     # ── Recalculate taxes from the Taxes table ──
     # ERPNext's calculate_taxes_and_totals ran during validate with stale
@@ -639,12 +658,21 @@ def recalc_doc_totals(doc):
             # up its rate for THIS tax row's account_head in
             # `item_tax_rate`. Fall back to `tax_row.rate` if not
             # present (single-rate quotes behave identically to before).
+            #
+            # Sammish 2026-06-18: also reduce per-item amount by its
+            # share of the Additional Discount when apply_on=Net Total
+            # — otherwise tax is computed on the pre-discount base
+            # while net_total is post-discount, leaving the customer
+            # overcharged by (tax_rate × discount).
             account = tax_row.account_head
             tax_for_row = 0.0
             for it in (doc.get("items") or []):
                 amount = flt(it.amount)
                 if not amount:
                     continue
+                if apply_on_net_total and addl_discount > 0 and item_amount_sum > 0:
+                    item_addl = flt(addl_discount * amount / item_amount_sum, 4)
+                    amount = flt(amount - item_addl, 4)
                 rate_for_item = flt(tax_row.rate)
                 try:
                     itax = it.get("item_tax_rate") or "{}"
