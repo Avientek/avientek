@@ -577,3 +577,11 @@ avientek.patches.drop_quotation_request_cancellation_from_approved
 avientek.patches.fix_reward_payable_account_type_drift
 avientek.patches.backfill_failed_reward_incentive_jvs
 avientek.patches.purge_error_log_full_wipe
+# Sammish 2026-06-18 — comprehensive negative-stock audit found 2
+# legacy per-batch negative buckets that the prior validators (now
+# correctly in place) won't grow further but can't auto-heal:
+#   (a) I017900 / BN-00687 / Stores - AETL  = -2 (LLC, since 2025-02)
+#   (b) I023674 / BN01071 / Stores - KSA    = -1 (KSA, since 2025-07)
+# Post Stock Reconciliations to bring each to 0 + refresh
+# tabBatch.batch_qty cache. Idempotent.
+avientek.patches.heal_negative_batch_buckets_2026_06_18
