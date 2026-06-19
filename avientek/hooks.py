@@ -269,7 +269,13 @@ doctype_list_js = {
 	"Sales Invoice": ["public/js/sales_invoice_list.js", "public/js/report_download.js"],
 	"Purchase Order": "public/js/report_download.js",
 	"Purchase Invoice": "public/js/report_download.js",
-	"Delivery Note": "public/js/report_download.js",
+	"Delivery Note": [
+		# Report-download permission helper (existing).
+		"public/js/report_download.js",
+		# Jithin 2026-06-19: red "Cancelled (Voided)" indicator on
+		# the list view for voided Drafts.
+		"public/js/delivery_note_list.js",
+	],
 	"Purchase Receipt": "public/js/report_download.js",
 	"Material Request": "public/js/report_download.js",
 	"Stock Entry": "public/js/report_download.js",
