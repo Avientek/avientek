@@ -27,9 +27,12 @@
 
 		// Wrap ERPNext's get_indicator: void branch first, then fall
 		// through to whatever ERPNext returns.
+		// NOTE: doc.docstatus can come back from the list query as
+		// integer 0 OR string "0" depending on Frappe version /
+		// caching layer. Coerce to int via cint() to handle both.
 		const prev_get_indicator = settings.get_indicator;
 		settings.get_indicator = function (doc) {
-			if (doc.docstatus === 0 && cint(doc.custom_is_void)) {
+			if (cint(doc.docstatus) === 0 && cint(doc.custom_is_void)) {
 				return [__("Cancelled (Voided)"), "red", "custom_is_void,=,1"];
 			}
 			if (prev_get_indicator) {
