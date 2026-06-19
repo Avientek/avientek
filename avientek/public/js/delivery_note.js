@@ -49,18 +49,22 @@ frappe.ui.form.on('Delivery Note', {
         //    users don't get confused.
         if (frm.doc.custom_is_void) {
             frm.disable_save();
-            // Disable all standard fields except the void section
-            // (which stays visible for audit reference).
-            ["customer", "set_warehouse", "items", "taxes_and_charges",
+            // Disable all standard top-level fields (the void section
+            // stays visible for audit reference). Skip "items" — the
+            // child grid has its own locking mechanism below.
+            ["customer", "set_warehouse", "taxes_and_charges",
              "shipping_rule", "tc_name"].forEach((fn) => {
                 if (frm.fields_dict[fn]) {
                     frm.set_df_property(fn, "read_only", 1);
                 }
             });
-            // Lock items grid against row add/delete/edit.
+            // Lock items grid against row add/delete — no toggle_enable
+            // here since that targets a field WITHIN a row, not the
+            // grid itself (was throwing "field items not found").
             if (frm.fields_dict.items && frm.fields_dict.items.grid) {
                 frm.fields_dict.items.grid.cannot_add_rows = true;
-                frm.fields_dict.items.grid.toggle_enable("items", false);
+                frm.fields_dict.items.grid.cannot_delete_rows = true;
+                frm.fields_dict.items.df.read_only = 1;
             }
         }
     },
