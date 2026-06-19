@@ -49,7 +49,13 @@ _FIELDS = [
         "fieldtype": "Check",
         "default": 0,
         "no_copy": 1,
-        "in_list_view": 0,
+        # in_list_view=1 forces Frappe to SELECT this field on every
+        # list-view query (independent of listview_settings.add_fields
+        # which runs too late to make it into the initial fetch). The
+        # listview customization at public/js/delivery_note_list.js
+        # then reads doc.custom_is_void to render the red
+        # "Cancelled (Voided)" indicator.
+        "in_list_view": 1,
         "in_standard_filter": 1,
         "description": (
             "Mark this Draft as voided (cancelled-in-spirit). The "
