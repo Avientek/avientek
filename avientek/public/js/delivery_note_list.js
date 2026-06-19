@@ -1,106 +1,81 @@
 // ── Avientek List View customization for Delivery Note ──
-// Jithin 2026-06-19: voided Drafts should appear visually distinct
-// in the list view (red "Cancelled (Voided)" indicator) instead of
-// the standard orange "Draft" badge.
+// Jithin 2026-06-19: voided Drafts show a red "Cancelled (Voided)"
+// indicator in the list view instead of the default orange "Draft"
+// badge. The DN stays at docstatus=0 (so the naming series is
+// preserved) but is visually + functionally treated as cancelled.
 //
-// PRODUCTION-READY DESIGN
+// IMPLEMENTATION
 //
-// The badge text on the list view is controlled by three layers
-// (any one can win). After much debugging, we use a layered
-// defense so SOMETHING is always correct:
+// Frappe v15's frappe.get_indicator (indicator.js:72-74) hard-codes
+// a fast-path that returns ["Draft", "red"] for ANY submittable
+// doctype with docstatus=0 BEFORE consulting settings.get_indicator
+// or doc.status. The only way to skip it via listview_settings is
+// `settings.has_indicator_for_draft = true`. BUT — listview_settings
+// is overwritten WHOLESALE by ERPNext's auto-loaded
+// stock/doctype/delivery_note/delivery_note_list.js, which loads
+// AFTER our hook-registered doctype_list_js. Every prior attempt to
+// patch listview_settings raced against ERPNext's overwrite and
+// lost.
 //
-//   1. Server-side: avientek.events.delivery_note.validate_void_state
-//      forces doc.status="Cancelled" when custom_is_void=1. Frappe's
-//      default indicator color map paints "Cancelled" red. This
-//      handles any code path that renders status directly.
-//
-//   2. Custom Field: custom_is_void.in_list_view=1 so the list query
-//      always SELECTs it. Combined with the Voided standard filter,
-//      users can drill into voided DNs in one click.
-//
-//   3. Client-side (this file): patches both
-//      frappe.listview_settings["Delivery Note"].get_indicator AND
-//      cur_list.listview_settings.get_indicator (snapshot) on every
-//      route change. Returns ["Cancelled (Voided)", "red"] for
-//      voided drafts, so the row dot indicator shows correctly.
-//
-// We deliberately do NOT call cur_list.refresh(true) here — that
-// triggers ListView.toggle_result_area which crashes with
-// "Cannot read properties of undefined (reading 'toggle')" if the
-// result area DOM isn't fully built yet. Next natural refresh
-// picks up the new indicator function.
+// The bulletproof fix: monkey-patch `frappe.get_indicator` ITSELF.
+// The list view calls this function for every row's indicator pill,
+// reading frappe.get_indicator off the global at call time — no
+// snapshot, no race. Once we wrap the function, EVERY indicator
+// query (list view, form toolbar, report view, quick-list widget)
+// honors the void state.
 (function () {
-	const DT = "Delivery Note";
+	if (!frappe.get_indicator || frappe.get_indicator.__avientek_void_wrapped) {
+		return;
+	}
+	const _orig_get_indicator = frappe.get_indicator;
 
-	const apply_void_indicator = function () {
-		const settings = frappe.listview_settings[DT] || {};
-
-		// Ensure custom_is_void is fetched.
-		const fields = settings.add_fields || [];
-		if (fields.indexOf("custom_is_void") === -1) {
-			fields.push("custom_is_void");
-			settings.add_fields = fields;
+	frappe.get_indicator = function (doc, doctype, show_workflow_state) {
+		const dt = doctype || (doc && doc.doctype);
+		if (
+			dt === "Delivery Note" &&
+			doc &&
+			cint(doc.docstatus) === 0 &&
+			cint(doc.custom_is_void)
+		) {
+			return [
+				__("Cancelled (Voided)"),
+				"red",
+				"custom_is_void,=,1",
+			];
 		}
-
-		// ROOT-CAUSE FIX (2026-06-19): Frappe v15
-		// frappe/public/js/frappe/model/indicator.js:72-74 hard-codes a
-		// fast-path that returns "Draft" for any submittable doctype
-		// with docstatus=0 — BEFORE settings.get_indicator runs. The
-		// only way to bypass it is `has_indicator_for_draft = true`,
-		// which signals "I have my own Draft logic, skip the
-		// shortcut." With this flag set, Frappe falls through to:
-		//   - line 82-86: doc.status vs meta.states (our server-side
-		//     status="Cancelled" matches the DN "Cancelled" state →
-		//     red pill, label "Cancelled", filter status,=,Cancelled).
-		//   - line 88-91: settings.get_indicator as final fallback.
-		// Without this flag, no client-side override of the Draft pill
-		// is possible.
-		settings.has_indicator_for_draft = true;
-
-		// Wrap get_indicator if not already wrapped. This now actually
-		// runs (was dead code before has_indicator_for_draft).
-		if (!settings.__avientek_void_patched) {
-			const prev = settings.get_indicator;
-			settings.get_indicator = function (doc) {
-				if (cint(doc.docstatus) === 0 && cint(doc.custom_is_void)) {
-					return [__("Cancelled (Voided)"), "red", "custom_is_void,=,1"];
-				}
-				if (prev) return prev(doc);
-			};
-			settings.__avientek_void_patched = true;
-		}
-		frappe.listview_settings[DT] = settings;
-
-		// Also patch the live snapshot if a list instance is already
-		// mounted (snapshot captured at construction time, before this
-		// code runs).
-		try {
-			if (
-				typeof cur_list !== "undefined" &&
-				cur_list &&
-				cur_list.doctype === DT
-			) {
-				cur_list.listview_settings = settings;
-			}
-		} catch (e) { /* cur_list may not exist yet */ }
+		return _orig_get_indicator.call(this, doc, doctype, show_workflow_state);
 	};
 
-	// Apply at load, after a tick, and on every route change.
-	apply_void_indicator();
-	setTimeout(apply_void_indicator, 0);
-	setTimeout(apply_void_indicator, 250);
+	frappe.get_indicator.__avientek_void_wrapped = true;
+
+	// Also ensure custom_is_void is fetched on every list query, so
+	// `doc.custom_is_void` is truthy when we read it above. We patch
+	// the listview_settings.add_fields on every route change to
+	// survive ERPNext's wholesale replace.
+	const ensure_field_in_list_query = function () {
+		const s = frappe.listview_settings["Delivery Note"] || {};
+		const fields = s.add_fields || [];
+		if (fields.indexOf("custom_is_void") === -1) {
+			fields.push("custom_is_void");
+			s.add_fields = fields;
+		}
+		frappe.listview_settings["Delivery Note"] = s;
+	};
+	ensure_field_in_list_query();
+	setTimeout(ensure_field_in_list_query, 0);
+	setTimeout(ensure_field_in_list_query, 250);
 
 	if (frappe.router && frappe.router.on) {
 		frappe.router.on("change", function () {
 			const route = frappe.get_route ? frappe.get_route() : [];
-			if (route && route[0] === "List" && route[1] === DT) {
-				setTimeout(apply_void_indicator, 0);
-				setTimeout(apply_void_indicator, 250);
+			if (route && route[0] === "List" && route[1] === "Delivery Note") {
+				setTimeout(ensure_field_in_list_query, 0);
+				setTimeout(ensure_field_in_list_query, 250);
 			}
 		});
 	}
 
 	$(document).on("page-change", function () {
-		setTimeout(apply_void_indicator, 0);
+		setTimeout(ensure_field_in_list_query, 0);
 	});
 })();
