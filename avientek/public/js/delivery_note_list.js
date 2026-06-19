@@ -1,104 +1,52 @@
 // ── Avientek List View customization for Delivery Note ──
 // Jithin 2026-06-19: voided Drafts should appear visually distinct
 // in the list view (red "Cancelled (Voided)" indicator) instead of
-// the standard orange "Draft" badge. Keeps the row visible (so the
-// audit trail is browseable) but flags it clearly so users don't
-// confuse it with active Drafts they should still be working on.
+// the standard orange "Draft" badge.
 //
-// Follows the same wholesale-replace pattern Avientek uses for
-// sales_order_list.js / quotation_list.js etc — copies ERPNext's
-// standard indicator logic and adds the void branch on top.
-frappe.listview_settings["Delivery Note"] = {
-	add_fields: [
-		"customer",
-		"customer_name",
-		"base_grand_total",
-		"per_installed",
-		"per_billed",
-		"transporter_name",
-		"grand_total",
-		"is_return",
-		"status",
-		"currency",
-		// Avientek: pull the void flag for the indicator branch below.
-		"custom_is_void",
-	],
+// Load-order note: Frappe loads doctype_list_js hook files (including
+// this one) BEFORE the auto-discovered <app>/<module>/doctype/<dt>/
+// <dt>_list.js (where ERPNext's delivery_note_list.js lives). If we
+// just set frappe.listview_settings["Delivery Note"] at top level,
+// ERPNext's file wipes ours wholesale a moment later.
+//
+// Fix: defer the override to the next tick via setTimeout. By then
+// ERPNext has set its listview_settings, and we mutate get_indicator
+// + extend add_fields without replacing the whole object — preserving
+// ERPNext's onload (Delivery Trip / Sales Invoice / Packing Slip
+// bulk actions) and its other indicator branches.
+(function () {
+	const apply_void_indicator = function () {
+		const settings = frappe.listview_settings["Delivery Note"] || {};
 
-	get_indicator: function (doc) {
-		// AVIENTEK BRANCH — voided Drafts → red Cancelled badge.
-		// Must fire BEFORE Frappe's default Draft indicator.
-		if (doc.docstatus === 0 && cint(doc.custom_is_void)) {
-			return [__("Cancelled (Voided)"), "red", "custom_is_void,=,1"];
+		// Ensure custom_is_void is fetched alongside ERPNext's standard fields.
+		const fields = settings.add_fields || [];
+		if (fields.indexOf("custom_is_void") === -1) {
+			fields.push("custom_is_void");
 		}
+		settings.add_fields = fields;
 
-		// Below: ERPNext's original indicator chain, preserved verbatim
-		// so existing behaviour on Submitted DNs (To Bill / Partially
-		// Billed / Completed / Return / Closed) is unchanged.
-		if (cint(doc.is_return) == 1 && doc.status == "Return") {
-			return [__("Return"), "gray", "is_return,=,1"];
-		} else if (doc.status === "Closed") {
-			return [__("Closed"), "green", "status,=,Closed"];
-		} else if (doc.status === "Return Issued") {
-			return [__("Return Issued"), "grey", "status,=,Return Issued"];
-		} else if (flt(doc.per_billed) == 0) {
-			return [__("To Bill"), "orange", "per_billed,=,0|docstatus,=,1"];
-		} else if (flt(doc.per_billed, 2) > 0 && flt(doc.per_billed, 2) < 100) {
-			return [__("Partially Billed"), "yellow", "per_billed,<,100|docstatus,=,1"];
-		} else if (flt(doc.per_billed, 2) === 100) {
-			return [__("Completed"), "green", "per_billed,=,100|docstatus,=,1"];
-		}
-	},
-
-	onload: function (doclist) {
-		// ERPNext's standard onload — preserve the Delivery Trip /
-		// Sales Invoice / Packing Slip bulk-action menu items.
-		const action = () => {
-			const selected_docs = doclist.get_checked_items();
-			const docnames = doclist.get_checked_items(true);
-
-			if (selected_docs.length > 0) {
-				for (let doc of selected_docs) {
-					if (!doc.docstatus) {
-						frappe.throw(__("Cannot create a Delivery Trip from Draft documents."));
-					}
-				}
-
-				frappe.new_doc("Delivery Trip").then(() => {
-					cur_frm.set_value("delivery_stops", []);
-					frappe.call({
-						type: "POST",
-						method: "frappe.model.mapper.map_docs",
-						args: {
-							method: "erpnext.stock.doctype.delivery_note.delivery_note.make_delivery_trip",
-							source_names: docnames,
-							target_doc: cur_frm.doc,
-						},
-						callback: function (r) {
-							if (!r.exc) {
-								frappe.model.sync(r.message);
-								cur_frm.dirty();
-								cur_frm.refresh();
-							}
-						},
-					});
-				});
+		// Wrap ERPNext's get_indicator: void branch first, then fall
+		// through to whatever ERPNext returns.
+		const prev_get_indicator = settings.get_indicator;
+		settings.get_indicator = function (doc) {
+			if (doc.docstatus === 0 && cint(doc.custom_is_void)) {
+				return [__("Cancelled (Voided)"), "red", "custom_is_void,=,1"];
+			}
+			if (prev_get_indicator) {
+				return prev_get_indicator(doc);
 			}
 		};
 
-		if (frappe.model.can_create("Delivery Trip")) {
-			doclist.page.add_action_item(__("Create Delivery Trip"), action);
-		}
+		frappe.listview_settings["Delivery Note"] = settings;
+	};
 
-		if (frappe.model.can_create("Sales Invoice")) {
-			doclist.page.add_action_item(__("Sales Invoice"), () => {
-				erpnext.bulk_transaction_processing.create(doclist, "Delivery Note", "Sales Invoice");
-			});
-		}
+	// Defer one tick — ERPNext's wholesale-replace runs synchronously
+	// later in the same JS load cycle; setTimeout puts us after it.
+	setTimeout(apply_void_indicator, 0);
 
-		if (frappe.model.can_create("Packing Slip")) {
-			doclist.page.add_action_item(__("Packaging Slip From Delivery Note"), () => {
-				erpnext.bulk_transaction_processing.create(doclist, "Delivery Note", "Packing Slip");
-			});
-		}
-	},
-};
+	// And re-apply on every list view route in case ERPNext re-sets
+	// the object on navigation (defensive — runs cheaply).
+	$(document).on("page-change", function () {
+		setTimeout(apply_void_indicator, 0);
+	});
+})();
