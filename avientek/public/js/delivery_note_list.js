@@ -3,84 +3,88 @@
 // in the list view (red "Cancelled (Voided)" indicator) instead of
 // the standard orange "Draft" badge.
 //
-// Load-order gotcha that bit us:
-//   ERPNext's auto-loaded delivery_note_list.js sets
-//   frappe.listview_settings["Delivery Note"] = { ... }
-//   AFTER my hook-registered file loads. So if I set get_indicator
-//   at top level, ERPNext's wholesale replace wipes it.
+// PRODUCTION-READY DESIGN
 //
-// Worse: even if I defer with setTimeout(0) so my override survives
-// in frappe.listview_settings, the live `cur_list.listview_settings`
-// is a STALE SNAPSHOT captured when the ListView was constructed —
-// pointing at ERPNext's object BEFORE my override applied. So
-// rendering uses Frappe's default Draft indicator, not mine.
+// The badge text on the list view is controlled by three layers
+// (any one can win). After much debugging, we use a layered
+// defense so SOMETHING is always correct:
 //
-// Fix: hook into frappe.router.on("change") AND $(document).on
-// "page-change". On every navigation to /app/delivery-note, mutate
-// BOTH frappe.listview_settings["Delivery Note"] AND
-// cur_list.listview_settings (if a list instance is already mounted).
-const _patch_dn_listview = function () {
-	const settings = frappe.listview_settings["Delivery Note"] || {};
-	if (settings.__avientek_void_patched) {
-		return; // already done for this navigation
-	}
-	settings.__avientek_void_patched = true;
+//   1. Server-side: avientek.events.delivery_note.validate_void_state
+//      forces doc.status="Cancelled" when custom_is_void=1. Frappe's
+//      default indicator color map paints "Cancelled" red. This
+//      handles any code path that renders status directly.
+//
+//   2. Custom Field: custom_is_void.in_list_view=1 so the list query
+//      always SELECTs it. Combined with the Voided standard filter,
+//      users can drill into voided DNs in one click.
+//
+//   3. Client-side (this file): patches both
+//      frappe.listview_settings["Delivery Note"].get_indicator AND
+//      cur_list.listview_settings.get_indicator (snapshot) on every
+//      route change. Returns ["Cancelled (Voided)", "red"] for
+//      voided drafts, so the row dot indicator shows correctly.
+//
+// We deliberately do NOT call cur_list.refresh(true) here — that
+// triggers ListView.toggle_result_area which crashes with
+// "Cannot read properties of undefined (reading 'toggle')" if the
+// result area DOM isn't fully built yet. Next natural refresh
+// picks up the new indicator function.
+(function () {
+	const DT = "Delivery Note";
 
-	const fields = settings.add_fields || [];
-	if (fields.indexOf("custom_is_void") === -1) fields.push("custom_is_void");
-	settings.add_fields = fields;
+	const apply_void_indicator = function () {
+		const settings = frappe.listview_settings[DT] || {};
 
-	const prev_get_indicator = settings.get_indicator;
-	settings.get_indicator = function (doc) {
-		if (cint(doc.docstatus) === 0 && cint(doc.custom_is_void)) {
-			return [__("Cancelled (Voided)"), "red", "custom_is_void,=,1"];
+		// Ensure custom_is_void is fetched.
+		const fields = settings.add_fields || [];
+		if (fields.indexOf("custom_is_void") === -1) {
+			fields.push("custom_is_void");
+			settings.add_fields = fields;
 		}
-		if (prev_get_indicator) return prev_get_indicator(doc);
+
+		// Wrap get_indicator if not already wrapped.
+		if (!settings.__avientek_void_patched) {
+			const prev = settings.get_indicator;
+			settings.get_indicator = function (doc) {
+				if (cint(doc.docstatus) === 0 && cint(doc.custom_is_void)) {
+					return [__("Cancelled (Voided)"), "red", "custom_is_void,=,1"];
+				}
+				if (prev) return prev(doc);
+			};
+			settings.__avientek_void_patched = true;
+		}
+		frappe.listview_settings[DT] = settings;
+
+		// Also patch the live snapshot if a list instance is already
+		// mounted (snapshot captured at construction time, before this
+		// code runs).
+		try {
+			if (
+				typeof cur_list !== "undefined" &&
+				cur_list &&
+				cur_list.doctype === DT
+			) {
+				cur_list.listview_settings = settings;
+			}
+		} catch (e) { /* cur_list may not exist yet */ }
 	};
-	frappe.listview_settings["Delivery Note"] = settings;
 
-	// Critical step: if the list view is ALREADY constructed (i.e. user
-	// navigated to /app/delivery-note before this code ran), its
-	// listview_settings is a stale snapshot. Patch it directly.
-	try {
-		if (
-			typeof cur_list !== "undefined" &&
-			cur_list &&
-			cur_list.doctype === "Delivery Note"
-		) {
-			cur_list.listview_settings = settings;
-			// Force re-fetch with new add_fields, then re-render.
-			cur_list.refresh(true);
-		}
-	} catch (e) { /* cur_list may be undefined yet */ }
-};
+	// Apply at load, after a tick, and on every route change.
+	apply_void_indicator();
+	setTimeout(apply_void_indicator, 0);
+	setTimeout(apply_void_indicator, 250);
 
-// Run as early as possible — before ERPNext's file loads (in case),
-// and also after a tick (in case ERPNext already overwrote).
-_patch_dn_listview();
-setTimeout(_patch_dn_listview, 0);
-setTimeout(_patch_dn_listview, 250);
+	if (frappe.router && frappe.router.on) {
+		frappe.router.on("change", function () {
+			const route = frappe.get_route ? frappe.get_route() : [];
+			if (route && route[0] === "List" && route[1] === DT) {
+				setTimeout(apply_void_indicator, 0);
+				setTimeout(apply_void_indicator, 250);
+			}
+		});
+	}
 
-// And on every route change to /app/delivery-note (re-clear our
-// __avientek_void_patched flag so we re-run when the listview
-// remounts on navigation).
-if (frappe.router && frappe.router.on) {
-	frappe.router.on("change", function () {
-		const route = frappe.get_route ? frappe.get_route() : [];
-		if (route && route[0] === "List" && route[1] === "Delivery Note") {
-			// Clear the patched flag so we re-apply for the new instance
-			const s = frappe.listview_settings["Delivery Note"];
-			if (s) delete s.__avientek_void_patched;
-			setTimeout(_patch_dn_listview, 0);
-			setTimeout(_patch_dn_listview, 250);
-		}
+	$(document).on("page-change", function () {
+		setTimeout(apply_void_indicator, 0);
 	});
-}
-
-// Defensive: also patch on jQuery page-change in case router.on
-// isn't firing on this Frappe version.
-$(document).on("page-change", function () {
-	const s = frappe.listview_settings["Delivery Note"];
-	if (s) delete s.__avientek_void_patched;
-	setTimeout(_patch_dn_listview, 0);
-});
+})();
