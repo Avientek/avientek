@@ -75,6 +75,16 @@ def validate_void_state(doc, method=None):
                 _("Void Reason is required to void this Delivery Note.")
             )
 
+    # Override status server-side so list views (which render the
+    # Status column as a colored pill from doc.status directly) show
+    # the void state correctly. Frappe's list-view client-side
+    # get_indicator override only catches the row dot, NOT the Status
+    # column — so the column needs the status field itself to change.
+    # ERPNext's set_status() runs in validate (before this hook), so
+    # our override here is the last word.
+    if new_void:
+        doc.status = "Cancelled"
+
 
 def block_submit_when_voided(doc, method=None):
     """before_submit hook — block submission of voided DNs.
