@@ -42,7 +42,23 @@
 			settings.add_fields = fields;
 		}
 
-		// Wrap get_indicator if not already wrapped.
+		// ROOT-CAUSE FIX (2026-06-19): Frappe v15
+		// frappe/public/js/frappe/model/indicator.js:72-74 hard-codes a
+		// fast-path that returns "Draft" for any submittable doctype
+		// with docstatus=0 — BEFORE settings.get_indicator runs. The
+		// only way to bypass it is `has_indicator_for_draft = true`,
+		// which signals "I have my own Draft logic, skip the
+		// shortcut." With this flag set, Frappe falls through to:
+		//   - line 82-86: doc.status vs meta.states (our server-side
+		//     status="Cancelled" matches the DN "Cancelled" state →
+		//     red pill, label "Cancelled", filter status,=,Cancelled).
+		//   - line 88-91: settings.get_indicator as final fallback.
+		// Without this flag, no client-side override of the Draft pill
+		// is possible.
+		settings.has_indicator_for_draft = true;
+
+		// Wrap get_indicator if not already wrapped. This now actually
+		// runs (was dead code before has_indicator_for_draft).
 		if (!settings.__avientek_void_patched) {
 			const prev = settings.get_indicator;
 			settings.get_indicator = function (doc) {
