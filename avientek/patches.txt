@@ -585,3 +585,13 @@ avientek.patches.purge_error_log_full_wipe
 # Post Stock Reconciliations to bring each to 0 + refresh
 # tabBatch.batch_qty cache. Idempotent.
 avientek.patches.heal_negative_batch_buckets_2026_06_18
+# Jithin 2026-06-19: Void-Draft workflow on Delivery Note. Users
+# frequently create duplicate Draft DNs when stock is short. Frappe
+# can't cancel a Draft (docstatus 0 → 2 unsupported), so they
+# currently delete — which breaks the DN naming series and leaves
+# audit gaps. This patch adds Custom Fields for a "void" flag that
+# marks the Draft as cancelled-in-spirit without touching docstatus.
+# UI changes: "Void this Draft" button + red Cancelled indicator
+# via public/js/delivery_note.js. Server invariants enforced by
+# avientek.events.delivery_note.validate_void_state (before_save).
+avientek.patches.add_dn_void_fields

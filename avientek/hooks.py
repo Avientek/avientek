@@ -742,9 +742,20 @@ doc_events = {
             # india_compliance clubbing rule belongs at Sales Invoice.
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
-        "before_save": "avientek.events.utils.validate_date_sanity",
+        "before_save": [
+            "avientek.events.utils.validate_date_sanity",
+            # Jithin 2026-06-19: enforce Void-Draft invariants (void
+            # is one-way, voided cannot submit, stamp audit fields
+            # on 0→1 transition). UI exposes "Void this Draft" button
+            # via public/js/delivery_note.js.
+            "avientek.events.delivery_note.validate_void_state",
+        ],
         "validate": "avientek.events.delivery_note.validate_item_tax_template",
         "before_submit": [
+            # Jithin 2026-06-19: block submit if Draft was voided.
+            # MUST run before batch_negative_guard so we throw a clear
+            # void-specific error instead of a stock error.
+            "avientek.events.delivery_note.block_submit_when_voided",
             # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
             # submit-time guard against per-batch negatives. See
             # avientek/stock/batch_negative_guard.py.

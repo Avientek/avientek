@@ -1,5 +1,70 @@
 // ── Client Script: "Delivery Note" ──
+//
+// Avientek customizations on Delivery Note:
+//   1. Company → filtered Customer query (sales-team access control)
+//   2. After save: auto-share to sales-team users (existing flow)
+//   3. Void Draft workflow (Jithin 2026-06-19): a "Void this Draft"
+//      button on Draft DNs. Server hook at
+//      avientek.events.delivery_note.validate_void_state enforces the
+//      one-way + locked + can't-submit invariants. UI side: red
+//      indicator + button + reason prompt.
 frappe.ui.form.on('Delivery Note', {
+    refresh: function(frm) {
+        // ── Void indicator (red) when the DN is voided ──
+        // Frappe's status indicator only knows about docstatus; we
+        // visually upgrade voided Drafts to look Cancelled.
+        if (frm.doc.custom_is_void) {
+            frm.page.set_indicator(__("Cancelled (Voided Draft)"), "red");
+        }
+
+        // ── "Void this Draft" button — only on Draft (docstatus=0)
+        //    AND not already voided. Hidden on Submitted / Cancelled.
+        if (frm.doc.docstatus === 0 && !frm.doc.custom_is_void && !frm.is_new()) {
+            frm.add_custom_button(__("Void this Draft"), function() {
+                frappe.prompt(
+                    [{
+                        label: __("Reason"),
+                        fieldname: "reason",
+                        fieldtype: "Small Text",
+                        reqd: 1,
+                    }],
+                    function(values) {
+                        frm.set_value("custom_void_reason", values.reason);
+                        frm.set_value("custom_is_void", 1);
+                        frm.save().then(() => {
+                            frappe.show_alert({
+                                message: __("Delivery Note voided. The DN remains in the system with its original number for audit; it will no longer appear in active Draft lists by default."),
+                                indicator: "orange",
+                            }, 7);
+                        });
+                    },
+                    __("Void this Draft Delivery Note"),
+                    __("Void"),
+                );
+            }, __("Actions"));
+        }
+
+        // ── Belt-and-suspenders: if voided, server-side hook already
+        //    blocks edits, but we also visually disable the form so
+        //    users don't get confused.
+        if (frm.doc.custom_is_void) {
+            frm.disable_save();
+            // Disable all standard fields except the void section
+            // (which stays visible for audit reference).
+            ["customer", "set_warehouse", "items", "taxes_and_charges",
+             "shipping_rule", "tc_name"].forEach((fn) => {
+                if (frm.fields_dict[fn]) {
+                    frm.set_df_property(fn, "read_only", 1);
+                }
+            });
+            // Lock items grid against row add/delete/edit.
+            if (frm.fields_dict.items && frm.fields_dict.items.grid) {
+                frm.fields_dict.items.grid.cannot_add_rows = true;
+                frm.fields_dict.items.grid.toggle_enable("items", false);
+            }
+        }
+    },
+
     company: function(frm) {
         frappe.call({
             "method": "avientek.api.filtered_parties.get_filtered_customers",
