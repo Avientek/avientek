@@ -681,3 +681,83 @@ try:
 except Exception:
 	pass
 
+
+def _patch_query_report_export_keeps_date_typed():
+	"""Sammish 2026-06-20 (Jithin Batch-Wise Ageing Report Excel): Date
+	columns in the downloaded xlsx were landing as TEXT cells instead
+	of typed Excel dates, so Excel couldn't sort / filter by date and
+	the autofilter dropdown listed each formatted string separately.
+
+	Root cause in Frappe core
+	-------------------------
+	`frappe.desk.query_report._export_query` calls
+	`frappe.desk.query_report.format_fields` BEFORE handing the data to
+	`make_xlsx`. format_fields walks every Date / Datetime column and
+	does:
+
+	    row[index] = formatdate(val)         # for Date
+	    row[index] = format_datetime(val)    # for Datetime
+
+	→ The cell value reaches make_xlsx as a *string* (e.g. "11-10-2024")
+	instead of a `datetime.date`. make_xlsx's typed-cell branch checks
+	`isinstance(value, datetime.date | datetime.datetime)` (xlsxutils.py
+	line 63) → fails → falls through to plain text cell.
+
+	Fix
+	---
+	Monkey-patch format_fields to skip the Date / Datetime branches.
+	make_xlsx then sees the raw datetime.date object, takes the typed-
+	cell path, and emits an Excel cell with `number_format` from
+	System Settings.date_format — so dates remain visually formatted
+	the way the user expects, AND Excel treats them as real dates for
+	sort / filter / formula purposes.
+
+	Other branches (Duration, Currency-with-precision) preserved
+	unchanged — they format to strings/floats that make_xlsx already
+	handles correctly.
+
+	Scope: GLOBAL across every Frappe Query Report on this site
+	(Batch-Wise Ageing, Stock Ageing, Sales Register, Purchase
+	Register, all custom reports, etc.). Doesn't affect Frappe's
+	Report Builder export (different code path that already gives
+	typed cells).
+
+	Idempotent — replaces the function once at app load. Forward-
+	compatible — if Frappe ever fixes this in core, our patch
+	produces the same result (typed dates).
+	"""
+	try:
+		import frappe.desk.query_report as qr_mod
+	except Exception:
+		return
+
+	from frappe.utils import format_duration
+
+	def _patched_format_fields(data):
+		for i, col in enumerate(data.columns):
+			if col.get("fieldtype") == "Duration":
+				for row in data.result:
+					index = col.get("fieldname") if isinstance(row, dict) else i
+					val = row.get(index) if isinstance(row, dict) else row[index]
+					if val:
+						row[index] = format_duration(val)
+			elif col.get("fieldtype") == "Currency" and col.get("precision"):
+				for row in data.result:
+					index = col.get("fieldname") if isinstance(row, dict) else i
+					val = row.get(index) if isinstance(row, dict) else row[index]
+					if val:
+						row[index] = round(val, col.get("precision"))
+			# Date / Datetime: deliberately NOT formatted. Let make_xlsx
+			# see the raw datetime.date / datetime.datetime so it can
+			# emit a typed Excel cell with System-Settings date_format
+			# applied. Avientek users need sortable / filterable date
+			# cells in Excel exports.
+
+	qr_mod.format_fields = _patched_format_fields
+
+
+try:
+	_patch_query_report_export_keeps_date_typed()
+except Exception:
+	pass
+
