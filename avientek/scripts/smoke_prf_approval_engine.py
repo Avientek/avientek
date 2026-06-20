@@ -187,6 +187,94 @@ def execute():
                            f"chain={chain}"))
     print()
 
+    # ── Test 9: Dynamic on_empty_chain = 'Auto-Approve' ──
+    print("Test 9: on_empty_chain = Auto-Approve → rule stamped, empty chain, level=0")
+    rule3 = frappe.db.get_value("PRF Approval Rule", {"rule_name": "AVWLL Catch-all"})
+    # AVWLL rule's L1 user = accounts@avientek.com. Force PRF owner to that
+    # so L1 self-skips, and L2 too (no min_amount), but wait — L2 is Role,
+    # not User, so self-skip doesn't apply. To make L2 also skip, we set
+    # min_amount_for_level high.
+    r3 = frappe.get_doc("PRF Approval Rule", rule3)
+    r3.approval_chain[1].min_amount_for_level = 999999  # force L2 skip
+    r3.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    avwll_prfs = frappe.get_all("Payment Request Form",
+                                 filters={"company": "Avientek Trading W.L.L"},
+                                 fields=["name"], limit_page_length=1)
+    if avwll_prfs:
+        doc = frappe.get_doc("Payment Request Form", avwll_prfs[0].name)
+        doc.owner = "accounts@avientek.com"  # == L1 → self-skip → empty chain
+        doc.total_outstanding_amount = 100
+        resolve_approval_chain(doc)
+        rule_name = frappe.db.get_value("PRF Approval Rule",
+                                         doc.custom_approval_rule, "rule_name") if doc.custom_approval_rule else None
+        results.append(_assert("rule stamped (Auto-Approve policy)",
+                               rule_name == "AVWLL Catch-all", f"got={rule_name}"))
+        results.append(_assert("chain is empty []",
+                               json.loads(doc.custom_approval_chain or "[]") == []))
+        results.append(_assert("current_level == 0 (auto-approved)",
+                               int(doc.custom_current_approval_level or 0) == 0))
+    # Restore
+    r3 = frappe.get_doc("PRF Approval Rule", rule3)
+    r3.approval_chain[1].min_amount_for_level = 0
+    r3.save(ignore_permissions=True)
+    frappe.db.commit()
+    print()
+
+    # ── Test 10: Dynamic on_empty_chain = 'Throw Error' ──
+    print("Test 10: on_empty_chain = Throw Error → frappe.throw raised")
+    rule2_name = frappe.db.get_value("PRF Approval Rule",
+                                       {"rule_name": "AETPL High-value (>= 500,000 INR)"})
+    # Force collapse: set every level's approver_user to the PRF owner
+    # AND uncheck allow_self_approval. Then verify throws.
+    r2 = frappe.get_doc("PRF Approval Rule", rule2_name)
+    r2.allow_self_approval = 0
+    for row in r2.approval_chain:
+        row.approver_type = "User"
+        row.approver_user = "accounts.india1@avientek.com"
+    r2.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    doc = frappe.get_doc("Payment Request Form", "AVLTD-01606")
+    doc.owner = "accounts.india1@avientek.com"
+    doc.total_outstanding_amount = 750000  # forces Rule 2 (priority 50)
+    threw = False
+    try:
+        resolve_approval_chain(doc)
+    except frappe.ValidationError:
+        threw = True
+    except Exception as e:
+        # frappe.throw may raise different exception types — accept any
+        threw = "empty" in str(e).lower() or "chain" in str(e).lower()
+    results.append(_assert("Throw Error policy raised exception", threw))
+    print()
+
+    # ── Test 11: Dynamic allow_self_approval = 1 ──
+    print("Test 11: allow_self_approval=1 → owner CAN be in own chain")
+    # Reset Rule 2 to a clean state
+    r2 = frappe.get_doc("PRF Approval Rule", rule2_name)
+    r2.allow_self_approval = 1  # ← the dynamic toggle
+    # L1 = User accounts.india1, L2 = Role, L3 = Role
+    r2.approval_chain[0].approver_type = "User"
+    r2.approval_chain[0].approver_user = "accounts.india1@avientek.com"
+    r2.approval_chain[1].approver_type = "Role"
+    r2.approval_chain[1].approver_role = "Accounts Manager"
+    r2.approval_chain[2].approver_type = "Role"
+    r2.approval_chain[2].approver_role = "System Manager"
+    r2.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    doc = frappe.get_doc("Payment Request Form", "AVLTD-01606")
+    doc.owner = "accounts.india1@avientek.com"  # SAME as L1 user
+    doc.total_outstanding_amount = 750000
+    resolve_approval_chain(doc)
+    chain = json.loads(doc.custom_approval_chain or "[]")
+    results.append(_assert("L1 NOT skipped despite owner==L1.user",
+                           len(chain) == 3 and chain[0].get("user") == "accounts.india1@avientek.com",
+                           f"chain_len={len(chain)} first_user={chain[0].get('user') if chain else '-'}"))
+    print()
+
     # ── Summary ──
     print("=" * 70)
     passed = sum(1 for r in results if r)

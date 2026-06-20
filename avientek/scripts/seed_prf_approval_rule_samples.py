@@ -32,6 +32,8 @@ import frappe
 
 _RULES = [
     {
+        # Conservative default — if the chain collapses to empty,
+        # let the existing role-based workflow take over.
         "rule_name": "AETPL India Supplier Pay (catch-all)",
         "priority": 200,
         "is_active": 1,
@@ -39,6 +41,8 @@ _RULES = [
         "payment_type": "Pay",
         "party_type": "Supplier",
         "amount_currency": "INR",
+        "on_empty_chain": "Fall Through",
+        "allow_self_approval": 0,
         "chain": [
             {"level": 1, "approver_type": "User", "approver_user": "accounts.india1@avientek.com"},
             {"level": 2, "approver_type": "Role", "approver_role": "Accounts Manager",
@@ -46,6 +50,8 @@ _RULES = [
         ],
     },
     {
+        # High-value rule — never auto-approve, never fall through.
+        # If the chain collapses, force a config fix.
         "rule_name": "AETPL High-value (>= 500,000 INR)",
         "priority": 50,
         "is_active": 1,
@@ -53,6 +59,8 @@ _RULES = [
         "payment_type": "Pay",
         "amount_currency": "INR",
         "amount_from": 500000,
+        "on_empty_chain": "Throw Error",
+        "allow_self_approval": 0,
         "chain": [
             {"level": 1, "approver_type": "User", "approver_user": "accounts.india1@avientek.com"},
             {"level": 2, "approver_type": "Role", "approver_role": "Accounts Manager"},
@@ -60,10 +68,14 @@ _RULES = [
         ],
     },
     {
+        # AVWLL catch-all — auto-approve on empty chain (trusts the
+        # dept head's own small-amount PRFs).
         "rule_name": "AVWLL Catch-all",
         "priority": 200,
         "is_active": 1,
         "company": "Avientek Trading W.L.L",
+        "on_empty_chain": "Auto-Approve",
+        "allow_self_approval": 0,
         "chain": [
             {"level": 1, "approver_type": "User", "approver_user": "accounts@avientek.com"},
             {"level": 2, "approver_type": "Role", "approver_role": "Accounts Manager"},

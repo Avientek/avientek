@@ -26,24 +26,66 @@ from frappe.utils import getdate, flt
 # ── Public hook ──
 def resolve_approval_chain(doc, method=None):
     """before_save hook — match PRF against active PRF Approval Rules and
-    stamp the resolved chain. Idempotent."""
+    stamp the resolved chain. Idempotent.
+
+    Empty-chain behavior is per-rule (PRF Approval Rule.on_empty_chain):
+        Fall Through — clear all stamped fields; existing role-based
+                       workflow takes over (the SAFE default).
+        Auto-Approve — stamp the rule, leave chain empty,
+                       current_level=0; Phase 3 workflow gate reads
+                       level=0 as 'no approval needed, route to Released'.
+        Throw Error  — frappe.throw with config guidance.
+
+    Self-approval handling is per-rule (PRF Approval Rule.allow_self_approval):
+        unchecked (default) — owner==approver levels are skipped, chain
+                              renumbered.
+        checked             — owner CAN be in own approval chain
+                              (preserves L2/L3 gates).
+    """
     rule = _find_matching_rule(doc)
     if not rule:
-        doc.custom_approval_rule = None
-        doc.custom_approval_chain = None
-        doc.custom_current_approval_level = 0
+        _clear_chain_fields(doc)
         return
 
     chain = _build_chain(rule, doc)
     if not chain:
-        doc.custom_approval_rule = None
-        doc.custom_approval_chain = None
-        doc.custom_current_approval_level = 0
+        _handle_empty_chain(doc, rule)
         return
 
     doc.custom_approval_rule = rule.name
     doc.custom_approval_chain = json.dumps(chain, default=str)
     doc.custom_current_approval_level = _first_unsigned_level(chain)
+
+
+def _clear_chain_fields(doc):
+    doc.custom_approval_rule = None
+    doc.custom_approval_chain = None
+    doc.custom_current_approval_level = 0
+
+
+def _handle_empty_chain(doc, rule):
+    """Apply per-rule on_empty_chain policy."""
+    policy = (rule.get("on_empty_chain") or "Fall Through").strip()
+
+    if policy == "Throw Error":
+        frappe.throw(
+            _(
+                "PRF Approval Rule '{0}' matched this PRF but the chain "
+                "resolved to empty (all levels skipped by self-approval "
+                "or min-amount filters). Extend the chain or change the "
+                "rule's 'On Empty Chain' policy."
+            ).format(rule.rule_name)
+        )
+    elif policy == "Auto-Approve":
+        # Stamp rule + empty chain. Phase 3 workflow gate reads
+        # current_level=0 as 'fully approved, route to Released'.
+        doc.custom_approval_rule = rule.name
+        doc.custom_approval_chain = json.dumps([], default=str)
+        doc.custom_current_approval_level = 0
+    else:
+        # 'Fall Through' (default) — silent: existing role-based
+        # workflow takes over. No fields stamped.
+        _clear_chain_fields(doc)
 
 
 # ── Whitelisted preview for the rule's "Test against a PRF" button ──
@@ -126,12 +168,14 @@ def _rule_matches(rule, doc, today):
 # ── Chain building ──
 def _build_chain(rule, doc):
     """Build the JSON chain from the rule's approval_chain child rows.
-    Skips:
-      - Levels whose min_amount_for_level > PRF amount (tiered within rule)
-      - Self-approval (requester == approver) — auto-skip that level
+    Filtering (in order applied per level):
+      - Skip levels whose min_amount_for_level > PRF amount.
+      - Skip levels where owner == approver_user UNLESS rule's
+        allow_self_approval is checked.
     """
     amt = flt(doc.get("total_outstanding_amount") or 0)
     requester = doc.get("owner")
+    allow_self = bool(int(rule.get("allow_self_approval") or 0))
     out = []
     for row in sorted(rule.approval_chain, key=lambda r: int(r.level or 0)):
         min_amt = flt(row.min_amount_for_level or 0)
@@ -139,8 +183,8 @@ def _build_chain(rule, doc):
             continue
 
         if row.approver_type == "User":
-            if row.approver_user == requester:
-                continue  # self-approval skip
+            if (not allow_self) and row.approver_user == requester:
+                continue  # self-approval skip (per-rule opt-out)
             out.append(
                 {
                     "level": int(row.level),

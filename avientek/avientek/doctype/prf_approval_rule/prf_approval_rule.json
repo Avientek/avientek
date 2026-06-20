@@ -25,6 +25,10 @@
   "amount_from",
   "amount_col_break",
   "amount_to",
+  "behavior_section",
+  "on_empty_chain",
+  "behavior_col_break",
+  "allow_self_approval",
   "chain_section",
   "approval_chain"
  ],
@@ -142,6 +146,33 @@
    "fieldname": "amount_to",
    "fieldtype": "Currency",
    "label": "Amount To"
+  },
+  {
+   "description": "What happens when the chain is empty after self-approval skips and per-level min-amount filters? Picked per rule so Finance team controls policy without code changes.",
+   "fieldname": "behavior_section",
+   "fieldtype": "Section Break",
+   "label": "Behavior"
+  },
+  {
+   "default": "Fall Through",
+   "description": "Fall Through = silent default (existing role-based workflow takes over). Auto-Approve = treat PRF as fully approved (skip workflow entirely). Throw Error = block save with a clear config error.",
+   "fieldname": "on_empty_chain",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "On Empty Chain",
+   "options": "Fall Through\nAuto-Approve\nThrow Error",
+   "reqd": 1
+  },
+  {
+   "fieldname": "behavior_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "If checked, the requester (PRF owner) CAN appear in their own approval chain. Default = unchecked = self-approval levels are silently skipped (chain renumbered). Toggle on for rules where the dept head's own small-amount PRFs should still hit the L2/L3 gate.",
+   "fieldname": "allow_self_approval",
+   "fieldtype": "Check",
+   "label": "Allow Self-Approval"
   },
   {
    "description": "Ordered approval chain. Level 1 is L1 sign-off, level 2 is L2, etc. Max 5 levels.",
