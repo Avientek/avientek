@@ -1,0 +1,207 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:PAR-{####}",
+ "creation": "2026-06-19 20:30:00.000000",
+ "description": "Configurable approval routing for Payment Request Form. Rules are matched at PRF save-time by priority (lower wins). First match resolves the approval chain that the workflow then gates against. Non-matching PRFs fall through to existing role-based workflow with zero breakage.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_section",
+  "rule_name",
+  "priority",
+  "is_active",
+  "rule_col_break",
+  "valid_from",
+  "valid_to",
+  "conditions_section",
+  "company",
+  "payment_type",
+  "conditions_col_break",
+  "party_type",
+  "requesting_department",
+  "amount_section",
+  "amount_currency",
+  "amount_from",
+  "amount_col_break",
+  "amount_to",
+  "chain_section",
+  "approval_chain"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_section",
+   "fieldtype": "Section Break",
+   "label": "Rule"
+  },
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Rule Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "100",
+   "description": "Lower wins on multi-match. Default 100.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Priority",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Is Active"
+  },
+  {
+   "fieldname": "rule_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Optional. Rule only matches PRFs created on or after this date.",
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Valid From"
+  },
+  {
+   "description": "Optional. Rule only matches PRFs created on or before this date.",
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Valid To"
+  },
+  {
+   "description": "All condition fields are AND-ed. Blank = match any. To restrict on a dimension, fill it in.",
+   "fieldname": "conditions_section",
+   "fieldtype": "Section Break",
+   "label": "Conditions"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "payment_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Payment Type",
+   "options": "\nPay\nReceive\nInternal Transfer"
+  },
+  {
+   "fieldname": "conditions_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "party_type",
+   "fieldtype": "Select",
+   "label": "Party Type",
+   "options": "\nSupplier\nCustomer\nEmployee\nShareholder"
+  },
+  {
+   "description": "Department of the user who raised the PRF. Resolver walks up parent_department if the user's own department doesn't match.",
+   "fieldname": "requesting_department",
+   "fieldtype": "Link",
+   "label": "Requesting Department",
+   "options": "Department"
+  },
+  {
+   "description": "Optional amount band. Currency must match the PRF's currency for the band to apply; blank currency = currency-agnostic.",
+   "fieldname": "amount_section",
+   "fieldtype": "Section Break",
+   "label": "Amount Range"
+  },
+  {
+   "fieldname": "amount_currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "description": "Match PRFs with grand_total >= this value. Blank = open-ended low.",
+   "fieldname": "amount_from",
+   "fieldtype": "Currency",
+   "label": "Amount From"
+  },
+  {
+   "fieldname": "amount_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Match PRFs with grand_total <= this value. Blank/0 = open-ended high.",
+   "fieldname": "amount_to",
+   "fieldtype": "Currency",
+   "label": "Amount To"
+  },
+  {
+   "description": "Ordered approval chain. Level 1 is L1 sign-off, level 2 is L2, etc. Max 5 levels.",
+   "fieldname": "chain_section",
+   "fieldtype": "Section Break",
+   "label": "Approval Chain"
+  },
+  {
+   "fieldname": "approval_chain",
+   "fieldtype": "Table",
+   "label": "Approval Chain",
+   "options": "PRF Approval Rule Chain",
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-19 20:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "PRF Approval Rule",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Support L2",
+   "share": 1
+  }
+ ],
+ "sort_field": "priority",
+ "sort_order": "ASC",
+ "states": []
+}

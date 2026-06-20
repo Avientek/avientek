@@ -1,0 +1,75 @@
+{
+ "actions": [],
+ "creation": "2026-06-19 20:30:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "level",
+  "approver_type",
+  "approver_user",
+  "approver_role",
+  "min_amount_for_level"
+ ],
+ "fields": [
+  {
+   "columns": 1,
+   "fieldname": "level",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Level",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "default": "User",
+   "fieldname": "approver_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Approver Type",
+   "options": "User\nRole",
+   "reqd": 1
+  },
+  {
+   "columns": 3,
+   "depends_on": "eval:doc.approver_type==='User'",
+   "fieldname": "approver_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Approver (User)",
+   "mandatory_depends_on": "eval:doc.approver_type==='User'",
+   "options": "User"
+  },
+  {
+   "columns": 3,
+   "depends_on": "eval:doc.approver_type==='Role'",
+   "fieldname": "approver_role",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Approver (Role)",
+   "mandatory_depends_on": "eval:doc.approver_type==='Role'",
+   "options": "Role"
+  },
+  {
+   "columns": 2,
+   "description": "Optional. Within this rule, this level only kicks in when the PRF amount is above this value. Lets a single rule express tiered sign-off (e.g. L1 always, L2 only above 10,000).",
+   "fieldname": "min_amount_for_level",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Min Amount for Level"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-19 20:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "PRF Approval Rule Chain",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "level",
+ "sort_order": "ASC",
+ "states": []
+}

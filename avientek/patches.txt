@@ -595,3 +595,10 @@ avientek.patches.heal_negative_batch_buckets_2026_06_18
 # via public/js/delivery_note.js. Server invariants enforced by
 # avientek.events.delivery_note.validate_void_state (before_save).
 avientek.patches.add_dn_void_fields
+# Jithin Avientek 2026-06-19: configurable PRF authorization engine
+# Phase 1 — schema only. Adds Custom Fields on Payment Request Form
+# (custom_approval_rule, custom_approval_chain JSON, custom_current_approval_level)
+# read-only, populated by the resolver in Phase 2 (events/payment_request_form.py).
+# Two new DocTypes ship via fixtures, not patches: "PRF Approval Rule" +
+# "PRF Approval Rule Chain" (child).
+avientek.patches.add_prf_approval_chain_fields
