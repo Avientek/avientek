@@ -77,15 +77,105 @@ def _handle_empty_chain(doc, rule):
             ).format(rule.rule_name)
         )
     elif policy == "Auto-Approve":
-        # Stamp rule + empty chain. Phase 3 workflow gate reads
-        # current_level=0 as 'fully approved, route to Released'.
+        # Stamp rule + empty chain. Resolver advances workflow_state
+        # directly from Draft → Authorised so Finance picks up immediately.
         doc.custom_approval_rule = rule.name
         doc.custom_approval_chain = json.dumps([], default=str)
         doc.custom_current_approval_level = 0
+        if doc.get("workflow_state") in (None, "", "Draft"):
+            doc.workflow_state = "Authorised"
     else:
         # 'Fall Through' (default) — silent: existing role-based
         # workflow takes over. No fields stamped.
         _clear_chain_fields(doc)
+
+
+# ── Phase 3: Workflow chain gate ──
+# Runs as a `validate` hook (NOT before_save — the resolver above runs
+# at before_save AND must complete before the gate fires, otherwise
+# the gate would see stale chain data on the first save with a new
+# rule). Frappe lifecycle: before_save → validate → before_submit.
+#
+# Mapping chain level → workflow transition:
+#   L1 = Draft → Authorised        (Jithin's "dept head authorize" ask)
+#   L2 = Authorised → Approved L1  (optional secondary pre-Finance)
+#   L3 = Approved L1 → Approved L2 (rarely used at this layer)
+# Finance Manager / GM / Finance Controller gates above stay as-is.
+def validate_workflow_actor(doc, method=None):
+    """Block workflow state transitions when the current session user
+    isn't the resolved chain approver for that level.
+
+    Skipped entirely when:
+      - No chain stamped (Fall Through rule or no rule matched)
+      - State isn't changing on this save (e.g. plain edit of Draft)
+      - Administrator is the actor (always allowed for ops/recovery)
+    """
+    if frappe.session.user == "Administrator":
+        return
+    if not doc.get("custom_approval_chain"):
+        return  # no chain → existing role gate handles it
+
+    # What state is this save trying to move to?
+    new_state = doc.get("workflow_state")
+    old_state = (
+        frappe.db.get_value("Payment Request Form", doc.name, "workflow_state")
+        if (doc.name and not doc.is_new())
+        else None
+    )
+    if new_state == old_state:
+        return  # nothing changed — let other hooks decide
+
+    target_level = _workflow_state_to_chain_level(new_state)
+    if target_level is None:
+        return  # transition not chain-gated (Release / Reject / Hold etc.)
+
+    chain = json.loads(doc.custom_approval_chain or "[]")
+    entry = next((e for e in chain if int(e.get("level") or 0) == target_level), None)
+    if not entry:
+        return  # chain doesn't define this level — no override
+
+    actor = frappe.session.user
+    if not _entry_allows(entry, actor):
+        expected = entry.get("user") if entry.get("type") == "User" else f"members of role '{entry.get('role')}'"
+        frappe.throw(
+            _(
+                "You are not the resolved L{lvl} approver for this PRF "
+                "(matched rule '{rule}'). Expected: {expected}. "
+                "Got: {actor}."
+            ).format(
+                lvl=target_level,
+                rule=doc.get("custom_approval_rule") or "?",
+                expected=expected,
+                actor=actor,
+            ),
+            frappe.PermissionError,
+        )
+
+    # Stamp this level as signed so the chain reflects history.
+    from frappe.utils import now_datetime
+    entry["signed_on"] = str(now_datetime())
+    entry["signed_by"] = actor
+    doc.custom_approval_chain = json.dumps(chain, default=str)
+    doc.custom_current_approval_level = _first_unsigned_level(chain)
+
+
+_STATE_TO_CHAIN_LEVEL = {
+    "Authorised": 1,           # chain L1 signs to authorize
+    "Approved Level 1": 2,     # chain L2 signs to advance
+    "Approved Level 2": 3,     # chain L3 signs to advance
+}
+
+
+def _workflow_state_to_chain_level(state):
+    return _STATE_TO_CHAIN_LEVEL.get(state)
+
+
+def _entry_allows(entry, user):
+    if entry.get("type") == "User":
+        return entry.get("user") == user
+    if entry.get("type") == "Role":
+        return entry.get("role") in frappe.get_roles(user)
+    return False
 
 
 # ── Whitelisted preview for the rule's "Test against a PRF" button ──

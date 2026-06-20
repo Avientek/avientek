@@ -469,8 +469,20 @@ doc_events = {
         # custom_current_approval_level. Idempotent. No rule match =
         # silent fall-through (existing role-based workflow stays in
         # charge — zero breakage). Workflow gating on the resolved
-        # chain ships in Phase 3.
+        # chain runs at validate (Phase 3) — see validate hook below.
         "before_save": "avientek.events.payment_request_form.resolve_approval_chain",
+        # Phase 3: gate workflow state transitions on the resolved
+        # chain. Skipped when no rule matched (Fall Through) or when
+        # the state isn't changing on this save. Throws
+        # frappe.PermissionError when session.user isn't the resolved
+        # approver for the target level. Maps:
+        #   Authorised        -> chain L1 (dept head authorize)
+        #   Approved Level 1  -> chain L2
+        #   Approved Level 2  -> chain L3
+        # Finance Manager / GM / Finance Controller transitions above
+        # stay gated by their existing roles — chain ADDs a narrower
+        # check on top.
+        "validate": "avientek.events.payment_request_form.validate_workflow_actor",
         # Sridhar/Rahul 2026-06-10: when the PRF workflow has
         # custom_enable_confirmation=1, the JS custom Revise dialog
         # auto-skips itself so the user only sees the generic

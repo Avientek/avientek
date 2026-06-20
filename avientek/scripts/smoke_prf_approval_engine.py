@@ -275,6 +275,94 @@ def execute():
                            f"chain_len={len(chain)} first_user={chain[0].get('user') if chain else '-'}"))
     print()
 
+    # ── Phase 3 tests: workflow chain gate ──
+    from avientek.events.payment_request_form import (
+        validate_workflow_actor,
+        _workflow_state_to_chain_level,
+        _entry_allows,
+    )
+
+    # ── Test 12: state→level mapping ──
+    print("Test 12: workflow state → chain level mapping")
+    results.append(_assert("Authorised → L1", _workflow_state_to_chain_level("Authorised") == 1))
+    results.append(_assert("Approved Level 1 → L2", _workflow_state_to_chain_level("Approved Level 1") == 2))
+    results.append(_assert("Approved Level 2 → L3", _workflow_state_to_chain_level("Approved Level 2") == 3))
+    results.append(_assert("Released → None (not chain-gated)",
+                           _workflow_state_to_chain_level("Released") is None))
+    print()
+
+    # ── Test 13: _entry_allows for User type ──
+    print("Test 13: _entry_allows — User type matching")
+    entry_user = {"type": "User", "user": "accounts.india1@avientek.com"}
+    results.append(_assert("matching user allowed",
+                           _entry_allows(entry_user, "accounts.india1@avientek.com")))
+    results.append(_assert("non-matching user blocked",
+                           not _entry_allows(entry_user, "someone-else@x.com")))
+    print()
+
+    # ── Test 14: _entry_allows for Role type ──
+    print("Test 14: _entry_allows — Role type matching")
+    entry_role = {"type": "Role", "role": "System Manager"}
+    results.append(_assert("Administrator has System Manager",
+                           _entry_allows(entry_role, "Administrator")))
+    print()
+
+    # ── Test 15: validate_workflow_actor — Fall Through (no chain) → no-op ──
+    print("Test 15: validate_workflow_actor — no chain → no-op (zero breakage)")
+    doc = frappe.get_doc("Payment Request Form", "AVLTD-01606")
+    doc.custom_approval_chain = None
+    doc.workflow_state = "Authorised"  # would normally trip gate
+    threw = False
+    try:
+        validate_workflow_actor(doc)
+    except Exception:
+        threw = True
+    results.append(_assert("no chain → no throw (fall through)", not threw))
+    print()
+
+    # ── Test 16: Administrator bypass ──
+    print("Test 16: Administrator bypass — always allowed (ops recovery)")
+    doc = frappe.get_doc("Payment Request Form", "AVLTD-01606")
+    doc.custom_approval_chain = json.dumps([
+        {"level": 1, "type": "User", "user": "someone-else@x.com",
+         "signed_on": None, "signed_by": None},
+    ])
+    doc.workflow_state = "Authorised"
+    # frappe.session.user is "Administrator" in bench execute context
+    threw = False
+    try:
+        validate_workflow_actor(doc)
+    except Exception:
+        threw = True
+    results.append(_assert("Administrator passes regardless of chain", not threw))
+    print()
+
+    # ── Test 17: Auto-Approve advances workflow_state to Authorised ──
+    print("Test 17: Auto-Approve policy advances workflow_state in resolver")
+    rule3 = frappe.db.get_value("PRF Approval Rule", {"rule_name": "AVWLL Catch-all"})
+    r3 = frappe.get_doc("PRF Approval Rule", rule3)
+    r3.approval_chain[1].min_amount_for_level = 999999  # force L2 skip
+    r3.save(ignore_permissions=True)
+    frappe.db.commit()
+    avwll_prfs = frappe.get_all("Payment Request Form",
+                                 filters={"company": "Avientek Trading W.L.L"},
+                                 fields=["name"], limit_page_length=1)
+    if avwll_prfs:
+        doc = frappe.get_doc("Payment Request Form", avwll_prfs[0].name)
+        doc.owner = "accounts@avientek.com"
+        doc.total_outstanding_amount = 100
+        doc.workflow_state = "Draft"  # reset
+        resolve_approval_chain(doc)
+        results.append(_assert("workflow_state advanced to Authorised",
+                               doc.workflow_state == "Authorised",
+                               f"got={doc.workflow_state}"))
+    # Restore
+    r3 = frappe.get_doc("PRF Approval Rule", rule3)
+    r3.approval_chain[1].min_amount_for_level = 0
+    r3.save(ignore_permissions=True)
+    frappe.db.commit()
+    print()
+
     # ── Summary ──
     print("=" * 70)
     passed = sum(1 for r in results if r)
