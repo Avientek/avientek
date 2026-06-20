@@ -180,6 +180,51 @@ var _RD_NUMERIC_TYPES = {
 	"Currency": 1, "Float": 1, "Int": 1, "Percent": 1, "Long Int": 1,
 };
 
+// Jithin 2026-06-20: rich-text Frappe fieldtypes whose stored content
+// is HTML (Quill / TinyMCE). When exported as-is, Excel shows the raw
+// markup ('<div class="ql-editor read-mode"><p>...</p></div>') instead
+// of the readable text. Always strip these regardless of detected
+// pattern. NOTE: 'Code' deliberately NOT here — source preservation
+// matters there.
+var _RD_RICH_TEXT_TYPES = {
+	"Text Editor": 1,
+	"HTML Editor": 1,
+	"Markdown Editor": 1,
+};
+
+// Block-level closing tags that should become line breaks so the
+// stripped text preserves the structure the user typed (e.g. one
+// <p> per serial number → one line per serial number).
+var _RD_BLOCK_CLOSE_RE = /<\/(p|div|li|h[1-6]|tr)>/gi;
+var _RD_BR_RE = /<br\s*\/?>/gi;
+var _RD_HAS_TAG_RE = /<[a-zA-Z][^>]*>/;
+
+/**
+ * Strip HTML tags from a string value for export. Replaces block-level
+ * closing tags with newlines first so structure (one paragraph per
+ * line) survives; everything else is collapsed to text via DOM
+ * textContent (which also unescapes &amp; / &lt; etc.).
+ *
+ * Returns the raw value unchanged when:
+ *   - input isn't a non-empty string
+ *   - input has no '<' character (fast path)
+ *   - ftype isn't a rich-text type AND no HTML tag pattern is detected
+ *     (defensive: catches Description-style fields typed Small Text /
+ *     Long Text / Data that nevertheless hold Quill HTML)
+ */
+function _rd_maybe_strip_html(raw, ftype) {
+	if (typeof raw !== "string" || !raw) return raw;
+	if (raw.indexOf("<") === -1) return raw;
+	var has_tag = _RD_HAS_TAG_RE.test(raw);
+	if (!_RD_RICH_TEXT_TYPES[ftype] && !has_tag) return raw;
+
+	var s = raw.replace(_RD_BLOCK_CLOSE_RE, "\n").replace(_RD_BR_RE, "\n");
+	var tmp = document.createElement("div");
+	tmp.innerHTML = s;
+	var text = tmp.textContent || tmp.innerText || "";
+	return text.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+/g, " ").trim();
+}
+
 function _rd_coerce_value(raw, ftype) {
 	if (raw == null || raw === "") return "";
 	if (_RD_NUMERIC_TYPES[ftype]) {
@@ -192,7 +237,7 @@ function _rd_coerce_value(raw, ftype) {
 		var n = parseFloat(s);
 		return isNaN(n) ? "" : n;
 	}
-	return String(raw);
+	return _rd_maybe_strip_html(String(raw), ftype);
 }
 
 
