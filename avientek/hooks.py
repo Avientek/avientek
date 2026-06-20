@@ -462,6 +462,15 @@ doc_events = {
         "on_cancel": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
     },
     "Payment Request Form": {
+        # Jithin Avientek 2026-06-19 (Phase 2 of PRF authorization
+        # rewrite): match the PRF against active PRF Approval Rule
+        # masters and stamp the resolved approval chain on
+        # custom_approval_rule / custom_approval_chain (JSON) /
+        # custom_current_approval_level. Idempotent. No rule match =
+        # silent fall-through (existing role-based workflow stays in
+        # charge — zero breakage). Workflow gating on the resolved
+        # chain ships in Phase 3.
+        "before_save": "avientek.events.payment_request_form.resolve_approval_chain",
         # Sridhar/Rahul 2026-06-10: when the PRF workflow has
         # custom_enable_confirmation=1, the JS custom Revise dialog
         # auto-skips itself so the user only sees the generic
