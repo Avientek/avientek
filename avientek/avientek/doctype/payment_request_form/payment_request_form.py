@@ -618,49 +618,77 @@ def _build_brand_summary_html(quotation_name):
 		# No matching column → render as standalone key/value pair below
 		standalone_totals.append(t)
 
-	thead_html = "".join(
-		f'<th style="background:#c9daf8;padding:4px 6px;border:1px solid #000;font-size:7.5pt;">'
-		f'{frappe.utils.escape_html(c["label"])}</th>'
-		for c in columns
-	)
-	tbody_rows = []
-	for r in rows:
-		tds = []
-		for c in columns:
+	def _render_one_table(cols_subset):
+		"""Render one <table> for the given column subset. Reuses
+		the closure's `rows`, `totals_by_column`, `_fmt`. Returns the
+		raw HTML for the table element."""
+		thead = "".join(
+			f'<th style="background:#c9daf8;padding:4px 6px;border:1px solid #000;font-size:7.5pt;">'
+			f'{frappe.utils.escape_html(c["label"])}</th>'
+			for c in cols_subset
+		)
+		tbody = []
+		for r in rows:
+			tds = []
+			for c in cols_subset:
+				ft = c["fieldtype"]
+				align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
+				tds.append(
+					f'<td style="border:1px solid #000;padding:2px 4px;font-size:7.5pt;text-align:{align};">'
+					f'{_fmt(r.get(c["fieldname"]), ft, with_symbol=False)}</td>'
+				)
+			tbody.append(f'<tr>{"".join(tds)}</tr>')
+		footer_tds = []
+		for i, c in enumerate(cols_subset):
+			fn = c["fieldname"]
 			ft = c["fieldtype"]
 			align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
-			tds.append(
-				f'<td style="border:1px solid #000;padding:2px 4px;font-size:7.5pt;text-align:{align};">'
-				f'{_fmt(r.get(c["fieldname"]), ft, with_symbol=False)}</td>'
+			base_style = (
+				"border:1px solid #000;padding:2px 4px;font-size:7.5pt;"
+				"background:#e8e8e8;font-weight:600;"
 			)
-		tbody_rows.append(f'<tr>{"".join(tds)}</tr>')
-	tbody_html = "".join(tbody_rows)
-
-	# Footer row — column-aligned totals. First column gets a "TOTAL"
-	# label; remaining columns either render the matched total or stay
-	# blank. Background tinted so the row reads as a totals strip.
-	footer_tds = []
-	for i, c in enumerate(columns):
-		fn = c["fieldname"]
-		ft = c["fieldtype"]
-		align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
-		base_style = (
-			"border:1px solid #000;padding:2px 4px;font-size:7.5pt;"
-			"background:#e8e8e8;font-weight:600;"
+			if i == 0:
+				footer_tds.append(
+					f'<td style="{base_style}text-align:left;">{frappe.utils.escape_html(_("TOTAL"))}</td>'
+				)
+			elif fn in totals_by_column:
+				t = totals_by_column[fn]
+				val_str = _fmt(t["value"], t["fieldtype"])
+				footer_tds.append(
+					f'<td style="{base_style}text-align:{align};">{val_str}</td>'
+				)
+			else:
+				footer_tds.append(f'<td style="{base_style}"></td>')
+		footer = f'<tr>{"".join(footer_tds)}</tr>'
+		return (
+			f'<table style="border-collapse:collapse;width:100%;table-layout:auto;">'
+			f'<thead><tr>{thead}</tr></thead>'
+			f'<tbody>{"".join(tbody)}{footer}</tbody>'
+			f'</table>'
 		)
-		if i == 0:
-			footer_tds.append(
-				f'<td style="{base_style}text-align:left;">{frappe.utils.escape_html(_("TOTAL"))}</td>'
-			)
-		elif fn in totals_by_column:
-			t = totals_by_column[fn]
-			val_str = _fmt(t["value"], t["fieldtype"])
-			footer_tds.append(
-				f'<td style="{base_style}text-align:{align};">{val_str}</td>'
-			)
-		else:
-			footer_tds.append(f'<td style="{base_style}"></td>')
-	footer_row = f'<tr>{"".join(footer_tds)}</tr>'
+
+	# Sammish 2026-06-20 (Jithin AVFZC-02239 PDF crop): when the
+	# Brand Summary has more than _SPLIT_THRESHOLD columns, PDF can't
+	# scroll horizontally so the right edge gets chopped off. Split
+	# into two stacked tables — Brand column is repeated as the first
+	# column of each so each row reads cleanly. Threshold 10 matches
+	# what fits portrait A4 at 7.5pt + 2px 4px padding (~17mm/col
+	# usable on 190mm). 17-col case (AVFZC-02239) splits to 9 + 9
+	# (Brand + 8 metric cols each).
+	_SPLIT_THRESHOLD = 10
+	if len(columns) > _SPLIT_THRESHOLD:
+		brand_col = columns[0]
+		metric_cols = columns[1:]
+		half = (len(metric_cols) + 1) // 2
+		first_half = [brand_col] + metric_cols[:half]
+		second_half = [brand_col] + metric_cols[half:]
+		tables_html = (
+			_render_one_table(first_half)
+			+ '<div style="height:6pt;"></div>'
+			+ _render_one_table(second_half)
+		)
+	else:
+		tables_html = _render_one_table(columns)
 
 	# Standalone totals (Total Qty, Total Company Currency, etc.) that
 	# don't map to any brand-row column. Compact 2-column table below
@@ -683,26 +711,25 @@ def _build_brand_summary_html(quotation_name):
 			)
 		standalone_html += "</table>"
 
-	# Sridhar 2026-06-13 (AVFZC-02239 preview review) → user follow-up
-	# 2026-06-20 (Jithin AVFZC-02239 PDF still cropped — 17 columns
-	# vs ~11 fitting on portrait A4 even with the overflow-x wrapper):
-	# all three deferred levers now applied in one fix —
-	#   (1) padding tightened 3px 6px → 2px 4px (this helper)
-	#   (2) font dropped 8.5pt → 7.5pt (this helper)
-	#   (3) both Payment Voucher print formats switched to Landscape
-	#       (payment_voucher_fast.json + payment_voucher_professional.json
-	#       + _sync_payment_voucher_formats now syncs `orientation` too)
-	# The overflow-x wrapper stays for browser preview (wkhtmltopdf
-	# ignores it but it doesn't hurt). Landscape gives ~41% more
-	# horizontal space (297mm vs 210mm usable) which combined with
-	# tighter cells lands all 17 brand columns inside the page width.
+	# Sridhar 2026-06-13 (AVFZC-02239 preview review) → Sammish
+	# 2026-06-20 evolution:
+	#   (1) padding tightened 3px 6px → 2px 4px (above)
+	#   (2) font dropped 8.5pt → 7.5pt (above)
+	#   (3) PDF auto-split: when columns > _SPLIT_THRESHOLD, the table
+	#       splits into two stacked tables both repeating the Brand
+	#       column. wkhtmltopdf can't horizontal-scroll a PDF, so a
+	#       single-table render of 17 columns was being clipped on the
+	#       right (Customs % through Margin % invisible). Split keeps
+	#       every value readable on portrait A4 without orientation
+	#       tricks — earlier @page landscape attempt (commit 7e7e31d,
+	#       reverted in b7abbef) blanked the section entirely in PDF.
+	# The overflow-x wrapper stays for browser preview as a safety
+	# net (wkhtmltopdf ignores it; browsers honor it for very narrow
+	# windows).
 	return (
 		f'<div class="quotation-brand-summary" '
 		f'style="overflow-x:auto;width:100%;display:block;">'
-		f'<table style="border-collapse:collapse;width:max-content;min-width:100%;">'
-		f'<thead><tr>{thead_html}</tr></thead>'
-		f'<tbody>{tbody_html}{footer_row}</tbody>'
-		f'</table>'
+		f'{tables_html}'
 		f'{standalone_html}'
 		f'</div>'
 	)
