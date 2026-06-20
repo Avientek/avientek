@@ -69,16 +69,50 @@ def execute():
             print(f"[sync_pv_formats] {pf_name!r}: source has empty html — skip")
             continue
 
+        # ── Page-layout attrs (Sammish 2026-06-20, AVFZC-02239 Brand
+        # Summary PDF crop): the syncer used to push only `html`, so
+        # any edit to layout-affecting fields in the source JSON would
+        # silently never reach prod. Now sync those too — gated by
+        # None so a missing key in source JSON doesn't wipe the
+        # existing DB value.
+        #
+        # NB: Print Format doctype does NOT have `orientation` or
+        # `page_size` columns (Frappe stores those in Print Settings
+        # globally, not per-format). For per-format orientation, use
+        # CSS `@page { size: A4 landscape; }` in the `css` field —
+        # wkhtmltopdf respects it. Both JSON files now ship that rule
+        # via `css` for the Brand Summary section's 17 columns.
+        LAYOUT_FIELDS = ("css", "font_size",
+                         "margin_top", "margin_bottom",
+                         "margin_left", "margin_right")
+        layout_changes = {}
+        for fld in LAYOUT_FIELDS:
+            src_val = data.get(fld)
+            if src_val is None:
+                continue
+            cur_val = frappe.db.get_value("Print Format", pf_name, fld)
+            if cur_val != src_val:
+                layout_changes[fld] = src_val
+
         existing_html = frappe.db.get_value("Print Format", pf_name, "html") or ""
-        if (_NEW_HEADER_MARKER in existing_html) and (existing_html == new_html):
+        html_in_sync = (_NEW_HEADER_MARKER in existing_html) and (existing_html == new_html)
+        if html_in_sync and not layout_changes:
             skipped_already += 1
             continue
 
-        frappe.db.set_value(
-            "Print Format", pf_name, "html", new_html, update_modified=False,
-        )
+        if not html_in_sync:
+            frappe.db.set_value(
+                "Print Format", pf_name, "html", new_html, update_modified=False,
+            )
+            print(f"[sync_pv_formats] {pf_name!r}: html refreshed from source")
+
+        for fld, val in layout_changes.items():
+            frappe.db.set_value(
+                "Print Format", pf_name, fld, val, update_modified=False,
+            )
+            print(f"[sync_pv_formats] {pf_name!r}: {fld} → {val!r}")
+
         fixed += 1
-        print(f"[sync_pv_formats] {pf_name!r}: html refreshed from source")
 
     if fixed:
         frappe.db.commit()

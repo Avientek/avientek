@@ -619,7 +619,7 @@ def _build_brand_summary_html(quotation_name):
 		standalone_totals.append(t)
 
 	thead_html = "".join(
-		f'<th style="background:#c9daf8;padding:4px 6px;border:1px solid #000;font-size:8.5pt;">'
+		f'<th style="background:#c9daf8;padding:4px 6px;border:1px solid #000;font-size:7.5pt;">'
 		f'{frappe.utils.escape_html(c["label"])}</th>'
 		for c in columns
 	)
@@ -630,7 +630,7 @@ def _build_brand_summary_html(quotation_name):
 			ft = c["fieldtype"]
 			align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
 			tds.append(
-				f'<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:{align};">'
+				f'<td style="border:1px solid #000;padding:2px 4px;font-size:7.5pt;text-align:{align};">'
 				f'{_fmt(r.get(c["fieldname"]), ft, with_symbol=False)}</td>'
 			)
 		tbody_rows.append(f'<tr>{"".join(tds)}</tr>')
@@ -645,7 +645,7 @@ def _build_brand_summary_html(quotation_name):
 		ft = c["fieldtype"]
 		align = "right" if ft in ("Currency", "Float", "Percent", "Int") else "left"
 		base_style = (
-			"border:1px solid #000;padding:3px 6px;font-size:8.5pt;"
+			"border:1px solid #000;padding:2px 4px;font-size:7.5pt;"
 			"background:#e8e8e8;font-weight:600;"
 		)
 		if i == 0:
@@ -675,29 +675,27 @@ def _build_brand_summary_html(quotation_name):
 			standalone_html += (
 				'<tr>'
 				f'<td style="border:1px solid #000;padding:3px 8px;background:#f5f5f5;'
-				f'font-weight:500;font-size:8.5pt;">'
+				f'font-weight:500;font-size:7.5pt;">'
 				f'{frappe.utils.escape_html(t["label"])}</td>'
-				f'<td style="border:1px solid #000;padding:3px 8px;font-size:8.5pt;'
+				f'<td style="border:1px solid #000;padding:3px 8px;font-size:7.5pt;'
 				f'text-align:right;min-width:120px;">{val_str}</td>'
 				'</tr>'
 			)
 		standalone_html += "</table>"
 
-	# Sridhar 2026-06-13 (AVFZC-02239 preview review): even with the
-	# currency-symbol removal, 13 columns are tight on portrait A4.
-	# Wrap the main table in an overflow-x:auto div so the browser
-	# preview gets a horizontal scrollbar within the Brand Summary
-	# section — user can scan all the way to Customs (%) without the
-	# preview being clipped. The wrapper uses `display:block` +
-	# `overflow-x:auto` + `width:100%` and the inner table uses
-	# `width:max-content` so columns size to their content rather
-	# than being squeezed.
-	#
-	# Note on PDF rendering: wkhtmltopdf ignores overflow:auto (no
-	# scrollbar in a PDF). If the printed PDF still gets cropped on
-	# the right after the Bench Update, follow-up levers are: drop
-	# padding 3px 6px → 2px 4px, drop font 8.5pt → 7.5pt, or move
-	# the PRF print format to landscape orientation.
+	# Sridhar 2026-06-13 (AVFZC-02239 preview review) → user follow-up
+	# 2026-06-20 (Jithin AVFZC-02239 PDF still cropped — 17 columns
+	# vs ~11 fitting on portrait A4 even with the overflow-x wrapper):
+	# all three deferred levers now applied in one fix —
+	#   (1) padding tightened 3px 6px → 2px 4px (this helper)
+	#   (2) font dropped 8.5pt → 7.5pt (this helper)
+	#   (3) both Payment Voucher print formats switched to Landscape
+	#       (payment_voucher_fast.json + payment_voucher_professional.json
+	#       + _sync_payment_voucher_formats now syncs `orientation` too)
+	# The overflow-x wrapper stays for browser preview (wkhtmltopdf
+	# ignores it but it doesn't hurt). Landscape gives ~41% more
+	# horizontal space (297mm vs 210mm usable) which combined with
+	# tighter cells lands all 17 brand columns inside the page width.
 	return (
 		f'<div class="quotation-brand-summary" '
 		f'style="overflow-x:auto;width:100%;display:block;">'

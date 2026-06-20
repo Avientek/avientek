@@ -27,5 +27,6 @@
  "print_format_type": "Jinja",
  "raw_printing": 0,
  "show_section_headings": 0,
- "standard": "Yes"
+ "standard": "Yes",
+ "css": "/* Sammish 2026-06-20, AVFZC-02239 Brand Summary PDF crop:\n * Print Format doctype has no orientation field; wkhtmltopdf reads\n * page orientation from CSS @page rules. Landscape A4 gives 297mm\n * usable width (vs 210mm portrait) \u2014 combined with the tighter font\n * + padding in _build_brand_summary_html, all 17 brand columns now\n * fit inside the page width.\n */\n@page {\n    size: A4 landscape;\n    margin: 8mm;\n}\n"
 }
