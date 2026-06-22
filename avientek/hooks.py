@@ -398,6 +398,15 @@ permission_query_conditions = {
     "Request for Quotation": "avientek.api.quotation_access.request_for_quotation_permission_query",
     "Opportunity": "avientek.api.quotation_access.opportunity_permission_query",
     "Customer": "avientek.api.quotation_access.customer_permission_query",
+    # Sridhar/Jithin 2026-06-22 (BRD "Enhancement Request: Visibility &
+    # Access Control Improvements", Section 1): Contact & Address inherit
+    # the Customer visibility scheme via the Dynamic Link bridge. A Sales
+    # Person user only sees Contacts/Addresses that link to at least one
+    # permitted Customer (OR semantics, multi-link friendly). Out of scope:
+    # Contacts that don't link to any Customer (Supplier/Lead/Employee only)
+    # — they pass through Frappe's default perms. Creator floor preserved.
+    "Contact": "avientek.api.contact_address_access.contact_permission_query",
+    "Address": "avientek.api.contact_address_access.address_permission_query",
     "Item": "avientek.api.quotation_access.item_permission_query",
     "Serial No": "avientek.api.quotation_access.serial_no_permission_query",
     "Item Price": "avientek.api.quotation_access.item_price_permission_query",
@@ -425,6 +434,14 @@ has_permission = {
     # link autocomplete from other forms) — list view already enforced via
     # customer_permission_query.
     "Customer": "avientek.api.quotation_access.has_permission_check",
+    # Sridhar/Jithin 2026-06-22 BRD Section 1: single-doc gate for direct
+    # URL reads — mirrors contact_permission_query / address_permission_query.
+    # Read-like ptypes only (read / select / export / print / email);
+    # create / edit / delete unchanged. Delegates to frappe.has_permission
+    # on each linked Customer so the "what makes a Customer visible"
+    # logic stays in a single place (quotation_access.customer_permission_query).
+    "Contact": "avientek.api.contact_address_access.contact_has_permission",
+    "Address": "avientek.api.contact_address_access.address_has_permission",
     "Payment Request Form": "avientek.avientek.doctype.payment_request_form.prf_permissions.has_permission",
 }
 
