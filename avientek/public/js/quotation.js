@@ -969,13 +969,25 @@ frappe.ui.form.on('Quotation', {
             });
         }
 
-        // Hide ERPNext's native "Update Items" button on Quotation.
-        // ERPNext adds this natively in versions newer than 15.95.2 —
-        // Avientek policy requires cancel+amend for submitted quote
-        // edits, so we strip the button out. Runs both immediately and
-        // again on the next tick so it catches whether ERPNext's refresh
-        // handler ran before or after ours.
+        // Sridhar/Jithin 2026-06-23 (QN-WLL-26-00159): the "Request for
+        // Update" flow puts the Quote into workflow_state "Approved for
+        // Update" so the Sales user can revise items + selling rate
+        // BEFORE re-submission. ERPNext's native "Update Items" button
+        // is exactly what's needed there.
+        //
+        // Default Avientek policy was cancel+amend for submitted quote
+        // edits → we used to blanket-strip the button. That blocked the
+        // legitimate Approved-for-Update path too — users got stuck
+        // with no edit affordance even though the workflow said
+        // "go ahead and edit".
+        //
+        // Updated rule: strip the button UNLESS the workflow has
+        // explicitly opened the doc for editing via the Approved-for-
+        // Update state. In every other submitted state (Approved,
+        // Pending L1/L2, etc.) the strip stays — cancel+amend still
+        // the policy there.
         var _strip_update_items = function () {
+            if (frm.doc.workflow_state === "Approved for Update") return;
             try { frm.remove_custom_button(__("Update Items")); } catch (e) {}
         };
         _strip_update_items();
