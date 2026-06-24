@@ -24,6 +24,16 @@ def run():
             "label": row.get("label"),
             "number_card_name": row.get("number_card_name"),
         })
+    # Sridhar ERP-TKT-32 2026-06-24: sync `roles` child table too.
+    # The Sales Team workspace was public with empty roles[] → visible
+    # to every Avientek user. TKT-32 restricts it to CS + GM-CS roles
+    # only. Frappe v15: when Workspace.roles is non-empty, the sidebar
+    # only shows the workspace to users with at least one of those
+    # roles. Other users won't see the Sales Team card at all.
+    ws.set("roles", [])
+    for row in spec.get("roles", []):
+        ws.append("roles", {"role": row.get("role")})
+
     # Jithin 2026-05-19: also sync shortcuts. Earlier sync only handled
     # number_cards + content, so the on-disk shortcuts list never reached
     # prod — leaving the workspace with too few accessible items for
@@ -48,8 +58,11 @@ def run():
     ws.flags.ignore_validate = True
     ws.save()
     frappe.db.commit()
-    print(f"  ✓ wrote {len(ws.number_cards)} number_cards + {len(ws.shortcuts)} shortcuts on Sales Team")
+    print(f"  ✓ wrote {len(ws.number_cards)} number_cards + {len(ws.shortcuts)} shortcuts + "
+          f"{len(ws.roles)} roles on Sales Team")
     for r in ws.number_cards:
         print(f"      [card] {r.number_card_name}")
     for s in ws.shortcuts:
         print(f"      [shortcut] {s.label}  →  {s.type}: {s.link_to}")
+    for rl in ws.roles:
+        print(f"      [role] {rl.role}")
