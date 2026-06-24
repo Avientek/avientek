@@ -23,7 +23,18 @@ _FIELDS = [
         "label": "Approval Chain (resolved)",
         "fieldtype": "Section Break",
         "collapsible": 1,
-        "insert_after": "is_tr_lc_payment",
+        # Sammish 2026-06-24 (Jithin PROD URGENT, Internal Transfer PRF
+        # missing Receiving Bank): the original placement
+        # `insert_after: "is_tr_lc_payment"` made this collapsible
+        # section the PARENT of cheque_date / cheque_no / receiving_bank /
+        # receiving_account / receiving_currency / receiving_amount —
+        # because Frappe Section Breaks adopt everything between them
+        # and the next break. Section starts collapsed on a new PRF →
+        # receiving fields invisible despite their own depends_on being
+        # satisfied. Moved to `insert_after: "receiving_amount"` so this
+        # section sits AFTER all receiving fields, restoring the
+        # original payment_details_section integrity.
+        "insert_after": "receiving_amount",
         "description": (
             "Auto-resolved at save by avientek.events.payment_request_form."
             "resolve_approval_chain. Read-only — configure via PRF Approval Rule masters."
