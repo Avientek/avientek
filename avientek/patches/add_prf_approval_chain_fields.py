@@ -83,4 +83,29 @@ _FIELDS = [
 def execute():
     print("[add_prf_approval_chain_fields] adding resolved-chain fields to Payment Request Form")
     create_custom_fields({"Payment Request Form": _FIELDS}, ignore_validate=True)
+
+    # Sammish 2026-06-24: create_custom_fields is idempotent — it skips
+    # UPDATING existing rows. Sites that already ran this patch with the
+    # old `insert_after: is_tr_lc_payment` (which made the section
+    # collapsible-parent the receiving fields and hid them on new IT
+    # PRFs) need an explicit set_value to heal. Re-assert on every run.
+    for spec in _FIELDS:
+        fieldname = spec.get("fieldname")
+        expected_insert_after = spec.get("insert_after")
+        if not fieldname or not expected_insert_after:
+            continue
+        cf_name = f"Payment Request Form-{fieldname}"
+        if not frappe.db.exists("Custom Field", cf_name):
+            continue
+        current = frappe.db.get_value("Custom Field", cf_name, "insert_after")
+        if current != expected_insert_after:
+            frappe.db.set_value(
+                "Custom Field", cf_name,
+                "insert_after", expected_insert_after,
+                update_modified=False,
+            )
+            print(f"[add_prf_approval_chain_fields] healed {cf_name}: "
+                  f"insert_after {current!r} → {expected_insert_after!r}")
+    frappe.db.commit()
+    frappe.clear_cache(doctype="Payment Request Form")
     print(f"[add_prf_approval_chain_fields] done — {len(_FIELDS)} fields ensured")
