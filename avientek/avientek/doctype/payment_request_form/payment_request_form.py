@@ -3588,16 +3588,21 @@ def _classify_payment_type(mode_of_payment):
 
 
 @frappe.whitelist()
-def get_supplier_payment_history(supplier, company=None, limit=50):
+def get_supplier_payment_history(supplier, company=None, limit=10):
     """
     Fetch payment history for a supplier from Payment Entry and Journal Entry.
     Returns a list of payment records with bank details, voucher info, and amounts.
+
+    Sammish 2026-06-24 (Jithin AVKSA-00404): default lowered 50 → 10 and
+    capped at 10 below — UI + PDF only ever display the latest 10 rows.
     """
     if not supplier:
         return []
 
-    # Ensure limit is an integer
-    limit = int(limit) if limit else 50
+    # Ensure limit is an integer; cap at 10 (AVKSA-00404 spec).
+    limit = int(limit) if limit else 10
+    if limit > 10:
+        limit = 10
 
     payment_history = []
 
@@ -4797,6 +4802,15 @@ def get_payment_voucher_context(docname):
         # the print view. Rasterize PDFs to images + embed images
         # directly, same pattern as prf_attachments.
         "additional_documents_print": additional_documents_print,
+        # Jithin 2026-06-24 (AVKSA-00404): Previous Payment Details on
+        # print/PDF — latest 10 supplier transactions. Same builder as
+        # the on-form HTML. Skip gracefully for non-Supplier parties so
+        # IT/Cheque PRFs don't pay the SQL cost.
+        "payment_history": (
+            get_supplier_payment_history(doc.party, doc.company, limit=10)
+            if doc.party and (doc.party_type or "").lower() == "supplier"
+            else []
+        ),
     }
 
 

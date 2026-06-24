@@ -2219,7 +2219,10 @@ frappe.ui.form.on('Payment Request Form', {
             args: {
                 supplier: frm.doc.party,
                 company: frm.doc.company,
-                limit: 50
+                // Jithin 2026-06-24 (AVKSA-00404): cap at latest 10
+                // transactions only. Previously 50 — print/PDF path
+                // already used 10, this aligns the form view.
+                limit: 10
             },
             callback: function(r) {
                 if (r.message && r.message.length > 0) {
