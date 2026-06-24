@@ -761,3 +761,76 @@ try:
 except Exception:
 	pass
 
+
+def _patch_india_compliance_round_off_accounts_signature():
+	"""Sammish 2026-06-24 (PROD URGENT, avientekv21.frappe.cloud, Sales Order
+	create broken with HTTP 500): ERPNext core's `get_round_off_applicable_accounts`
+	was updated to pass THREE positional args to the regional override:
+
+	    return get_regional_round_off_accounts(company, account_list, doc)
+
+	The india_compliance override (gst_india.overrides.transaction.
+	get_regional_round_off_accounts) on this bench still has the OLDER
+	2-arg signature:
+
+	    def get_regional_round_off_accounts(company, account_list):
+
+	Result: every Sales Order / Sales Invoice form load on an India
+	company hits a 500 with
+	    TypeError: get_regional_round_off_accounts() takes 2 positional
+	    arguments but 3 were given.
+
+	Triggered by today's Frappe Cloud deploy (ksa_compliance install also
+	bumped ERPNext to a version that uses the new 3-arg call site, but
+	india_compliance wasn't bumped in lockstep).
+
+	FIX: wrap the override to accept and discard the extra `doc` arg.
+	The 3rd arg in ERPNext's call is passed for future use (regional code
+	may need to introspect doc context); india_compliance's current
+	implementation does not need it — its 2-arg behavior remains
+	semantically correct.
+
+	Self-deactivating: introspects the current signature first. If
+	india_compliance gets bumped to a 3-arg version upstream, the patch
+	becomes a no-op (skips wrapping).
+	"""
+	try:
+		from india_compliance.gst_india.overrides import transaction as tx_mod
+	except Exception:
+		return  # india_compliance not installed — nothing to patch
+
+	import inspect
+	current = getattr(tx_mod, "get_regional_round_off_accounts", None)
+	if current is None:
+		return
+
+	try:
+		params = inspect.signature(current).parameters
+	except (TypeError, ValueError):
+		return  # builtins / C-extensions — leave alone
+
+	# Count positional-or-keyword params (not *args/**kwargs catch-alls)
+	concrete = [p for p in params.values()
+	            if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+	                          inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+	if len(concrete) >= 3:
+		return  # already 3-arg compatible — no patch needed
+
+	# Has *args catch-all? Also fine — caller's extra positional flows in.
+	if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params.values()):
+		return
+
+	_orig = current
+
+	def _wrapped(company, account_list, *args, **kwargs):
+		# Discard the extra `doc` arg (and any future additions)
+		return _orig(company, account_list)
+
+	tx_mod.get_regional_round_off_accounts = _wrapped
+
+
+try:
+	_patch_india_compliance_round_off_accounts_signature()
+except Exception:
+	pass
+
