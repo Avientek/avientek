@@ -876,3 +876,186 @@ try:
 except Exception:
 	pass
 
+
+def _patch_intercompany_return_bundle_target_warehouse():
+	"""Sammish 2026-06-25 (PROD URGENT, DN-FZCO-26-00872): intercompany return DN
+	submit blows up with
+
+	    pymysql.err.IntegrityError: (1048, "Column 'incoming_rate' cannot be null")
+
+	Trigger
+	-------
+	Avientek tags intercompany customers with ``is_internal_customer=1`` but does
+	NOT populate ``target_warehouse`` on the original DN items — single-company
+	warehouse routing, not the full ERPNext intercompany flow.
+
+	On return-DN submit, ERPNext's ``make_serial_batch_bundle_for_return``
+	(``erpnext.controllers.sales_and_purchase_return``, around L1162-1164) does:
+
+	    if parent_doc.get("is_internal_customer"):
+	        warehouse = child_doc.get("target_warehouse")   # ← becomes None
+	        type_of_transaction = "Outward"
+
+	With ``warehouse=None``, the SerialBatchCreation auto-discovery finds zero
+	available batches → ``doc.entries`` stays empty → the SABB builder bails
+	with ``return frappe._dict({})``. Back in
+	``stock_controller.make_bundle_for_non_rejected_qty`` (L411-414):
+
+	    row.db_set("incoming_rate",
+	               frappe.db.get_value("Serial and Batch Bundle", bundle, "avg_rate"))
+
+	→ ``bundle`` is ``None`` → ``get_value`` returns ``None`` → MariaDB rejects
+	the UPDATE because ``Delivery Note Item.incoming_rate`` is ``NOT NULL``.
+
+	Fix
+	---
+	Belt + braces:
+
+	(A) Replace ``make_serial_batch_bundle_for_return`` with a version that only
+	    flips ``warehouse`` to ``target_warehouse`` when it is actually set.
+	    With Avientek's intercompany data shape, the source warehouse +
+	    default Inward direction is the right answer (return adds stock
+	    back to the shipping warehouse).
+
+	(B) Replace ``StockController.make_bundle_for_non_rejected_qty`` with a
+	    version that defensively skips the ``incoming_rate`` overwrite when
+	    ``bundle`` is falsy or the bundle's ``avg_rate`` is ``None``. The
+	    existing ``incoming_rate`` (populated when the return was drafted from
+	    the original DN's batch valuation) is the correct fallback — better
+	    than crashing the submit.
+
+	Forward-compat: if upstream ERPNext ever guards these cases too, both
+	replacements remain semantically identical to the new core behavior.
+	"""
+	try:
+		from erpnext.controllers import sales_and_purchase_return as spr_mod
+		from erpnext.controllers import stock_controller as sc_mod
+		from erpnext.controllers.stock_controller import StockController
+	except Exception:
+		return
+
+	import frappe
+	from frappe import _
+
+	# --- (A) Patched make_serial_batch_bundle_for_return ---------------------
+	def _patched_make_serial_batch_bundle_for_return(
+		data, child_doc, parent_doc, warehouse_field=None, qty_field=None
+	):
+		from erpnext.stock.serial_batch_bundle import SerialBatchCreation
+
+		type_of_transaction = "Outward"
+		if parent_doc.doctype in ["Sales Invoice", "Delivery Note", "POS Invoice"]:
+			type_of_transaction = "Inward"
+
+		if not warehouse_field:
+			warehouse_field = "warehouse"
+
+		if not qty_field:
+			qty_field = "stock_qty"
+
+		if not hasattr(child_doc, qty_field):
+			qty_field = "qty"
+
+		warehouse = child_doc.get(warehouse_field)
+		# Avientek 2026-06-25: only flip to target_warehouse when it is actually
+		# set. The standard ERPNext branch assumes the full intercompany flow
+		# populated target_warehouse on the originating DN, which Avientek does
+		# not do. Leaving warehouse=None here breaks SABB creation downstream.
+		target_wh = child_doc.get("target_warehouse")
+		if parent_doc.get("is_internal_customer") and target_wh:
+			warehouse = target_wh
+			type_of_transaction = "Outward"
+
+		if not child_doc.get(qty_field):
+			frappe.throw(
+				_("For the {0}, the quantity is required to make the return entry").format(
+					frappe.bold(child_doc.item_code)
+				)
+			)
+
+		cls_obj = SerialBatchCreation(
+			{
+				"type_of_transaction": type_of_transaction,
+				"item_code": child_doc.item_code,
+				"warehouse": warehouse,
+				"serial_nos": data.get("serial_nos"),
+				"batches": data.get("batches"),
+				"serial_nos_valuation": data.get("serial_nos_valuation"),
+				"batches_valuation": data.get("batches_valuation"),
+				"posting_date": parent_doc.posting_date,
+				"posting_time": parent_doc.posting_time,
+				"voucher_type": parent_doc.doctype,
+				"voucher_no": parent_doc.name,
+				"voucher_detail_no": child_doc.name,
+				"qty": child_doc.get(qty_field),
+				"company": parent_doc.company,
+				"do_not_submit": True,
+			}
+		).make_serial_and_batch_bundle()
+
+		return cls_obj.name
+
+	spr_mod.make_serial_batch_bundle_for_return = _patched_make_serial_batch_bundle_for_return
+	# stock_controller.py uses `from ... import make_serial_batch_bundle_for_return`
+	# at module load → it holds its own binding to the original. Update it too.
+	sc_mod.make_serial_batch_bundle_for_return = _patched_make_serial_batch_bundle_for_return
+
+	# --- (B) Patched StockController.make_bundle_for_non_rejected_qty --------
+	def _patched_make_bundle_for_non_rejected_qty(self, table_name):
+		# Re-read the names through the module so the patched (A) is used.
+		from erpnext.controllers.sales_and_purchase_return import (
+			available_serial_batch_for_return,
+			filter_serial_batches,
+		)
+
+		field, reference_ids = self.get_reference_ids(table_name)
+		if not reference_ids:
+			return
+
+		child_doctype = self.doctype + " Item"
+		if table_name == "packed_items":
+			field = "parent_detail_docname"
+			child_doctype = "Packed Item"
+
+		available_dict = available_serial_batch_for_return(field, child_doctype, reference_ids)
+
+		for row in self.get(table_name):
+			value = row.get(field)
+			if table_name == "packed_items" and row.get("parent_detail_docname"):
+				value = self.get_value_for_packed_item(row)
+				if not value:
+					continue
+
+			if data := available_dict.get(value):
+				data = filter_serial_batches(self, data, row)
+				bundle = spr_mod.make_serial_batch_bundle_for_return(data, row, self)
+				row.db_set(
+					{
+						"serial_and_batch_bundle": bundle,
+						"batch_no": "",
+						"serial_no": "",
+					}
+				)
+
+				if self.doctype in ["Sales Invoice", "Delivery Note"]:
+					# Avientek 2026-06-25: skip the overwrite when bundle is
+					# falsy or its avg_rate is None — keep the existing
+					# incoming_rate set when the return was drafted. Better
+					# than crashing the submit with an IntegrityError.
+					if bundle:
+						new_ir = frappe.db.get_value(
+							"Serial and Batch Bundle", bundle, "avg_rate"
+						)
+						if new_ir is not None:
+							row.db_set("incoming_rate", new_ir)
+
+	StockController.make_bundle_for_non_rejected_qty = (
+		_patched_make_bundle_for_non_rejected_qty
+	)
+
+
+try:
+	_patch_intercompany_return_bundle_target_warehouse()
+except Exception:
+	pass
+
