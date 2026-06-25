@@ -732,6 +732,7 @@ def _patch_query_report_export_keeps_date_typed():
 		return
 
 	from frappe.utils import format_duration
+	import datetime as _dt
 
 	def _patched_format_fields(data):
 		for i, col in enumerate(data.columns):
@@ -747,11 +748,52 @@ def _patch_query_report_export_keeps_date_typed():
 					val = row.get(index) if isinstance(row, dict) else row[index]
 					if val:
 						row[index] = round(val, col.get("precision"))
-			# Date / Datetime: deliberately NOT formatted. Let make_xlsx
-			# see the raw datetime.date / datetime.datetime so it can
-			# emit a typed Excel cell with System-Settings date_format
-			# applied. Avientek users need sortable / filterable date
-			# cells in Excel exports.
+			elif col.get("fieldtype") in ("Date", "Datetime"):
+				# Sammish 2026-06-25 (Sridhar TSK-2026-00383 TC3/TC4/TC7
+				# failures on qcs-avntk-test): skip formatdate() to keep
+				# date objects typed — AND coerce stray empty-string /
+				# non-date values in this column to None so Excel's
+				# column-type inference still classifies the column as
+				# Date.
+				#
+				# Background: reports like General Ledger and Sales
+				# Register insert SUMMARY rows (Opening / Total /
+				# Closing / opening_row) as dicts that lack the
+				# posting_date key entirely. xlsxutils.build_xlsx_data
+				# falls back to `row.get(fieldname, row.get(label, ""))`
+				# → "" (empty string) → Excel writes that as a TEXT
+				# cell. Even ONE text cell in the column makes Excel's
+				# AutoFilter classify the whole column as text →
+				# Text Filters dropdown + flat string list instead of
+				# the Date Filters tree (year → month → day).
+				#
+				# Coercing "" / non-date strings to None makes openpyxl
+				# emit an empty cell (not a text cell with empty
+				# content), so the column stays cleanly typed as Date.
+				# Genuine date-strings (rare but possible from raw SQL)
+				# are left untouched so make_xlsx's coercion path can
+				# still try to parse them.
+				for row in data.result:
+					index = col.get("fieldname") if isinstance(row, dict) else i
+					if isinstance(row, dict):
+						val = row.get(index)
+					else:
+						try:
+							val = row[index]
+						except (IndexError, TypeError):
+							continue
+					# Leave real date/datetime objects alone (they're
+					# what we WANT make_xlsx to receive raw).
+					if isinstance(val, (_dt.date, _dt.datetime)):
+						continue
+					# Coerce empty/whitespace strings + None to None so
+					# the summary-row cells become empty Excel cells
+					# instead of text cells.
+					if val is None or (isinstance(val, str) and not val.strip()):
+						if isinstance(row, dict):
+							row[index] = None
+						else:
+							row[index] = None
 
 	qr_mod.format_fields = _patched_format_fields
 
