@@ -248,16 +248,40 @@ def update_eta(item):
 	frappe.db.set_value("Purchase Order Item",item.name,"eta_history_text",set_history(po_eta_history))
 
 def po_validate(doc, method):
+	"""Detect ETA changes per row and fire update_eta on changed rows.
+
+	Sammish 2026-06-26 (Rahul POLTD26-27-00128 PROD URGENT): the previous
+	implementation iterated `doc.items` by index and accessed
+	`doc_before_save.items[i]` directly. When a new line was added to the
+	PO (Rahul's case — second SO line from SO-LTD-26-27-00332), the
+	current `doc.items` length exceeded `doc_before_save.items` and the
+	loop blew up with `IndexError: list index out of range` on save.
+
+	Fix: index `doc_before_save.items` by row `name` and skip rows that
+	don't exist in the prior snapshot (newly added — no ETA history to
+	compare against). Also skip when the prior row has no eta to detect
+	a "change" against.
+	"""
 	doc_before_save = doc.get_doc_before_save()
+	if not doc_before_save:
+		return
+	if not doc.items:
+		return
 
-	if doc_before_save:
+	before_by_name = {row.name: row for row in (doc_before_save.items or []) if row.name}
 
-		if not doc.items:
-			return  
-
-		for i, item in enumerate(doc.items):
-			if item.avientek_eta and doc_before_save.items[i] and item.avientek_eta != doc_before_save.items[i].avientek_eta and item.name == doc_before_save.items[i].name:
-				update_eta(item)
+	for item in doc.items:
+		if not item.avientek_eta:
+			continue
+		before_item = before_by_name.get(item.name)
+		if not before_item:
+			# Newly inserted row — no prior eta to compare to. Treat as
+			# a first-time set, which update_eta handles via its
+			# append-or-seed branch.
+			update_eta(item)
+			continue
+		if item.avientek_eta != before_item.avientek_eta:
+			update_eta(item)
 
 
 def append_to_eta_list(avientek_eta, eta_history):
