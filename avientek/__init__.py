@@ -973,15 +973,111 @@ def _patch_intercompany_return_bundle_target_warehouse():
 				)
 			)
 
+		# Pull from the available-batches lookup first; these may be empty/missing
+		# in the is_internal_customer + target_warehouse=None case (the upstream
+		# filter_serial_batches at L1099-1105 inverts batch_qty when
+		# is_internal_customer=1 and drops anything that ends up ≤0).
+		batches = data.get("batches")
+		serial_nos = data.get("serial_nos")
+		batches_valuation = data.get("batches_valuation")
+		serial_nos_valuation = data.get("serial_nos_valuation")
+
+		# Avientek 2026-06-26 (Jithin DN-FZCO-26-00872 follow-up to 0eb826e):
+		# when the intercompany-return falls through to Inward at the source
+		# warehouse AND `data` came back with no batches / no serials,
+		# `SerialBatchCreation.set_auto_serial_batch_entries_for_inward` would
+		# call `create_batch()` to fabricate a fresh batch (next auto-name
+		# like BN17483) — which then trips
+		# `validate_returned_serial_batch_no` because the fabricated batch is
+		# not in the original DN. Fix: read the original DN row's bundle
+		# directly via `dn_detail` / `sales_invoice_item` and rebuild batches
+		# (FIFO-consume to the return qty) + serial_nos from those entries.
+		# Genuine no-batch/no-serial items pass through untouched.
+		if (
+			parent_doc.get("is_internal_customer")
+			and not target_wh
+			and parent_doc.doctype in ("Sales Invoice", "Delivery Note", "POS Invoice")
+			and not batches
+			and not serial_nos
+		):
+			from frappe.utils import flt
+			original_field = {
+				"Sales Invoice": "sales_invoice_item",
+				"Delivery Note": "dn_detail",
+				"POS Invoice": "pos_invoice_item",
+			}.get(parent_doc.doctype)
+			original_detail = child_doc.get(original_field) if original_field else None
+			if original_detail:
+				original_bundle = frappe.db.get_value(
+					"Serial and Batch Bundle",
+					{
+						"voucher_detail_no": original_detail,
+						"docstatus": 1,
+						"is_cancelled": 0,
+					},
+					"name",
+				)
+				if original_bundle:
+					original_entries = frappe.db.get_all(
+						"Serial and Batch Entry",
+						filters={"parent": original_bundle},
+						fields=["batch_no", "serial_no", "qty", "incoming_rate"],
+						order_by="idx asc",
+					)
+					original_batches = {}
+					original_batches_valuation = {}
+					original_serial_nos = []
+					original_serial_nos_valuation = {}
+					for e in original_entries:
+						if e.get("batch_no"):
+							key = e["batch_no"]
+							original_batches[key] = original_batches.get(key, 0) + abs(
+								flt(e.get("qty"))
+							)
+							original_batches_valuation[key] = flt(e.get("incoming_rate"))
+						if e.get("serial_no"):
+							original_serial_nos.append(e["serial_no"])
+							original_serial_nos_valuation[e["serial_no"]] = flt(
+								e.get("incoming_rate")
+							)
+
+					return_qty = abs(flt(child_doc.get(qty_field)))
+
+					if original_batches and return_qty > 0:
+						# FIFO-consume the original batches against the return qty so
+						# partial returns don't put more stock back than they're for.
+						capped_batches = {}
+						remaining = return_qty
+						for batch_no, available in original_batches.items():
+							if remaining <= 0:
+								break
+							take = min(flt(available), remaining)
+							if take > 0:
+								capped_batches[batch_no] = take
+								remaining -= take
+						if capped_batches:
+							batches = capped_batches
+							batches_valuation = original_batches_valuation
+
+					if original_serial_nos and return_qty > 0:
+						# Take the first N serials matching the return qty
+						capped_serials = original_serial_nos[: int(return_qty)]
+						if capped_serials:
+							serial_nos = capped_serials
+							serial_nos_valuation = {
+								sn: original_serial_nos_valuation.get(sn)
+								for sn in capped_serials
+							}
+
 		cls_obj = SerialBatchCreation(
 			{
 				"type_of_transaction": type_of_transaction,
 				"item_code": child_doc.item_code,
 				"warehouse": warehouse,
-				"serial_nos": data.get("serial_nos"),
-				"batches": data.get("batches"),
-				"serial_nos_valuation": data.get("serial_nos_valuation"),
-				"batches_valuation": data.get("batches_valuation"),
+				"serial_nos": serial_nos,
+				"batches": batches,
+				"serial_nos_valuation": serial_nos_valuation,
+				"batches_valuation": batches_valuation,
 				"posting_date": parent_doc.posting_date,
 				"posting_time": parent_doc.posting_time,
 				"voucher_type": parent_doc.doctype,
