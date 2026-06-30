@@ -95,6 +95,15 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         l2_approvers = approvers  # single-stage fallback
 
     CANCEL_COND = "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"
+    # Rahul 2026-06-30: direct (single-click) Cancel from Approved is allowed
+    # only for LOW-probability (<75%) quotes whose margin is "up to mark"
+    # (custom_auto_approve_ok == 1). High-prob / below-margin quotes still go
+    # through the L1->L2 cancellation chain (Sridhar 2026-06-01 audit rule).
+    # This previously lived in the standalone patch
+    # add_quotation_direct_cancel_from_approved.py, but that transition was
+    # wiped on every migrate because this seeder rebuilds all transitions —
+    # so the cancel option kept disappearing. Encoded here so it survives.
+    DIRECT_CANCEL_COND = CANCEL_COND + " and doc.custom_auto_approve_ok == 1"
 
     # Each entry: (state, action, next_state, role_key_or_literal, self_approval, condition).
     # role_key_or_literal is either:
@@ -140,6 +149,13 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         # transitions added below.
         ("Approved",               "Request for Update",    "Requested for update",   "creator",     1, "doc.custom_request_for_update"),
         ("Approved",               "Request Cancellation",  "Cancellation Requested", "creator",     1, "doc.custom_cancellation_check"),
+
+        # Rahul 2026-06-30: single-click Cancel from Approved for low-prob,
+        # margin-OK quotes (see DIRECT_CANCEL_COND above). High-prob quotes
+        # still use the Request Cancellation -> L1 -> L2 chain.
+        ("Approved",               "Cancel",                "Cancelled",              "creator",     1, DIRECT_CANCEL_COND),
+        ("Approved",               "Cancel",                "Cancelled",              "l1_approver", 1, DIRECT_CANCEL_COND),
+        ("Approved",               "Cancel",                "Cancelled",              "l2_approver", 1, DIRECT_CANCEL_COND),
         ("Submitted",              "Request for Update",    "Requested for update",   "creator",     1, "doc.custom_request_for_update"),
         ("Submitted",              "Request Cancellation",  "Cancellation Requested", "creator",     1, "doc.custom_cancellation_check"),
 
