@@ -420,7 +420,13 @@ def rebuild_brand_summary(doc):
     buckets = {}
 
     for it in doc.items:
-        b = it.brand or "Unbranded"
+        # Group no-brand items under a None sentinel (NOT the string
+        # "Unbranded"): the Brand Summary `brand` column is a Link to
+        # Brand, and there is no Brand named "Unbranded", so persisting
+        # that string fails link validation — which blocks saving,
+        # notably on bulk Data Import where item.brand is often empty.
+        # The sentinel is mapped back to a blank Link value on append.
+        b = it.brand or None
         if b not in buckets:
             buckets[b] = {
                 "shipping": 0, "shipping_percent": 0,
@@ -483,7 +489,7 @@ def rebuild_brand_summary(doc):
         )
 
         doc.append("custom_quotation_brand_summary", {
-            "brand":              brand,
+            "brand":              brand or "",
             "buying_price":       flt(d["buying_price"], 4),
             "shipping":           flt(d["shipping"], 4),
             "shipping_percent":   flt(d["shipping_percent"] / n, 4),

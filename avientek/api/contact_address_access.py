@@ -27,9 +27,17 @@ Q1 — Contact links to BOTH a permitted and a non-permitted Customer
      → SHOW. OR semantics, most permissive wins. (Salesperson A and
      Salesperson B both legitimately need to reach a shared contact
      of a multi-team customer.)
-Q2 — Contact linked ONLY to Supplier / Lead / Employee (no Customer)
-     → NO RESTRICTION. Our scope is the Customer permission scheme;
-     Supplier / Lead have their own perms which Frappe enforces.
+Q2 — Contact linked ONLY to Supplier (no Customer)
+     → SUPPLIER-SCOPED. (Updated 2026-06-30, Sridhar: Customer contacts
+     were correctly restricted by sales-person access, but Supplier
+     contacts/addresses were leaking to sales persons because a
+     supplier-only record has no Customer link and fell through the
+     "no Customer link → out of scope" branch.) Supplier links are now
+     scoped by the same Supplier Group User Permission the rest of the
+     app uses (`_get_user_supplier_groups`): visible only if the user
+     has a matching Supplier Group permission. A sales person with no
+     Supplier Group permission therefore cannot see supplier
+     contacts/addresses. Lead / Employee links remain out of scope.
 Q3 — Scope = READ-like operations only (read / select / export /
      print / email). Create / edit / delete unchanged.
 Q4 — Orphan Contact (zero Dynamic Link rows) → visible to creator only.
@@ -50,6 +58,7 @@ from avientek.api.quotation_access import (
 	_get_user_sales_persons,
 	_get_user_customer_groups,
 	_get_user_companies,
+	_get_user_supplier_groups,
 )
 
 
@@ -92,6 +101,29 @@ def _build_link_scoped_query(user, parenttype):
 
 	parent_table = "`tab{}`".format(parenttype)
 	user_esc = frappe.db.escape(user)
+	parenttype_esc = frappe.db.escape(parenttype)
+
+	# Supplier visibility, scoped by Supplier Group User Permission — the
+	# same mechanism the rest of the app uses (_supplier_group_permission_query).
+	# If the user has Supplier Group perms, a supplier link is permitted when
+	# the supplier's group is among them. If the user has NONE, supplier links
+	# are NEVER permitted here (so a sales person with no supplier access does
+	# not see supplier contacts/addresses — the bug Sridhar reported).
+	sg_perms = _get_user_supplier_groups(user)
+	supplier_branch = ""
+	if sg_perms:
+		sgs_sql = ", ".join(frappe.db.escape(sg) for sg in sg_perms)
+		supplier_branch = (
+			" OR EXISTS ("
+			"SELECT 1 FROM `tabDynamic Link` dl "
+			"WHERE dl.parent = {parent}.name "
+			"AND dl.parenttype = {parenttype_esc} "
+			"AND dl.link_doctype = 'Supplier' "
+			"AND dl.link_name IN ("
+			"SELECT name FROM `tabSupplier` WHERE `supplier_group` IN ({sgs})"
+			")"
+			")"
+		).format(parent=parent_table, parenttype_esc=parenttype_esc, sgs=sgs_sql)
 
 	# Note on the EXISTS shape: we use a 2-step subquery rather than
 	# an INNER JOIN. customer_permission_query returns a WHERE fragment
@@ -111,21 +143,29 @@ def _build_link_scoped_query(user, parenttype):
 		"SELECT name FROM `tabCustomer` WHERE {cust_frag}"
 		")"
 		")"
-		# (B) No Customer link at all → out of scope
-		" OR NOT EXISTS ("
+		# (A2) At least one Supplier link is permitted (by Supplier Group)
+		"{supplier_branch}"
+		# (B) No Customer AND no Supplier link → out of scope (Lead/Employee/orphan)
+		" OR (NOT EXISTS ("
 		"SELECT 1 FROM `tabDynamic Link` dl "
 		"WHERE dl.parent = {parent}.name "
 		"AND dl.parenttype = {parenttype_esc} "
 		"AND dl.link_doctype = 'Customer'"
-		")"
+		") AND NOT EXISTS ("
+		"SELECT 1 FROM `tabDynamic Link` dl "
+		"WHERE dl.parent = {parent}.name "
+		"AND dl.parenttype = {parenttype_esc} "
+		"AND dl.link_doctype = 'Supplier'"
+		"))"
 		# (C) Creator floor — always visible to the user who created it
 		" OR {parent}.owner = {user_esc}"
 		")"
 	).format(
 		parent=parent_table,
-		parenttype_esc=frappe.db.escape(parenttype),
+		parenttype_esc=parenttype_esc,
 		cust_frag=cust_frag,
 		user_esc=user_esc,
+		supplier_branch=supplier_branch,
 	)
 
 
@@ -169,26 +209,27 @@ def _has_permission_link_scoped(doc, ptype, user):
 	if doc.get("owner") == user:
 		return None
 
-	# Collect Customer Dynamic Links from the doc
+	# Collect Customer + Supplier Dynamic Links from the doc
 	links = doc.get("links") or []
+
+	def _field(l, attr):
+		return l.get(attr) if isinstance(l, dict) else getattr(l, attr, None)
+
 	customer_link_names = [
-		(l.get("link_name") if isinstance(l, dict) else getattr(l, "link_name", None))
-		for l in links
-		if (
-			(l.get("link_doctype") if isinstance(l, dict) else getattr(l, "link_doctype", None))
-			== "Customer"
-		)
+		_field(l, "link_name") for l in links
+		if _field(l, "link_doctype") == "Customer" and _field(l, "link_name")
 	]
-	customer_link_names = [name for name in customer_link_names if name]
+	supplier_link_names = [
+		_field(l, "link_name") for l in links
+		if _field(l, "link_doctype") == "Supplier" and _field(l, "link_name")
+	]
 
-	if not customer_link_names:
-		return None  # No Customer link → out of scope (Q2)
+	if not customer_link_names and not supplier_link_names:
+		return None  # No Customer or Supplier link → out of scope (Q2: Lead/Employee/orphan)
 
-	# OR semantics — if user can see AT LEAST ONE linked Customer, allow.
-	# Delegating to frappe.has_permission keeps a single source of
-	# truth for "what makes a Customer visible". When the Customer
-	# permission scheme is extended in quotation_access.py, Contact /
-	# Address automatically inherit.
+	# (A) Customer OR semantics — if user can see AT LEAST ONE linked
+	# Customer, allow. Delegating to frappe.has_permission keeps a single
+	# source of truth for "what makes a Customer visible".
 	for cust_name in customer_link_names:
 		try:
 			if frappe.has_permission("Customer", doc=cust_name, user=user, ptype="read"):
@@ -198,7 +239,20 @@ def _has_permission_link_scoped(doc, ptype, user):
 			# out of a Contact that has other valid links.
 			continue
 
-	# No linked Customer is permitted → hide
+	# (A2) Supplier OR semantics — scoped by Supplier Group User Permission
+	# (mirrors the list-query SQL). A user with no Supplier Group perms sees
+	# no supplier-linked records (Sridhar 2026-06-30).
+	sg_perms = set(_get_user_supplier_groups(user))
+	if supplier_link_names and sg_perms:
+		for sup_name in supplier_link_names:
+			try:
+				sg = frappe.db.get_value("Supplier", sup_name, "supplier_group")
+				if sg and sg in sg_perms:
+					return None  # At least one permitted supplier
+			except Exception:
+				continue
+
+	# No permitted Customer and no permitted Supplier → hide
 	return False
 
 

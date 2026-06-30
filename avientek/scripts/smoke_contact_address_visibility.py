@@ -183,12 +183,50 @@ def execute():
 				f"got={r}",
 			))
 
-		# T8: no Customer link at all (only Supplier)
-		doc = _mk([{"link_doctype": "Supplier", "link_name": "ANY-SUPPLIER"}])
+		# T8: Supplier-only contact — scoped by Supplier Group perms now
+		# (Sridhar 2026-06-30). A sales user WITHOUT supplier-group perms
+		# must NOT see supplier contacts (the reported bug). A user WITH a
+		# matching supplier-group perm should still see them.
+		from avientek.api.quotation_access import _get_user_supplier_groups
+		sg_perms = _get_user_supplier_groups(sales_user)
+		if not sg_perms:
+			doc = _mk([{"link_doctype": "Supplier", "link_name": "ANY-SUPPLIER"}])
+			r = contact_has_permission(doc, ptype="read", user=sales_user)
+			results.append(_assert(
+				"T8  Contact→Supplier only, user has NO supplier perms → denied (False)",
+				r is False, f"got={r}",
+			))
+		else:
+			# Find a supplier inside the user's permitted groups (allowed)
+			# and one outside (denied).
+			permitted_sup = frappe.db.sql_list(
+				"SELECT name FROM `tabSupplier` WHERE supplier_group IN ({}) LIMIT 1".format(
+					", ".join(frappe.db.escape(g) for g in sg_perms)
+				)
+			)
+			if permitted_sup:
+				doc = _mk([{"link_doctype": "Supplier", "link_name": permitted_sup[0]}])
+				r = contact_has_permission(doc, ptype="read", user=sales_user)
+				results.append(_assert(
+					"T8  Contact→permitted Supplier → allowed (None)", r is None, f"got={r}",
+				))
+			outside_sup = frappe.db.sql_list(
+				"SELECT name FROM `tabSupplier` WHERE supplier_group NOT IN ({}) LIMIT 1".format(
+					", ".join(frappe.db.escape(g) for g in sg_perms)
+				)
+			)
+			if outside_sup:
+				doc = _mk([{"link_doctype": "Supplier", "link_name": outside_sup[0]}])
+				r = contact_has_permission(doc, ptype="read", user=sales_user)
+				results.append(_assert(
+					"T8b Contact→non-permitted Supplier → denied (False)", r is False, f"got={r}",
+				))
+
+		# T8c: orphan contact (no links at all) → out of scope → allowed
+		doc = _mk([])
 		r = contact_has_permission(doc, ptype="read", user=sales_user)
 		results.append(_assert(
-			"T8  Contact→Supplier only (no Customer link) → allowed (out of scope)",
-			r is None, f"got={r}",
+			"T8c Contact→no links at all → allowed (out of scope)", r is None, f"got={r}",
 		))
 
 		# T9: ptype='write' should defer

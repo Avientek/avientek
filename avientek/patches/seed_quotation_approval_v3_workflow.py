@@ -155,6 +155,15 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         # team wants to clear out rejected quotes by Cancel + Delete.
         ("Rejected",               "Cancel",                "Cancelled",              "All",         1, ""),
 
+        # Sridhar 2026-06-30: after a hard Reject there was NO way for the
+        # creator to send the quote back for re-approval — Rejected was a
+        # dead end (only Cancel). Sridhar added this transition manually in
+        # the live UI, but the V3 workflow is re-seeded from THIS file on
+        # every migrate, so the manual edit would be wiped on the next site
+        # update. Encoding it here makes it survive. Mirrors the existing
+        # "Sent for Revision -> Send for Approval -> Pending L1" path.
+        ("Rejected",               "Send for Approval",     "Pending L1 Approval",   "creator",     1, ""),
+
         # L1 approver decides on the user's REQUEST FOR UPDATE — this
         # is just permission to edit, single-stage approval is enough
         # (no L2 chain at this gate, the BRD's L1->L2 is for the

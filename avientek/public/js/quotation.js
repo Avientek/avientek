@@ -1558,7 +1558,11 @@ function rebuild_brand_summary_preview(frm, addl_discount) {
         let margin_pct = eff_ts ? flt((eff_ts - tc) / eff_ts * 100, 4) : 0;
 
         let row = frm.add_child("custom_quotation_brand_summary");
-        row.brand            = brand;
+        // "Unbranded" is a grouping label, not a real Brand record. The
+        // brand column is a Link to Brand, so write a blank link for the
+        // no-brand bucket (mirrors server rebuild_brand_summary) — else
+        // the form fails link validation and the quote cannot be saved.
+        row.brand            = (brand === "Unbranded") ? "" : brand;
         row.buying_price     = flt(d.buying, 4);
         row.shipping         = flt(d.shipping, 4);
         row.shipping_percent = flt(d.shipping_pct / n, 4);
