@@ -1,5 +1,31 @@
 import frappe
 import json
+from frappe import _
+
+
+def validate_payment_terms_mandatory(doc, method=None):
+	"""Block submit of Sales Order / Sales Invoice without Payment Terms.
+
+	Rahul 2026-06-30: Payment Terms must be mandatory on SO & Invoice.
+	Enforced at SUBMIT time (not save) so drafts and data-imports can still
+	be saved, and intercompany / internal auto-created documents are exempt
+	so the intercompany SO/PO/SI makers don't break (those are generated
+	without terms by ERPNext).
+
+	Accepts either a Payment Terms Template or manually-entered Payment
+	Schedule rows.
+	"""
+	# Exempt intercompany / internal documents (auto-created without terms).
+	if doc.get("is_internal_customer"):
+		return
+	if doc.get("inter_company_order_reference") or doc.get("inter_company_invoice_reference"):
+		return
+
+	if not (doc.get("payment_terms_template") or doc.get("payment_schedule")):
+		frappe.throw(
+			_("Payment Terms is mandatory. Please set a Payment Terms Template before submitting."),
+			title=_("Payment Terms Required"),
+		)
 
 
 def fill_missing_item_defaults(doc, method=None):
