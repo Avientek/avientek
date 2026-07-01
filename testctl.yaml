@@ -1,6 +1,6 @@
 stacks:
   frappe:
-    benchPath: /Users/sammishthundiyil/frappe-bench-qcs
-    site: avientekv21.local
+    benchPath: /Users/sammishthundiyil/frappe-bench-15-qcs
+    site: avintek.local
     apps:
       - avientek

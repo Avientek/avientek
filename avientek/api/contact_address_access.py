@@ -103,12 +103,20 @@ def _build_link_scoped_query(user, parenttype):
 	user_esc = frappe.db.escape(user)
 	parenttype_esc = frappe.db.escape(parenttype)
 
-	# Supplier visibility, scoped by Supplier Group User Permission — the
-	# same mechanism the rest of the app uses (_supplier_group_permission_query).
-	# If the user has Supplier Group perms, a supplier link is permitted when
-	# the supplier's group is among them. If the user has NONE, supplier links
-	# are NEVER permitted here (so a sales person with no supplier access does
-	# not see supplier contacts/addresses — the bug Sridhar reported).
+	# Supplier visibility. Sridhar 2026-06-30 wanted supplier contacts/addresses
+	# hidden from sales persons. But procurement/accounts users (who process PO/
+	# PR/PI) legitimately need supplier addresses and do NOT carry a Supplier
+	# Group User Permission — they have role-based Supplier read. Requiring a
+	# Supplier Group UP therefore wrongly blocked them (Rahul 2026-07-01:
+	# operations2 / accounts.india / Harsha blocked on PO & PI).
+	#
+	# The distinguisher is a Sales Person User Permission: sales-team users are
+	# who Sridhar wanted supplier details hidden from. Procurement/accounts
+	# carry a Company (not Sales Person) UP and must keep supplier access.
+	# Role-based Supplier read does NOT separate them (everyone has it).
+	#   - Supplier Group UP set        -> permit supplier links in allowed groups
+	#   - else NOT a Sales-Person user  -> permit any supplier link (procurement/accounts)
+	#   - else (Sales-Person user)      -> hide supplier links
 	sg_perms = _get_user_supplier_groups(user)
 	supplier_branch = ""
 	if sg_perms:
@@ -124,6 +132,15 @@ def _build_link_scoped_query(user, parenttype):
 			")"
 			")"
 		).format(parent=parent_table, parenttype_esc=parenttype_esc, sgs=sgs_sql)
+	elif not _get_user_sales_persons(user):
+		supplier_branch = (
+			" OR EXISTS ("
+			"SELECT 1 FROM `tabDynamic Link` dl "
+			"WHERE dl.parent = {parent}.name "
+			"AND dl.parenttype = {parenttype_esc} "
+			"AND dl.link_doctype = 'Supplier'"
+			")"
+		).format(parent=parent_table, parenttype_esc=parenttype_esc)
 
 	# Note on the EXISTS shape: we use a 2-step subquery rather than
 	# an INNER JOIN. customer_permission_query returns a WHERE fragment
@@ -239,18 +256,25 @@ def _has_permission_link_scoped(doc, ptype, user):
 			# out of a Contact that has other valid links.
 			continue
 
-	# (A2) Supplier OR semantics — scoped by Supplier Group User Permission
-	# (mirrors the list-query SQL). A user with no Supplier Group perms sees
-	# no supplier-linked records (Sridhar 2026-06-30).
-	sg_perms = set(_get_user_supplier_groups(user))
-	if supplier_link_names and sg_perms:
-		for sup_name in supplier_link_names:
-			try:
-				sg = frappe.db.get_value("Supplier", sup_name, "supplier_group")
-				if sg and sg in sg_perms:
-					return None  # At least one permitted supplier
-			except Exception:
-				continue
+	# (A2) Supplier OR semantics (mirrors the list-query SQL). The gate is a
+	# Sales Person User Permission: procurement/accounts (Company UP, no Sales
+	# Person UP) keep supplier access so they can open PO/PR/PI whose billing
+	# address is supplier-linked; sales-team users are restricted. Role-based
+	# Supplier read does NOT separate them here (Rahul 2026-07-01 regression fix;
+	# supersedes the Supplier-Group-UP-only check from 2026-06-30).
+	if supplier_link_names:
+		if not _get_user_sales_persons(user):
+			return None  # procurement/accounts/etc. may see supplier-linked
+		sg_perms = set(_get_user_supplier_groups(user))
+		if sg_perms:
+			for sup_name in supplier_link_names:
+				try:
+					sg = frappe.db.get_value("Supplier", sup_name, "supplier_group")
+					if sg and sg in sg_perms:
+						return None  # At least one permitted supplier
+				except Exception:
+					continue
+		# Sales-Person user without a matching Supplier Group → hide.
 
 	# No permitted Customer and no permitted Supplier → hide
 	return False

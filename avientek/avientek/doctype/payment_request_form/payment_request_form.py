@@ -2088,6 +2088,16 @@ def get_outstanding_reference_documents(args):
                 row["bill_no"] = voucher_no
 
             row["posting_date"] = invoice.get("posting_date")
+            # Rahul 2026-07-01 (AVFZC-02300): the reference row's Supplier
+            # Invoice Date + Due Date must come from the PURCHASE INVOICE's
+            # own fields — bill_date is the supplier's actual invoice date in
+            # ERPNext (falls back to posting_date if the PI has no bill_date),
+            # and due_date is the PI's payment due date. Previously neither
+            # was set here, so the picker surfaced the booking/posting date
+            # instead of the real supplier invoice date.
+            if voucher_type == "Purchase Invoice":
+                row["invoice_date"] = invoice.get("bill_date") or invoice.get("posting_date")
+                row["due_date"] = invoice.get("due_date")
             row["grand_total"] = invoice.get("grand_total") or invoice.get("total")
             row["invoice_amount"] = invoice.get("total") or invoice.get("grand_total")
             row["currency"] = invoice.get("currency")

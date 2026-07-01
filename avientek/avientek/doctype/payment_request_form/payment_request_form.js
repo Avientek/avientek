@@ -1239,7 +1239,7 @@ frappe.ui.form.on('Payment Request Form', {
 							c.document_reference = d.document_reference;
 						}
 						c.due_date = d.due_date;
-						c.invoice_date = d.posting_date;
+						c.invoice_date = d.invoice_date || d.posting_date;
 						c.grand_total = d.grand_total;
 						c.base_grand_total = d.base_grand_total;
 						c.outstanding_amount = d.outstanding;
@@ -1351,7 +1351,7 @@ frappe.ui.form.on('Payment Request Form', {
         // that returns {row_field: value, ...} given the fetched values}.
         const RECIPES = {
             "Purchase Invoice": {
-                fields: ["bill_no", "posting_date", "due_date", "currency",
+                fields: ["bill_no", "bill_date", "posting_date", "due_date", "currency",
                          "conversion_rate", "grand_total", "base_grand_total",
                          "outstanding_amount", "base_outstanding_amount", "is_return"],
                 mapper: function (v) {
@@ -1367,7 +1367,11 @@ frappe.ui.form.on('Payment Request Form', {
                         out.reference_name = v.bill_no;
                         out.bill_no = v.bill_no;
                     }
-                    out.invoice_date = v.posting_date || "";
+                    // Rahul 2026-07-01 (AVFZC-02300): Supplier Invoice Date
+                    // must be the PI's bill_date (the actual supplier invoice
+                    // date), not the posting/booking date. Fall back to
+                    // posting_date only if bill_date is blank.
+                    out.invoice_date = v.bill_date || v.posting_date || "";
                     out.due_date = v.due_date || "";
                     out.currency = v.currency || "";
                     out.exchange_rate = parseFloat(v.conversion_rate || 1) || 1;
