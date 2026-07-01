@@ -282,6 +282,9 @@ doctype_list_js = {
 	"Payment Entry": "public/js/report_download.js",
 	"Journal Entry": "public/js/report_download.js",
 	"Item": "public/js/report_download.js",
+	# Rahul 2026-07-01: Report Download on Item Price list (like Quotation) so
+	# users can export unlimited Item Price rows from Report View.
+	"Item Price": "public/js/report_download.js",
 }
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
