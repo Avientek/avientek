@@ -931,7 +931,14 @@ override_whitelisted_methods = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# ignore_links_on_delete = ["Communication", "ToDo"]
+# Sridhar 2026-07-02: the custom_history child table (Quotation Item History)
+# stores a Dynamic Link (document_id) to prior Quotations/SOs/Invoices as an
+# AUDIT SNAPSHOT. When a revised quote (e.g. QN-LTD-26-02379-1) snapshots the
+# original (QN-LTD-26-02216), Frappe's cancel/delete link check treats that
+# snapshot as a real dependency and blocks cancelling the original. It is not a
+# dependency — exclude Quotation Item History from the linked-doc check so the
+# original can still be cancelled/deleted.
+ignore_links_on_delete = ["Quotation Item History"]
 
 # Request Events
 # ----------------
