@@ -21,6 +21,14 @@ def validate_payment_terms_mandatory(doc, method=None):
 	if doc.get("inter_company_order_reference") or doc.get("inter_company_invoice_reference"):
 		return
 
+	# Exempt Credit Notes / Returns and POS invoices. ERPNext hides the
+	# Payment Schedule for is_return / is_pos (payment_schedule.depends_on =
+	# "!doc.is_pos && !doc.is_return"), so there is no way to add payment
+	# terms on them — and terms don't apply to a return anyway. Without this,
+	# Credit Notes (e.g. CRN-LLC-26-00058) can't be submitted. (Rahul 2026-07-02)
+	if doc.get("is_return") or doc.get("is_pos"):
+		return
+
 	if not (doc.get("payment_terms_template") or doc.get("payment_schedule")):
 		frappe.throw(
 			_("Payment Terms is mandatory. Please set a Payment Terms Template before submitting."),
