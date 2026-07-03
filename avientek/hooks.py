@@ -227,7 +227,7 @@ app_include_js = [
     # Stopgap for a Frappe-core grid selection bug on the deployed server
     # (Create → Purchase Order threw "update_selection_banner is not a
     # function"). Remove after Frappe is upgraded on the dedicated server.
-    "/assets/avientek/js/grid_selection_fix.js?v=2",
+    "/assets/avientek/js/grid_selection_fix.js?v=3",
 ]
 
 # include js, css files in header of web template
