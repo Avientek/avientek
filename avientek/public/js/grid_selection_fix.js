@@ -2,30 +2,66 @@
  * Grid selection handler fix (stopgap).
  *
  * Sridhar/Rahul 2026-07-02, SO-LTD-26-27-00387-1: "Create → Purchase Order"
- * (and any child-table checkbox selection) throws on the server currently
- * deployed to the dedicated Frappe Cloud instance:
+ * fails on the server currently deployed to the dedicated Frappe Cloud
+ * instance:
  *
  *   Uncaught TypeError: this.update_selection_banner is not a function
  *     at HTMLInputElement.<anonymous> (grid.js:221)
- *     at ...make_purchase_order (sales_order.js)
+ *     at SalesOrderController.make_purchase_order (sales_order.js:1363)
  *
- * Root cause is in FRAPPE CORE, not Avientek: on the deployed Frappe version,
- * Grid.setup_check() binds its ".grid-row-check" change handler with a plain
- * function(), so inside it `this` is the checkbox <input>, not the Grid — so
- * this.update_selection_banner() / this.refresh_remove_rows_button() don't
- * exist and the action dies. Frappe fixed this in a newer release (our local
- * bench, 15.113.1, already uses an arrow function and works).
+ * make_purchase_order builds a "Select Items" dialog and programmatically
+ * clicks the grid's select-all checkbox:
+ *     dialog.wrapper.find(".grid-heading-row .grid-row-check").click();
+ * That fires Grid.setup_check()'s ".grid-row-check" handler. On the deployed
+ * Frappe version that handler is a plain function(), so inside it `this` is the
+ * checkbox <input> (not the Grid) and this.update_selection_banner() /
+ * this.refresh_remove_rows_button() don't exist → it throws and PO creation
+ * dies. This is a FRAPPE CORE bug, fixed upstream (our local bench 15.113.1
+ * uses an arrow function and works). Not an Avientek bug.
  *
- * PROPER FIX: update Frappe/ERPNext on the dedicated server to >= 15.113.1
- * and rebuild assets. This file is a STOPGAP so PO creation works until then —
- * it re-installs setup_check with the corrected arrow-function binding (a copy
- * of the fixed core version) and guards the two method calls. REMOVE this file
- * once the server is upgraded.
+ * PROPER FIX: upgrade Frappe/ERPNext on the dedicated server to >= 15.113.1
+ * and rebuild assets, then DELETE this file. Until then this stopgap applies
+ * TWO independent safety nets:
+ *
+ *   1. Re-install Grid.prototype.setup_check with the corrected arrow-function
+ *      binding (retried until the Grid class is defined, so it can't lose the
+ *      race with app_include_js load order).
+ *   2. Add harmless no-op fallbacks for the two grid methods on
+ *      HTMLInputElement.prototype, so even if (1) doesn't match the deployed
+ *      version's internals, a mis-bound `this.update_selection_banner()` /
+ *      `this.refresh_remove_rows_button()` on an <input> can never throw.
+ *      These names are Frappe-Grid-specific; no real <input> uses them.
  */
-frappe.provide("frappe.ui.form");
 
+// ── Safety net 2: no-op fallbacks on HTMLInputElement (belt-and-suspenders) ──
 (function () {
-	if (!frappe.ui || !frappe.ui.form || !frappe.ui.form.Grid) return;
+	try {
+		["update_selection_banner", "refresh_remove_rows_button"].forEach(function (m) {
+			if (!(m in HTMLInputElement.prototype)) {
+				Object.defineProperty(HTMLInputElement.prototype, m, {
+					value: function () {},
+					writable: true,
+					configurable: true,
+					enumerable: false,
+				});
+			}
+		});
+	} catch (e) {
+		/* ignore */
+	}
+})();
+
+// ── Safety net 1: reinstall the corrected setup_check (retry for load order) ──
+(function applySetupCheckFix(attempt) {
+	attempt = attempt || 0;
+	if (!(window.frappe && frappe.ui && frappe.ui.form && frappe.ui.form.Grid)) {
+		if (attempt < 100) {
+			setTimeout(function () {
+				applySetupCheckFix(attempt + 1);
+			}, 50);
+		}
+		return;
+	}
 
 	frappe.ui.form.Grid.prototype.setup_check = function () {
 		this.wrapper.on("click", ".grid-row-check", (e) => {
@@ -35,13 +71,16 @@ frappe.provide("frappe.ui.form");
 			const docname = $check.parents(".grid-row:first")?.attr("data-name");
 
 			if (is_select_all) {
-				// (un)check all visible checkboxes
 				this.form_grid.find(".grid-row-check").prop("checked", checked);
 
-				// set following rows as checked in model
-				let result_length = this.grid_pagination.get_result_length();
-				let page_index = this.grid_pagination.page_index;
-				let page_length = this.grid_pagination.page_length;
+				let result_length =
+					this.grid_pagination && this.grid_pagination.get_result_length
+						? this.grid_pagination.get_result_length()
+						: (this.grid_rows || []).length;
+				let page_index = this.grid_pagination ? this.grid_pagination.page_index : 1;
+				let page_length = this.grid_pagination
+					? this.grid_pagination.page_length
+					: result_length;
 				for (let ri = (page_index - 1) * page_length; ri < result_length; ri++) {
 					this.grid_rows[ri]?.select(checked);
 				}
@@ -53,7 +92,6 @@ frappe.provide("frappe.ui.form");
 				this.last_checked_docname = docname;
 			}
 
-			// Guarded — these exist on current Frappe; no-op on versions that lack them.
 			if (typeof this.refresh_remove_rows_button === "function") {
 				this.refresh_remove_rows_button();
 			}
