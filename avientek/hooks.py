@@ -224,10 +224,6 @@ app_include_js = [
     "/assets/avientek/js/brand_access.js?v=11",
     "/assets/avientek/js/item_defaults_filler.js?v=3",
     "/assets/avientek/js/number_card_click_fix.js?v=1",
-    # Stopgap for a Frappe-core grid selection bug on the deployed server
-    # (Create → Purchase Order threw "update_selection_banner is not a
-    # function"). Remove after Frappe is upgraded on the dedicated server.
-    "/assets/avientek/js/grid_selection_fix.js?v=3",
 ]
 
 # include js, css files in header of web template
@@ -248,7 +244,7 @@ app_include_js = [
 doctype_js = {
 	"Quotation": "public/js/quotation.js",
 	"Purchase Order": "public/js/purchase_order.js",
-	"Sales Order" : "public/js/sales_order.js",
+	"Sales Order" : ["public/js/sales_order.js", "public/js/sales_order_po_fix.js"],
 	"Company": "public/js/send_email.js",
 	"Brand": "public/js/brand.js",
 	"Journal Entry": "public/js/journal_entry.js",
