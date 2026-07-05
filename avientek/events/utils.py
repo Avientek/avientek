@@ -69,13 +69,18 @@ def fill_missing_item_defaults(doc, method=None):
         if not src:
             continue
         if not getattr(it, "item_name", None):
-            it.item_name = src["item_name"]
+            # Fall back to item_code if the Item master itself has no
+            # item_name (some imported items, e.g. I030402, have a blank
+            # name). item_name is mandatory on the transaction row, so a
+            # blank here fails validation — e.g. the ZATCA compliance check
+            # picked I030402 and hit "Value missing for: Item Name".
+            it.item_name = src["item_name"] or it.item_code
         if not getattr(it, "uom", None):
             it.uom = src["stock_uom"]
         if not getattr(it, "stock_uom", None):
             it.stock_uom = src["stock_uom"]
         if not getattr(it, "description", None):
-            it.description = src["description"] or src["item_name"]
+            it.description = src["description"] or src["item_name"] or it.item_code
         if not getattr(it, "conversion_factor", None):
             it.conversion_factor = 1
 
