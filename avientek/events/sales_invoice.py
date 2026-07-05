@@ -17,11 +17,32 @@ def validate_item_tax_template(doc, method=None):
 
 # ── Server Script: "SI validate customer company" ──
 # DocType Event: Sales Invoice, Before Validate
+def _in_ksa_compliance_check():
+    """True when we're inside ksa_compliance's compliance-check flow.
+
+    ZATCA onboarding ("Perform Compliance Checks" / "Get Production CSID")
+    builds a THROWAWAY Sales Invoice for the ZATCA company using an
+    auto-picked customer/item that may belong to a different Avientek
+    company (e.g. simplified customer C-AETPL-00855 for the KSA company).
+    That synthetic invoice must not be blocked by our company-ownership
+    rule. Checked only when a mismatch is about to throw (rare), so no
+    cost on normal saves.
+    """
+    import inspect
+    for frame in inspect.stack(0):
+        if "ksa_compliance" in frame.filename and "compliance_checks" in frame.filename:
+            return True
+    return False
+
+
 def validate_customer_company(doc, method=None):
     """Ensure customer belongs to the same company on the invoice."""
     if doc.customer and doc.company and not doc.is_internal_customer:
         customer = frappe.get_doc("Customer", doc.customer)
         if customer.company and customer.company != doc.company:
+            # Allow ZATCA compliance-check synthetic invoices through.
+            if _in_ksa_compliance_check():
+                return
             frappe.throw(_("Customer does not belongs to company"))
 
 
