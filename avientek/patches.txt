@@ -602,3 +602,4 @@ avientek.patches.add_dn_void_fields
 # Two new DocTypes ship via fixtures, not patches: "PRF Approval Rule" +
 # "PRF Approval Rule Chain" (child).
 avientek.patches.add_prf_approval_chain_fields
+avientek.patches.backfill_blank_item_name
