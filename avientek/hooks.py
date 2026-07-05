@@ -224,6 +224,10 @@ app_include_js = [
     "/assets/avientek/js/brand_access.js?v=11",
     "/assets/avientek/js/item_defaults_filler.js?v=3",
     "/assets/avientek/js/number_card_click_fix.js?v=1",
+    # ERP-TKT-15 stopgap: force a fresh render when switching between two print
+    # documents (stale print-preview on the deployed Frappe). Remove after the
+    # Frappe upgrade on the dedicated server.
+    "/assets/avientek/js/print_refresh_fix.js?v=1",
 ]
 
 # include js, css files in header of web template
