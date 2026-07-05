@@ -376,7 +376,13 @@ def set_sales_order(sales_order, item_name, eta):
 		return True
 
 @frappe.whitelist()
-def create_notification(ref_doctype,ref_name,item):
+def create_notification(ref_doctype, ref_name=None, item=None):
+	# Guard: the JS caller (send_notification in purchase_order.js) sometimes
+	# fires with an undefined ref_name, raising "create_notification() missing
+	# 1 required positional argument: 'ref_name'" (~52x/2d in prod). Make the
+	# args optional and no-op when the reference is incomplete.
+	if not ref_doctype or not ref_name:
+		return
 	try:
 		doc = frappe.get_doc(ref_doctype,ref_name)
 		title = get_title(ref_doctype, ref_name)
