@@ -3,23 +3,30 @@ import frappe
 from frappe.email.doctype.email_template.email_template import get_email_template
 
 @frappe.whitelist()
-def get_sales_orders(company_name):
+def get_sales_orders(company_name=None):
+    # Default the arg (was required-positional) so a malformed/direct call
+    # raises a clean ValidationError instead of a raw TypeError that lands in
+    # the Error Log. Parameterise `company_name` — it was f-string'd straight
+    # into the SQL (injection risk).
+    if not company_name:
+        frappe.throw(frappe._("Company is required to fetch open sales orders."))
+
     sql_data = []
-    query = f'''
-        SELECT 
+    query = '''
+        SELECT
             c.name AS customer_name, c.email_id AS customer_mail, so.name AS sales_order_name, so.po_no, so.status,
             soi.item_code, soi.part_number, (soi.qty - soi.delivered_qty) AS qty, soi.avientek_eta as eta
-        FROM 
+        FROM
             `tabCustomer` c
-        LEFT JOIN          
+        LEFT JOIN
             `tabSales Order` so ON c.name = so.customer
         LEFT JOIN
             `tabSales Order Item` soi ON so.name = soi.parent
-        WHERE 
-            c.disabled = 0 AND so.docstatus = 1 AND so.per_delivered < 100 AND soi.delivered_qty<soi.qty AND so.company = "{company_name}"
+        WHERE
+            c.disabled = 0 AND so.docstatus = 1 AND so.per_delivered < 100 AND soi.delivered_qty<soi.qty AND so.company = %(company)s
     '''
 
-    sql_data = frappe.db.sql(query, as_dict=True)
+    sql_data = frappe.db.sql(query, {"company": company_name}, as_dict=True)
     grouped_data = {}
     for row in sql_data:
         customer_mail = row.customer_mail
