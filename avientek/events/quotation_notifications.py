@@ -263,6 +263,25 @@ def _resolve_approvers_for_quote(doc, approver_roles):
     if not candidate_users:
         return set()
 
+    # Company scope (applied up front so BOTH the sales-person match path and
+    # the no-sales-person fallback below are company-aware): drop any user
+    # whose Company User Permissions exclude this quote's company. Users with
+    # no Company UP are unaffected. (Rahul 2026-07-06: pd@ is scoped to the
+    # India company yet was resolved/shared for Free-Zone (FZCO) quotes.)
+    company = (doc.get("company") or "").strip()
+    if company:
+        def _company_ok(u):
+            ups = frappe.get_all(
+                "User Permission",
+                filters={"user": u, "allow": "Company"},
+                pluck="for_value",
+            )
+            return (not ups) or (company in ups)
+
+        candidate_users = [u for u in candidate_users if _company_ok(u)]
+        if not candidate_users:
+            return set()
+
     # Avientek Quotation has a single Custom Field `sales_person`
     # (Link). Fall through to the standard sales_team child table as
     # a secondary source if the Custom Field is blank but the table
@@ -314,7 +333,28 @@ def _resolve_approvers_for_quote(doc, approver_roles):
 def _assign_todo(doc, user, description):
     """Create an assignment ToDo on the doc for `user`. Idempotent —
     skips if an open ToDo with the same user already exists on this
-    doc (avoids spamming on every workflow save)."""
+    doc (avoids spamming on every workflow save).
+
+    DISABLED by default (Rahul, 2026-07-06 WhatsApp). The auto-assignment
+    shared the quote (Frappe grants Read to any assignee lacking permission)
+    with users whose Company User Permission *excluded* it — e.g. pd@ is
+    scoped to the India company yet got Free-Zone (FZCO) quotes shared,
+    firing the "Shared with … Read access" popup on submit and piling
+    assignees onto the doc at every workflow step. Investigation
+    (diag_approver_assign) showed every approver-role user already has
+    Quotation read via their other roles, so the per-doc share was
+    redundant AND overrode the intended company scoping. Gated behind an
+    opt-in Avientek Settings switch (`enable_quotation_assignment`);
+    absent/unset ⇒ off, so it stays reversible without a code change.
+    Email notifications (below) are unaffected."""
+    # Guard with meta.has_field first (cached, no throw) — get_single_value
+    # raises if the field doesn't exist, and this opt-in field isn't deployed
+    # yet. Absent field OR unset/"0" ⇒ assignment disabled.
+    if not frappe.get_meta("Avientek Settings").has_field("enable_quotation_assignment"):
+        return
+    enabled = frappe.db.get_single_value("Avientek Settings", "enable_quotation_assignment")
+    if not enabled or str(enabled) == "0":
+        return
     if not user or user == "Administrator":
         return
     existing = frappe.db.exists(
