@@ -75,6 +75,36 @@ def _user_has_customer_restriction(user):
 	)
 
 
+# Roles that mean "this user works with suppliers" (procurement / accounts).
+# A PURE sales user never holds one; a procurement/accounts/dispatch user
+# does. Used to keep supplier Contact/Address visible to procurement even
+# when they ALSO carry Sales Person User Permissions (hybrid users scoped to
+# their team's customers). Deliberately excludes generic Supplier *read*
+# (everyone has it) — see the 2026-06-30 note. Purchase/Accounts roles are
+# held only by supplier-facing staff.
+_SUPPLIER_FACING_ROLES = frozenset({
+	"Purchase User", "Purchase Manager", "Purchase Master Manager",
+	"Accounts User", "Accounts Manager",
+})
+
+
+def _user_sees_suppliers(user):
+	"""True if supplier-linked Contact/Address should be visible to `user`:
+	either they have NO Sales Person UP (not a sales-team user at all), OR
+	they hold a procurement/accounts role. Pure sales users (Sales Person UP
+	and none of those roles) → False, so supplier details stay hidden.
+
+	Sridhar ERP QA 2026-07-06: procurement.india1@ (Purchase User) is scoped
+	to its team's customers via 12 Sales Person UPs, so the old
+	`not _get_user_sales_persons` gate mis-classified it as sales and HID
+	supplier contacts — blocking procurement. The role signal fixes that
+	without leaking suppliers to the 18 pure-sales users (verified: none of
+	them hold a procurement/accounts role)."""
+	if not _get_user_sales_persons(user):
+		return True
+	return bool(set(frappe.get_roles(user)) & _SUPPLIER_FACING_ROLES)
+
+
 # ── Shared SQL fragment generator ──
 
 def _build_link_scoped_query(user, parenttype):
@@ -110,13 +140,16 @@ def _build_link_scoped_query(user, parenttype):
 	# Supplier Group UP therefore wrongly blocked them (Rahul 2026-07-01:
 	# operations2 / accounts.india / Harsha blocked on PO & PI).
 	#
-	# The distinguisher is a Sales Person User Permission: sales-team users are
-	# who Sridhar wanted supplier details hidden from. Procurement/accounts
-	# carry a Company (not Sales Person) UP and must keep supplier access.
-	# Role-based Supplier read does NOT separate them (everyone has it).
-	#   - Supplier Group UP set        -> permit supplier links in allowed groups
-	#   - else NOT a Sales-Person user  -> permit any supplier link (procurement/accounts)
-	#   - else (Sales-Person user)      -> hide supplier links
+	# The distinguisher is procurement/accounts vs pure sales. Sales-team users
+	# are who Sridhar wanted supplier details hidden from. Procurement/accounts
+	# must keep supplier access — even hybrids who ALSO carry Sales Person UPs
+	# to see their team's customers (procurement.india1). `_user_sees_suppliers`
+	# encodes: no Sales Person UP OR a procurement/accounts role. Role-based
+	# Supplier *read* does NOT separate them (everyone has it) — Purchase/
+	# Accounts roles do.
+	#   - Supplier Group UP set            -> permit supplier links in allowed groups
+	#   - else _user_sees_suppliers(user)  -> permit any supplier link (procurement/accounts)
+	#   - else (pure sales user)           -> hide supplier links
 	sg_perms = _get_user_supplier_groups(user)
 	supplier_branch = ""
 	if sg_perms:
@@ -132,7 +165,7 @@ def _build_link_scoped_query(user, parenttype):
 			")"
 			")"
 		).format(parent=parent_table, parenttype_esc=parenttype_esc, sgs=sgs_sql)
-	elif not _get_user_sales_persons(user):
+	elif _user_sees_suppliers(user):
 		supplier_branch = (
 			" OR EXISTS ("
 			"SELECT 1 FROM `tabDynamic Link` dl "
@@ -256,14 +289,15 @@ def _has_permission_link_scoped(doc, ptype, user):
 			# out of a Contact that has other valid links.
 			continue
 
-	# (A2) Supplier OR semantics (mirrors the list-query SQL). The gate is a
-	# Sales Person User Permission: procurement/accounts (Company UP, no Sales
-	# Person UP) keep supplier access so they can open PO/PR/PI whose billing
-	# address is supplier-linked; sales-team users are restricted. Role-based
-	# Supplier read does NOT separate them here (Rahul 2026-07-01 regression fix;
-	# supersedes the Supplier-Group-UP-only check from 2026-06-30).
+	# (A2) Supplier OR semantics (mirrors the list-query SQL). Procurement/
+	# accounts keep supplier access so they can open PO/PR/PI whose billing
+	# address is supplier-linked — including hybrids who ALSO hold Sales Person
+	# UPs (procurement.india1, Sridhar 2026-07-06). `_user_sees_suppliers`
+	# gates on: no Sales Person UP OR a procurement/accounts role. Pure sales
+	# users are restricted. (Supersedes the `not _get_user_sales_persons` gate
+	# that mis-classified hybrid procurement users as sales.)
 	if supplier_link_names:
-		if not _get_user_sales_persons(user):
+		if _user_sees_suppliers(user):
 			return None  # procurement/accounts/etc. may see supplier-linked
 		sg_perms = set(_get_user_supplier_groups(user))
 		if sg_perms:
