@@ -26,6 +26,7 @@ def after_migrate():
 	_enforce_export_permissions()
 	_sync_payment_voucher_formats()
 	_sync_sales_team_workspace()
+	_unblock_avientek_module()
 	# Jithin 2026-05-13: previously called _block_prf_workflow_self_approval()
 	# which forced allow_self_approval=0 on every PRF transition each migrate
 	# (Sridhar 2026-05-06 policy). Reversed — Jithin's team wants self-approval
@@ -33,6 +34,73 @@ def after_migrate():
 	# the repo as historical reference but are no longer auto-invoked.
 	_seed_quotation_approval_v3_workflow()
 	_purge_custom_quote_project_field()
+
+
+def _unblock_avientek_module():
+	"""Keep the Avientek + Avientek Reports modules UNblocked on every Module
+	Profile AND User, every migrate.
+
+	Frappe v15's desk sidebar hides a workspace whose `module` is blocked for
+	the user. The Sales Team workspace is module=Avientek, so a GM-CS / CS user
+	whose Module Profile blocks 'Avientek' can't see it even with the right
+	roles + read perms (Jithin 2026-05-19: Rahul; Sridhar 2026-07-06:
+	st@/Shijin Thomas). The one-time `unblock_avientek_module_for_module_profiles`
+	patch fixes it once, but does NOT re-apply if a profile/user gets re-blocked
+	later — so we re-assert it here idempotently (same pattern as the workspace
+	sync + workflow re-seed).
+
+	Cleans BOTH the Module Profile rows AND any direct User-level block rows,
+	then re-saves affected users so their cached block_modules table syncs.
+	No-op (a cheap scan) when nothing is blocked.
+	"""
+	UNBLOCK = ("Avientek", "Avientek Reports")
+	rows = frappe.db.get_all(
+		"Block Module",
+		filters={
+			"module": ["in", UNBLOCK],
+			"parenttype": ["in", ("Module Profile", "User")],
+		},
+		fields=["parent", "parenttype"],
+	)
+	if not rows:
+		return
+
+	profiles = {r.parent for r in rows if r.parenttype == "Module Profile"}
+	users = {r.parent for r in rows if r.parenttype == "User"}
+
+	# Drop the block rows at both levels in one shot.
+	frappe.db.delete("Block Module", {
+		"module": ["in", UNBLOCK],
+		"parenttype": ["in", ("Module Profile", "User")],
+	})
+
+	# Users inheriting a now-cleaned profile also need their cached table synced.
+	if profiles:
+		for u in frappe.db.get_all(
+			"User",
+			filters={"module_profile": ["in", list(profiles)], "enabled": 1},
+			pluck="name",
+		):
+			users.add(u)
+
+	frappe.db.commit()
+
+	for u in users:
+		if u in ("Administrator", "Guest"):
+			continue
+		try:
+			frappe.clear_cache(user=u)
+		except Exception:
+			pass
+	try:
+		frappe.cache.delete_value("workspace_sidebar_items")
+	except Exception:
+		pass
+
+	print(
+		f"[after_migrate] Unblocked Avientek module: cleared block rows on "
+		f"{len(profiles)} profile(s) + synced {len(users)} user(s)"
+	)
 
 
 def _purge_custom_quote_project_field():
