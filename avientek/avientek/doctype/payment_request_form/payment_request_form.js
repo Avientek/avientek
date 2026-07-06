@@ -1304,7 +1304,15 @@ frappe.ui.form.on('Payment Request Form', {
                             c.document_reference = d.document_reference;
                         }
                         c.due_date = d.due_date;
-                        c.invoice_date = d.posting_date;
+                        // ERP-TKT-41 (Sridhar 2026-07-06): use the server's
+                        // invoice_date (= the Purchase Invoice's bill_date, the
+                        // ACTUAL supplier invoice date) — fall back to
+                        // posting_date only when it's absent (non-PI types).
+                        // Previously hard-coded to posting_date, so the "Get
+                        // Purchase Invoice" button showed the booking date, not
+                        // the supplier invoice date. Mirrors the correct path
+                        // at get_outstanding (d.invoice_date || d.posting_date).
+                        c.invoice_date = d.invoice_date || d.posting_date;
                         c.grand_total = d.grand_total;
                         c.base_grand_total = d.base_grand_total;
                         c.outstanding_amount = d.outstanding;
