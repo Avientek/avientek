@@ -23,6 +23,12 @@
   "prf_section",
   "issued_bank_edit_roles",
   "prf_revise_roles",
+  "supplier_visibility_section",
+  "supplier_visibility_mode",
+  "supplier_visibility_roles",
+  "supplier_visibility_column_break",
+  "supplier_visibility_deny_users",
+  "supplier_visibility_allow_users",
   "notifications_section",
   "enable_quotation_notifications",
   "enable_workflow_state_notifications",
@@ -148,6 +154,43 @@
    "options": "Avientek Quote Role",
    "label": "PRF Revise Roles",
    "description": "Any user with ANY of these roles sees the 'Revise' workflow action on a PRF in 'Authorised' state — clicking it routes the document back to 'Draft' for corrections (instead of forcing a Reject). User is prompted for a mandatory reason; creator gets notified. Defaults to Finance Manager + General Manager + Director when empty."
+  },
+  {
+   "fieldname": "supplier_visibility_section",
+   "fieldtype": "Section Break",
+   "label": "Supplier Contact & Address Visibility",
+   "description": "Controls who can see supplier-linked Contact and Address records. Sales-team users are hidden from supplier details; procurement / accounts users keep access. Change the rule here without a code deploy."
+  },
+  {
+   "default": "Hide from Sales-Person users",
+   "fieldname": "supplier_visibility_mode",
+   "fieldtype": "Select",
+   "label": "Supplier Visibility Mode",
+   "options": "Hide from Sales-Person users\nShow to procurement/accounts roles\nUnrestricted (show to all)",
+   "description": "How supplier Contact/Address visibility is decided. 'Hide from Sales-Person users' (recommended): a user sees suppliers only if they have NO Sales Person User Permission — so sales-team-scoped users (incl. procurement.india1) are hidden, while true procurement/accounts (no Sales Person UP, e.g. operations2, accounts.india) keep access. 'Show to procurement/accounts roles': also allow anyone holding one of the Supplier-Facing Roles below, even if they have a Sales Person UP. 'Unrestricted': everyone sees suppliers. The Always-Deny / Always-Allow lists override the mode for specific users."
+  },
+  {
+   "fieldname": "supplier_visibility_roles",
+   "fieldtype": "Table",
+   "options": "Avientek Quote Role",
+   "label": "Supplier-Facing Roles",
+   "description": "Only used by the 'Show to procurement/accounts roles' mode. Users holding ANY of these roles may see supplier Contact/Address even if they have a Sales Person UP. If empty, defaults to Purchase User / Purchase Manager / Purchase Master Manager / Accounts User / Accounts Manager."
+  },
+  {
+   "fieldname": "supplier_visibility_column_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "supplier_visibility_deny_users",
+   "fieldtype": "Small Text",
+   "label": "Always-Deny Users",
+   "description": "Users who are ALWAYS hidden from supplier Contact/Address, whatever the mode. One email per line (or comma-separated). Use this for an urgent per-user block, e.g. procurement.india1@avientek.com."
+  },
+  {
+   "fieldname": "supplier_visibility_allow_users",
+   "fieldtype": "Small Text",
+   "label": "Always-Allow Users",
+   "description": "Users who ALWAYS see supplier Contact/Address, whatever the mode. One email per line (or comma-separated). Use for exceptions like a dispatch user who needs supplier addresses for logistics."
   },
   {
    "fieldname": "notifications_section",

@@ -75,34 +75,72 @@ def _user_has_customer_restriction(user):
 	)
 
 
-# Roles that mean "this user works with suppliers" (procurement / accounts).
-# A PURE sales user never holds one; a procurement/accounts/dispatch user
-# does. Used to keep supplier Contact/Address visible to procurement even
-# when they ALSO carry Sales Person User Permissions (hybrid users scoped to
-# their team's customers). Deliberately excludes generic Supplier *read*
-# (everyone has it) — see the 2026-06-30 note. Purchase/Accounts roles are
-# held only by supplier-facing staff.
+# Default procurement/accounts roles for the "Show to procurement/accounts
+# roles" mode when the Avientek Settings → Supplier-Facing Roles table is empty.
 _SUPPLIER_FACING_ROLES = frozenset({
 	"Purchase User", "Purchase Manager", "Purchase Master Manager",
 	"Accounts User", "Accounts Manager",
 })
 
+_SUPPLIER_VIS_DEFAULT_MODE = "Hide from Sales-Person users"
+
+
+def _cfg(field):
+	"""Cached single-field read of Avientek Settings that never raises — the
+	fields may not exist yet on a site that hasn't migrated this change."""
+	try:
+		return frappe.get_cached_value("Avientek Settings", "Avientek Settings", field)
+	except Exception:
+		return None
+
+
+def _emails(raw):
+	return {e.strip().lower() for e in (raw or "").replace(",", "\n").splitlines() if e.strip()}
+
 
 def _user_sees_suppliers(user):
-	"""True if supplier-linked Contact/Address should be visible to `user`:
-	either they have NO Sales Person UP (not a sales-team user at all), OR
-	they hold a procurement/accounts role. Pure sales users (Sales Person UP
-	and none of those roles) → False, so supplier details stay hidden.
+	"""Decide whether supplier-linked Contact/Address is visible to `user`,
+	driven by Avientek Settings → Supplier Contact & Address Visibility so the
+	rule can be changed WITHOUT a code deploy (Sridhar 2026-07-08).
 
-	Sridhar ERP QA 2026-07-06: procurement.india1@ (Purchase User) is scoped
-	to its team's customers via 12 Sales Person UPs, so the old
-	`not _get_user_sales_persons` gate mis-classified it as sales and HID
-	supplier contacts — blocking procurement. The role signal fixes that
-	without leaking suppliers to the 18 pure-sales users (verified: none of
-	them hold a procurement/accounts role)."""
-	if not _get_user_sales_persons(user):
+	Precedence:
+	  1. Always-Deny Users  → hidden
+	  2. Always-Allow Users → visible
+	  3. Mode:
+	       • Unrestricted (show to all)              → visible
+	       • Show to procurement/accounts roles       → visible if no Sales Person
+	         UP, OR the user holds a Supplier-Facing Role
+	       • Hide from Sales-Person users (default)   → visible only if the user
+	         has NO Sales Person User Permission
+
+	The default mode hides suppliers from every sales-team-scoped user
+	(anyone with a Sales Person UP — e.g. procurement.india1, which is scoped
+	to 12 sales persons) while keeping true procurement/accounts (operations2,
+	accounts.india — no Sales Person UP) able to see them. It is also the
+	safe fallback if the settings fields are not migrated yet."""
+	u = (user or "").lower()
+	if u in _emails(_cfg("supplier_visibility_deny_users")):
+		return False
+	if u in _emails(_cfg("supplier_visibility_allow_users")):
 		return True
-	return bool(set(frappe.get_roles(user)) & _SUPPLIER_FACING_ROLES)
+
+	mode = _cfg("supplier_visibility_mode") or _SUPPLIER_VIS_DEFAULT_MODE
+	if mode == "Unrestricted (show to all)":
+		return True
+	if mode == "Show to procurement/accounts roles":
+		if not _get_user_sales_persons(user):
+			return True
+		roles = _SUPPLIER_FACING_ROLES
+		try:
+			cfg = {r.role for r in (frappe.get_cached_doc("Avientek Settings")
+					.get("supplier_visibility_roles") or []) if r.role}
+			if cfg:
+				roles = frozenset(cfg)
+		except Exception:
+			pass
+		return bool(set(frappe.get_roles(user)) & roles)
+	# Default: "Hide from Sales-Person users"
+	return not _get_user_sales_persons(user)
 
 
 # ── Shared SQL fragment generator ──
