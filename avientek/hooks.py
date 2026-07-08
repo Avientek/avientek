@@ -183,6 +183,7 @@ fixtures = [
 					"Purchase Order Item-sales_order-read_only",
 					"Purchase Invoice-represents_company-ignore_user_permissions",
 					"Quotation-main-field_order",
+					"Item-gst_hsn_code-mandatory_depends_on",
 				],
 			]
 		],
