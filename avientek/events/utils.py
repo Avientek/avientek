@@ -13,8 +13,9 @@ def validate_payment_terms_mandatory(doc, method=None):
 	intercompany / internal / return / POS documents remain exempt so the
 	intercompany SO/PO/SI makers and credit notes don't break.
 
-	Accepts either a Payment Terms Template or manually-entered Payment
-	Schedule rows.
+	Accepts a Payment Terms Template, or a Payment Schedule row with a NAMED
+	Payment Term. ERPNext's auto-generated blank-term default row does NOT
+	count (that is why the original "any schedule row" check never blocked).
 	"""
 	# Bulk / system-created docs (Data Import, migrate, install) are exempt so
 	# imports and patches don't fail — terms are enforced on user saves only.
@@ -34,9 +35,19 @@ def validate_payment_terms_mandatory(doc, method=None):
 	if doc.get("is_return") or doc.get("is_pos"):
 		return
 
-	if not (doc.get("payment_terms_template") or doc.get("payment_schedule")):
+	# ERPNext auto-creates a single default Payment Schedule row (invoice_portion
+	# 100, BLANK payment_term) during validate even when the user picked nothing —
+	# so "has a payment_schedule" is NOT proof of real terms (that blank row is why
+	# the earlier check never blocked a normal SO/SI). Require a real Payment Terms
+	# Template, OR at least one schedule row carrying a NAMED Payment Term.
+	has_template = bool(doc.get("payment_terms_template"))
+	has_named_term = any(
+		(r.get("payment_term") if hasattr(r, "get") else getattr(r, "payment_term", None))
+		for r in (doc.get("payment_schedule") or [])
+	)
+	if not (has_template or has_named_term):
 		frappe.throw(
-			_("Payment Terms is mandatory. Please set a Payment Terms Template before submitting."),
+			_("Payment Terms is mandatory. Please set a Payment Terms Template (or a named Payment Term on the schedule) before saving."),
 			title=_("Payment Terms Required"),
 		)
 
