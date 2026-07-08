@@ -311,6 +311,10 @@ frappe.ui.form.on('Quotation', {
         // Quotation throws as a hard backstop — this is the UX layer
         // so the user doesn't even see the option pre-approval.
         _strip_print_buttons_unless_approved(frm);
+
+        // Auto-fetch Item Price defaults for rows added via the Items grid's
+        // "Bulk Edit" CSV upload — see setup_bulk_upload_auto_fetch(). PR #13.
+        setup_bulk_upload_auto_fetch(frm);
     },
 
     probability(frm) {
@@ -517,7 +521,7 @@ frappe.ui.form.on('Quotation', {
 
         // Reset all items to pre-discount selling prices first
         items.forEach(row => {
-            calculate_all_preview(frm, row.doctype, row.name, true);  // ERP-TKT-42: defer grid refresh
+            compute_row_preview(frm, row.doctype, row.name);  // bulk: compute only; grid refreshed once after loop
         });
 
         // Now read fresh total selling value (before discount)
@@ -685,7 +689,7 @@ frappe.ui.form.on('Quotation', {
 
         // Recalculate all items preview (incentive % is already set synchronously above)
         items.forEach(row => {
-            calculate_all_preview(frm, row.doctype, row.name, true);  // ERP-TKT-42: defer grid refresh
+            compute_row_preview(frm, row.doctype, row.name);  // bulk: compute only; grid refreshed once after loop
         });
         frm.refresh_field("items");  // ERP-TKT-42: single grid refresh after the bulk recalc loop
 
@@ -1004,12 +1008,11 @@ frappe.ui.form.on('Quotation', {
 
     selling_price_list(frm) {
         if (!frm.doc.selling_price_list) return;
-        // Reload defaults for all existing items
-        frm.doc.items.forEach(item => {
-            if (item.item_code) {
-                load_item_defaults(frm, item.doctype, item.name);
-            }
-        });
+        // Reload defaults for all existing items in ONE batched call (was one
+        // server request per item — froze on large quotes). PR #13.
+        let rows = (frm.doc.items || []).filter(item => item.item_code);
+        rows.forEach(item => { item.__defaults_fetched = true; });
+        load_item_defaults_bulk(frm, rows);
     },
 });
 
@@ -1051,7 +1054,9 @@ frappe.ui.form.on('Quotation Item', {
         // Load and render item info (with table population for backward compatibility)
         refresh_item_info_html(frm, row.item_code, true);
 
-        // Load item defaults (single server call)
+        // Load item defaults (single server call). Mark as fetched so the
+        // bulk-upload MutationObserver doesn't redundantly re-fetch this row.
+        row.__defaults_fetched = true;
         load_item_defaults(frm, cdt, cdn);
 
         // Handle service items
@@ -1298,7 +1303,7 @@ frappe.ui.form.on('Quotation Item', {
  * Writes directly to row properties for instant UI feedback.
  * Server recalculates authoritatively on save.
  */
-function calculate_all_preview(frm, cdt, cdn, skip_refresh) {
+function compute_row_preview(frm, cdt, cdn) {
     let row = locals[cdt][cdn];
 
     let qty = flt(row.qty) || 1;
@@ -1354,12 +1359,20 @@ function calculate_all_preview(frm, cdt, cdn, skip_refresh) {
     row.base_amount           = flt(selling_price * conversion_rate);
     row.net_amount            = selling_price;
     row.base_net_amount       = flt(selling_price * conversion_rate);
+}
 
-    // ERP-TKT-42 perf: skip the (expensive) full grid re-render when called
-    // inside a bulk loop — the caller does ONE refresh_field("items") after
-    // the loop. calculate_all_preview only mutates the row DATA object, so
-    // deferring the DOM refresh is behaviour-preserving.
-    if (!skip_refresh) frm.refresh_field("items");
+
+/**
+ * Compute one row's preview, then redraw the grid. Single-row callers use this.
+ * Bulk callers (load_item_defaults_bulk, the discount/incentive loops, and
+ * run_full_calculation_preview) call compute_row_preview() directly — which
+ * only mutates the row DATA object — and redraw the grid exactly once after
+ * their loop, instead of once per row (ERP-TKT-42: avoids the O(n²) freeze on
+ * large / bulk-uploaded quotes).
+ */
+function calculate_all_preview(frm, cdt, cdn) {
+    compute_row_preview(frm, cdt, cdn);
+    frm.refresh_field("items");
 }
 
 
@@ -1762,6 +1775,142 @@ function load_item_defaults(frm, cdt, cdn) {
 
 
 /**
+ * Bulk-safe applier: writes fields directly onto the row object (no
+ * frappe.model.set_value → no per-field triggers, no per-row grid redraw).
+ * Caller computes every row then redraws once. Fills item_name/uom (mandatory
+ * on save) regardless of price availability. Returns {item_code} if the row had
+ * no Item Price so the caller can report them together. (PR #13.)
+ */
+function apply_item_defaults_to_row_silent(frm, cdt, cdn, d) {
+    let row = locals[cdt][cdn];
+
+    if (!row.item_name) row.item_name = d.item_name || row.item_code;
+    if (!row.description) row.description = d.description || d.item_name;
+    if (!row.uom && d.stock_uom) {
+        row.uom = d.stock_uom;
+        row.stock_uom = d.stock_uom;
+        row.conversion_factor = 1;
+        row.stock_qty = flt(row.qty) * 1;
+    }
+
+    if (d.no_price_for_company) {
+        return { item_code: d.item_code };
+    }
+
+    let std_price = d.custom_standard_price_ || 0;
+    let sp = d.custom_special_price || std_price;
+    row.custom_standard_price_ = std_price;
+    row.custom_special_price = sp;
+
+    if (!row.shipping_per)      row.shipping_per = d.shipping_per_air || 0;
+    if (!row.custom_transport_) row.custom_transport_ = d.custom_transport_ || 0;
+    if (!row.custom_finance_)   row.custom_finance_ = d.custom_finance_ || 0;
+    if (!row.std_margin_per)    row.std_margin_per = d.std_margin_per || 0;
+    if (!row.custom_customs_)   row.custom_customs_ = d.custom_customs_ || 0;
+    if (!row.custom_markup_)    row.custom_markup_ = d.custom_markup_ || 0;
+
+    // Per-item shipping minimums (parity with load_item_defaults) so the
+    // shipping_per validation uses this row's own Item Price values.
+    row.__min_ship_air = flt(d.shipping_per_air);
+    row.__min_ship_sea = flt(d.shipping_per_sea);
+
+    compute_row_preview(frm, cdt, cdn);
+    return null;
+}
+
+
+/**
+ * Batched load_item_defaults() — one request for many rows (bulk CSV upload).
+ * Applies results silently and redraws the grid once at the end. (PR #13.)
+ */
+function load_item_defaults_bulk(frm, rows) {
+    if (!rows.length || !frm.doc.selling_price_list) return;
+
+    let item_codes = [...new Set(rows.map(r => r.item_code))];
+
+    frappe.call({
+        method: "avientek.events.quotation.get_item_defaults_bulk",
+        args: {
+            item_codes: item_codes,
+            price_list: frm.doc.selling_price_list,
+            currency: frm.doc.currency,
+            price_list_currency: frm.doc.price_list_currency,
+            plc_conversion_rate: frm.doc.plc_conversion_rate || 1,
+            company: frm.doc.company,
+        },
+        callback(r) {
+            if (!r.message) return;
+            let results = r.message;
+            let missing_price = [];
+
+            rows.forEach(row => {
+                let d = results[row.item_code];
+                if (!d) return;
+                let missing = apply_item_defaults_to_row_silent(frm, row.doctype, row.name, d);
+                if (missing) missing_price.push(missing.item_code);
+            });
+
+            frm.dirty();
+            frm.refresh_field("items");
+            update_doc_totals_preview(frm);
+
+            frappe.show_alert({
+                message: __('Prices fetched for {0} item(s).', [rows.length - missing_price.length]),
+                indicator: 'green'
+            });
+
+            if (missing_price.length) {
+                frappe.msgprint({
+                    title: __('No Item Price Found'),
+                    message: __('No Item Price found for: {0}', [missing_price.join(', ')]),
+                    indicator: 'orange'
+                });
+            }
+        }
+    });
+}
+
+
+/**
+ * Auto-fetch Item Price defaults for rows added via the Items grid's "Bulk
+ * Edit" CSV upload. That core feature writes item_code directly onto new child
+ * rows and never fires the item_code field trigger, so load_item_defaults()
+ * never runs for them. Rather than patching Frappe's core Grid class (which
+ * previously broke form rendering), watch the Items grid DOM and react only
+ * after rows are painted — all pending rows are fetched in one batched call.
+ * (PR #13.)
+ */
+function setup_bulk_upload_auto_fetch(frm) {
+    if (frm.__bulk_upload_observer) return;  // once per form instance
+
+    let grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+    let wrapper = grid && grid.wrapper && grid.wrapper.get(0);
+    if (!wrapper) return;
+
+    let debounce_timer = null;
+    let observer = new MutationObserver(() => {
+        clearTimeout(debounce_timer);
+        debounce_timer = setTimeout(() => {
+            let pending = (frm.doc.items || []).filter(
+                item => item.item_code && !flt(item.custom_standard_price_) && !item.__defaults_fetched
+            );
+            if (!pending.length) return;
+
+            pending.forEach(item => { item.__defaults_fetched = true; });
+            frappe.show_alert({
+                message: __('Fetching item prices for {0} row(s)...', [pending.length]),
+                indicator: 'blue'
+            });
+            load_item_defaults_bulk(frm, pending);
+        }, 300);
+    });
+
+    observer.observe(wrapper, { childList: true, subtree: true });
+    frm.__bulk_upload_observer = observer;
+}
+
+
+/**
  * Full calculation pipeline that mirrors server's run_calculation_pipeline.
  * Used by both before_save and calculate_taxes_and_totals override to
  * ensure live preview always matches server output.
@@ -1770,7 +1919,7 @@ function run_full_calculation_preview(frm) {
     // 1) Recalculate all items from scratch (like server calc_item_totals)
     (frm.doc.items || []).forEach(row => {
         if (row.custom_special_price) {
-            calculate_all_preview(frm, row.doctype, row.name, true);  // ERP-TKT-42: defer grid refresh
+            compute_row_preview(frm, row.doctype, row.name);  // bulk: compute only; grid refreshed once after loop
         }
     });
 

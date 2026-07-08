@@ -118,7 +118,7 @@ def apply_discount(doc, discount_amount):
 def get_item_all_details(item_code, customer, price_list, company=None):
     return {
         "history": get_last_5_transactions(item_code, customer),
-        "stock": get_company_stock(item_code),
+        "stock": get_company_stock(item_code, company),
         "shipment_margin": get_shipment_and_margin(item_code, price_list, company)
     }
 
@@ -136,6 +136,7 @@ def get_last_5_transactions(item_code, customer):
           AND sii.item_code=%s
           AND si.docstatus=1
         ORDER BY si.posting_date DESC
+        LIMIT 5
     """, (customer, item_code), as_dict=True)
 
     for r in invoices:
@@ -160,12 +161,12 @@ def get_last_5_transactions(item_code, customer):
         AND soi.item_code = %s
         AND so.docstatus = 1
         AND so.status IN ("To Deliver and Bill", "To Deliver", "To Bill", "Completed", "Closed")
-        AND so.name NOT IN (
-            SELECT DISTINCT sii.sales_order
-            FROM `tabSales Invoice Item` sii
-            WHERE sii.sales_order IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM `tabSales Invoice Item` sii
+            WHERE sii.sales_order = so.name
         )
         ORDER BY so.transaction_date DESC
+        LIMIT 5
     """, (customer, item_code), as_dict=True)
 
 
@@ -190,12 +191,12 @@ def get_last_5_transactions(item_code, customer):
         WHERE q.party_name=%s
           AND qi.item_code=%s
           AND q.docstatus=1
-          AND q.name NOT IN (
-              SELECT DISTINCT soi.prevdoc_docname
-              FROM `tabSales Order Item` soi
-              WHERE soi.prevdoc_docname IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM `tabSales Order Item` soi
+              WHERE soi.prevdoc_docname = q.name
           )
         ORDER BY q.transaction_date DESC
+        LIMIT 5
     """, (customer, item_code), as_dict=True)
 
     for r in quotations:
@@ -211,12 +212,14 @@ def get_last_5_transactions(item_code, customer):
 
     return result
 @frappe.whitelist()
-def get_company_stock(item_code):
+def get_company_stock(item_code, company=None):
     stock = []
 
-    companies = frappe.get_all("Company", pluck="name")
+    # Quotation always has a company set before items are added, so scope
+    # the warehouse/bin lookup to it instead of looping every company.
+    companies = [company] if company else frappe.get_all("Company", pluck="name")
 
-    for company in companies:
+    for c in companies:
         # Venkatesh/Rahul 2026-06-11 ERP-TKT-29: RMA / Demo / Service /
         # Repair warehouses (21 of them on prod as of 2026-06-11) carry
         # inventory that's NOT available for sale — replacement units,
@@ -238,7 +241,7 @@ def get_company_stock(item_code):
               AND is_group = 0
               AND (warehouse_type IS NULL OR warehouse_type != 'Freezed Items')
             """,
-            (company,),
+            (c,),
         )
 
         if not warehouses:
@@ -264,7 +267,7 @@ def get_company_stock(item_code):
             continue
 
         stock.append({
-            "company": company,
+            "company": c,
             "actual_stock": actual,
             "free_stock": free_stock,
             "projected_stock": projected
@@ -931,11 +934,95 @@ def _apply_manual_selling_rate(it, user_rate, discount_total=0.0, pre_discount_t
     })
 
 
+def backfill_item_core_fields(doc):
+    """Bulk-uploaded rows (Items grid "Bulk Edit" CSV upload / Data Import /
+    API) never fire the item_code client trigger, so ERPNext's own "fetch item
+    details" (item_name, uom, stock_uom, ...) never runs. Without this, save
+    fails core's mandatory-field check ("Item Name is required" / "UOM is
+    required") for every such row. (PR #13, ported to master 2026-07-08.)"""
+    item_codes = {
+        it.item_code for it in doc.items
+        if it.item_code and (not it.item_name or not it.uom)
+    }
+    if not item_codes:
+        return
+
+    item_data = {
+        row.name: row
+        for row in frappe.get_all(
+            "Item",
+            filters={"name": ["in", list(item_codes)]},
+            fields=["name", "item_name", "stock_uom", "description"],
+        )
+    }
+
+    for it in doc.items:
+        if not it.item_code:
+            continue
+        item = item_data.get(it.item_code)
+        if not item:
+            continue  # invalid item_code — core link validation will catch it
+        if not it.item_name:
+            it.item_name = item.item_name or it.item_code
+        if not it.description:
+            it.description = item.description or item.item_name
+        if not it.uom:
+            it.uom = item.stock_uom
+            it.stock_uom = item.stock_uom
+            it.conversion_factor = 1
+            it.stock_qty = flt(it.qty) * 1
+
+
+def backfill_item_price_defaults(doc):
+    """Same root cause as backfill_item_core_fields: rows added via bulk CSV
+    upload / Data Import / API never fire the item_code trigger, so
+    get_item_defaults() never ran. Fill Item Price / Brand pricing server-side
+    for any row that has an item_code but no standard price yet, before
+    calc_item_totals runs. Reuses get_item_defaults() so the company-specific /
+    fallback lookup stays identical to the interactive path."""
+    for it in doc.items:
+        if not it.item_code or _to_flt(it.custom_standard_price_):
+            continue  # no item, or already priced (user/JS already set it)
+
+        defaults = get_item_defaults(
+            it.item_code,
+            doc.selling_price_list,
+            doc.currency,
+            doc.price_list_currency,
+            doc.plc_conversion_rate,
+            doc.company,
+        )
+        if defaults.get("no_price_for_company") or not defaults.get("custom_standard_price_"):
+            continue  # no Item Price — leave at 0, don't block save
+
+        it.custom_standard_price_ = defaults["custom_standard_price_"]
+        if not _to_flt(it.custom_special_price):
+            it.custom_special_price = defaults["custom_special_price"]
+        if not _to_flt(it.shipping_per):
+            it.shipping_per = defaults.get("shipping_per_air") or 0
+        if not _to_flt(it.custom_transport_):
+            it.custom_transport_ = defaults.get("custom_transport_") or 0
+        if not _to_flt(it.custom_finance_):
+            it.custom_finance_ = defaults.get("custom_finance_") or 0
+        if not _to_flt(it.std_margin_per):
+            it.std_margin_per = defaults.get("std_margin_per") or 0
+        if not _to_flt(it.custom_customs_):
+            it.custom_customs_ = defaults.get("custom_customs_") or 0
+        if not _to_flt(it.custom_markup_):
+            it.custom_markup_ = defaults.get("custom_markup_") or 0
+
+
 def run_calculation_pipeline(doc, method=None):
     """Authoritative server-side calculation — runs on every save.
     Skip on submit/cancel/amend to preserve the previewed values."""
     if doc.docstatus != 0:
         return
+
+    # Rows added via the Items grid "Bulk Edit" CSV upload / Data Import / API
+    # never fire the item_code client trigger — backfill their core fields and
+    # pricing server-side before calculation (PR #13).
+    backfill_item_core_fields(doc)
+    backfill_item_price_defaults(doc)
 
     # Detect which items had their selling price manually edited.
     # Condition: custom_special_rate changed but custom_markup_ did not
@@ -1243,6 +1330,119 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
                 result["custom_transport_"] = flt(brand_data.custom_transport)
 
     return result
+
+
+@frappe.whitelist()
+def get_item_defaults_bulk(item_codes, price_list, currency, price_list_currency, plc_conversion_rate, company=None):
+    """Batched version of get_item_defaults() — one round trip for many items.
+    Used by the Items grid's bulk-upload auto-fetch (CSV import can add 50+
+    rows at once) so the client doesn't fire one request per row. Runs a small
+    fixed number of queries (Item Price + Item + Brand) instead of per item.
+    Returns {item_code: {...same shape as get_item_defaults...}}.
+
+    Note: unlike get_item_defaults(), this does not fall back to a non-company
+    Item Price — but the server-side backfill_item_price_defaults() (which does
+    reuse get_item_defaults with the fallback) still prices such rows on save,
+    so nothing is lost. (PR #13, ported to master 2026-07-08.)"""
+    item_codes = frappe.parse_json(item_codes) if isinstance(item_codes, str) else item_codes
+    item_codes = list(dict.fromkeys(item_codes or []))  # de-dupe, keep order
+    if not item_codes:
+        return {}
+
+    plc_rate = flt(plc_conversion_rate) or 1.0
+    warn_missing_price = bool(
+        company and frappe.db.get_single_value("Avientek Settings", "item_price_variation_in_quotation")
+    )
+
+    ip_filters = {"item_code": ["in", item_codes], "price_list": price_list}
+    if company:
+        ip_filters["custom_company"] = company
+
+    price_by_item = {
+        row.item_code: row
+        for row in frappe.get_all(
+            "Item Price",
+            filters=ip_filters,
+            fields=[
+                "item_code",
+                "price_list_rate",
+                "custom_shipping__air_",
+                "custom_shipping__sea_",
+                "custom_processing_",
+                "custom_min_finance_charge_",
+                "custom_min_margin_",
+                "custom_customs_",
+                "custom_markup_",
+            ],
+        )
+    }
+
+    item_rows = frappe.get_all(
+        "Item",
+        filters={"item_code": ["in", item_codes]},
+        fields=["item_code", "brand", "item_name", "stock_uom", "description"],
+    )
+    item_by_item = {row.item_code: row for row in item_rows}
+    brand_by_item = {row.item_code: row.brand for row in item_rows if row.brand}
+    brands = list(set(brand_by_item.values()))
+    brand_data_by_brand = {}
+    if brands:
+        brand_data_by_brand = {
+            row.name: row
+            for row in frappe.get_all(
+                "Brand",
+                filters={"name": ["in", brands]},
+                fields=["name", "custom_finance_", "custom_transport"],
+            )
+        }
+
+    result = {}
+    for item_code in item_codes:
+        ip = price_by_item.get(item_code)
+        item = item_by_item.get(item_code)
+        core_fields = {
+            "item_name": item.item_name if item else None,
+            "stock_uom": item.stock_uom if item else None,
+            "description": item.description if item else None,
+        }
+
+        if not ip and warn_missing_price:
+            result[item_code] = {
+                "no_price_for_company": True,
+                "item_code": item_code,
+                "company": company,
+                "price_list": price_list,
+                **core_fields,
+            }
+            continue
+
+        item_result = dict(core_fields)
+        if ip:
+            std_price = flt(ip.price_list_rate)
+            if currency != price_list_currency:
+                std_price = flt(std_price * plc_rate, 4)
+
+            item_result["custom_standard_price_"] = std_price
+            item_result["custom_special_price"]   = std_price
+            item_result["shipping_per_air"]       = flt(ip.custom_shipping__air_)
+            item_result["shipping_per_sea"]       = flt(ip.custom_shipping__sea_)
+            item_result["custom_transport_"]      = flt(ip.custom_processing_)
+            item_result["custom_finance_"]        = flt(ip.custom_min_finance_charge_)
+            item_result["std_margin_per"]         = flt(ip.custom_min_margin_)
+            item_result["custom_customs_"]        = flt(ip.custom_customs_)
+            item_result["custom_markup_"]         = flt(ip.custom_markup_)
+
+        brand_data = brand_data_by_brand.get(brand_by_item.get(item_code))
+        if brand_data:
+            if not item_result.get("custom_finance_"):
+                item_result["custom_finance_"] = flt(brand_data.custom_finance_)
+            if not item_result.get("custom_transport_"):
+                item_result["custom_transport_"] = flt(brand_data.custom_transport)
+
+        result[item_code] = item_result
+
+    return result
+
 
 def calculate_additional_discount_percentage(doc, method=None):
     if not doc.discount_amount:
