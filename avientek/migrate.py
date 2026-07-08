@@ -4,36 +4,50 @@ from frappe import _
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 
+def _run_step(label, fn):
+	"""Run one after_migrate step in isolation. A failure in one step must NOT
+	abort the rest — before this guard, an early step raising (e.g. during a
+	Frappe Cloud deploy) skipped everything after it, including
+	_unblock_avientek_module, so GM-CS users lost the Sales Team workspace +
+	number cards (prod 2026-07-08). Each step commits on success; on failure it
+	rolls back its own partial work, logs, and we continue."""
+	try:
+		fn()
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=f"after_migrate step failed: {label}",
+			message=frappe.get_traceback(),
+		)
+		print(f"[after_migrate] step {label!r} FAILED (continuing) — see Error Log")
+
+
 def after_migrate():
-	make_property_setter(
-		"Item", None, "search_fields", "item_name,description,item_group,customer_code,part_number", "Data", for_doctype="Doctype"
-	)
-	# Jithin 2026-05-15 — default PRF print format = "Payment Voucher
-	# Fast". Frappe's `/app/print/<doctype>/<name>` preview defaults to
-	# the doctype-level setting, so without this property setter the
-	# preview rendered the bare "Standard" format (empty body, just
-	# letterhead) even though Combined PDF correctly used the Fast
-	# format. Idempotent via make_property_setter.
-	make_property_setter(
-		"Payment Request Form", None, "default_print_format",
-		"Payment Voucher Fast", "Data", for_doctype="Doctype",
-	)
-	_create_asset_dam_fields()
-	_deactivate_old_quotation_workflows()
-	_fix_quotation_item_calc_layout()
-	_fix_global_field_settings()
-	_enforce_custom_role_permissions()
-	_enforce_export_permissions()
-	_sync_payment_voucher_formats()
-	_sync_sales_team_workspace()
-	_unblock_avientek_module()
-	# Jithin 2026-05-13: previously called _block_prf_workflow_self_approval()
-	# which forced allow_self_approval=0 on every PRF transition each migrate
-	# (Sridhar 2026-05-06 policy). Reversed — Jithin's team wants self-approval
-	# allowed so single-role flows work. The helper + patch file remain in
-	# the repo as historical reference but are no longer auto-invoked.
-	_seed_quotation_approval_v3_workflow()
-	_purge_custom_quote_project_field()
+	# Jithin 2026-05-15 — default PRF print format = "Payment Voucher Fast".
+	# Idempotent via make_property_setter.
+	steps = [
+		("item_search_fields", lambda: make_property_setter(
+			"Item", None, "search_fields",
+			"item_name,description,item_group,customer_code,part_number",
+			"Data", for_doctype="Doctype")),
+		("prf_default_print_format", lambda: make_property_setter(
+			"Payment Request Form", None, "default_print_format",
+			"Payment Voucher Fast", "Data", for_doctype="Doctype")),
+		("create_asset_dam_fields", _create_asset_dam_fields),
+		("deactivate_old_quotation_workflows", _deactivate_old_quotation_workflows),
+		("fix_quotation_item_calc_layout", _fix_quotation_item_calc_layout),
+		("fix_global_field_settings", _fix_global_field_settings),
+		("enforce_custom_role_permissions", _enforce_custom_role_permissions),
+		("enforce_export_permissions", _enforce_export_permissions),
+		("sync_payment_voucher_formats", _sync_payment_voucher_formats),
+		("sync_sales_team_workspace", _sync_sales_team_workspace),
+		("unblock_avientek_module", _unblock_avientek_module),
+		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
+		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
+	]
+	for label, fn in steps:
+		_run_step(label, fn)
 
 
 def _unblock_avientek_module():
