@@ -4,17 +4,22 @@ from frappe import _
 
 
 def validate_payment_terms_mandatory(doc, method=None):
-	"""Block submit of Sales Order / Sales Invoice without Payment Terms.
+	"""Block save of Sales Order / Sales Invoice without Payment Terms.
 
-	Rahul 2026-06-30: Payment Terms must be mandatory on SO & Invoice.
-	Enforced at SUBMIT time (not save) so drafts and data-imports can still
-	be saved, and intercompany / internal auto-created documents are exempt
-	so the intercompany SO/PO/SI makers don't break (those are generated
-	without terms by ERPNext).
+	Rahul 2026-06-30: Payment Terms mandatory on SO & Invoice.
+	Rahul 2026-07-08: moved from SUBMIT to SAVE time (validate) — a document
+	can no longer be SAVED (even as a draft) without terms. Data imports /
+	migrations / installs are exempt (they bulk-create docs without terms), and
+	intercompany / internal / return / POS documents remain exempt so the
+	intercompany SO/PO/SI makers and credit notes don't break.
 
 	Accepts either a Payment Terms Template or manually-entered Payment
 	Schedule rows.
 	"""
+	# Bulk / system-created docs (Data Import, migrate, install) are exempt so
+	# imports and patches don't fail — terms are enforced on user saves only.
+	if frappe.flags.in_import or frappe.flags.in_migrate or frappe.flags.in_install:
+		return
 	# Exempt intercompany / internal documents (auto-created without terms).
 	if doc.get("is_internal_customer"):
 		return

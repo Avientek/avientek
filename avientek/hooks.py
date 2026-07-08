@@ -567,6 +567,10 @@ doc_events = {
             # JS button-strip in quotation.js refresh. Blocks SO creation
             # from a Quotation whose V3 workflow_state isn't yet Approved.
             "avientek.events.sales_order.validate_quotation_approved",
+            # Rahul 2026-07-08: Payment Terms mandatory at SAVE time (moved from
+            # before_submit) — an SO can't be saved without terms. Imports +
+            # intercompany/internal + return/POS exempt (see the function).
+            "avientek.events.utils.validate_payment_terms_mandatory",
         ],
         "before_save": [
             "avientek.events.sales_order.strip_quotation_optional_items",
@@ -579,11 +583,6 @@ doc_events = {
             "avientek.events.utils.validate_date_sanity",
         ],
         "after_save": "avientek.events.sales_order.sync_delivery_date_to_items",
-        "before_submit": [
-            # Rahul 2026-06-30: Payment Terms mandatory on SO at submit time
-            # (drafts/imports + intercompany docs exempt — see the function).
-            "avientek.events.utils.validate_payment_terms_mandatory",
-        ],
         "on_submit": "avientek.events.sales_order.set_sales_order_confirmation_date",
     },
     "Quotation": {
@@ -767,6 +766,10 @@ doc_events = {
         "validate": [
             "avientek.events.sales_invoice.validate_item_tax_template",
             "avientek.events.sales_invoice.validate_customer_company",
+            # Rahul 2026-07-08: Payment Terms mandatory at SAVE time (moved from
+            # before_submit) — an Invoice can't be saved without terms. Imports +
+            # intercompany/internal + return/POS exempt (see the function).
+            "avientek.events.utils.validate_payment_terms_mandatory",
         ],
         "before_save": [
             "avientek.events.sales_invoice.set_vat_emirate",
@@ -779,9 +782,6 @@ doc_events = {
             # stock-affecting SIs (update_stock=1 / POS); inert otherwise
             # because the row's warehouse will be empty.
             "avientek.stock.batch_negative_guard.check_batches_remain_positive",
-            # Rahul 2026-06-30: Payment Terms mandatory on Invoice at submit
-            # time (intercompany / internal docs exempt — see the function).
-            "avientek.events.utils.validate_payment_terms_mandatory",
         ],
         "on_submit": "avientek.events.sales_invoice_reward_incentive.book_reward_incentive_jv",
         "on_cancel": "avientek.events.sales_invoice_reward_incentive.cancel_reward_incentive_jv",
