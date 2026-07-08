@@ -517,7 +517,7 @@ frappe.ui.form.on('Quotation', {
 
         // Reset all items to pre-discount selling prices first
         items.forEach(row => {
-            calculate_all_preview(frm, row.doctype, row.name);
+            calculate_all_preview(frm, row.doctype, row.name, true);  // ERP-TKT-42: defer grid refresh
         });
 
         // Now read fresh total selling value (before discount)
@@ -685,8 +685,9 @@ frappe.ui.form.on('Quotation', {
 
         // Recalculate all items preview (incentive % is already set synchronously above)
         items.forEach(row => {
-            calculate_all_preview(frm, row.doctype, row.name);
+            calculate_all_preview(frm, row.doctype, row.name, true);  // ERP-TKT-42: defer grid refresh
         });
+        frm.refresh_field("items");  // ERP-TKT-42: single grid refresh after the bulk recalc loop
 
         // Re-apply discount on top if one exists
         let discount_amount = flt(frm.doc.custom_discount_amount_value);
@@ -1297,7 +1298,7 @@ frappe.ui.form.on('Quotation Item', {
  * Writes directly to row properties for instant UI feedback.
  * Server recalculates authoritatively on save.
  */
-function calculate_all_preview(frm, cdt, cdn) {
+function calculate_all_preview(frm, cdt, cdn, skip_refresh) {
     let row = locals[cdt][cdn];
 
     let qty = flt(row.qty) || 1;
@@ -1354,7 +1355,11 @@ function calculate_all_preview(frm, cdt, cdn) {
     row.net_amount            = selling_price;
     row.base_net_amount       = flt(selling_price * conversion_rate);
 
-    frm.refresh_field("items");
+    // ERP-TKT-42 perf: skip the (expensive) full grid re-render when called
+    // inside a bulk loop — the caller does ONE refresh_field("items") after
+    // the loop. calculate_all_preview only mutates the row DATA object, so
+    // deferring the DOM refresh is behaviour-preserving.
+    if (!skip_refresh) frm.refresh_field("items");
 }
 
 
@@ -1765,7 +1770,7 @@ function run_full_calculation_preview(frm) {
     // 1) Recalculate all items from scratch (like server calc_item_totals)
     (frm.doc.items || []).forEach(row => {
         if (row.custom_special_price) {
-            calculate_all_preview(frm, row.doctype, row.name);
+            calculate_all_preview(frm, row.doctype, row.name, true);  // ERP-TKT-42: defer grid refresh
         }
     });
 
@@ -1824,6 +1829,7 @@ function run_full_calculation_preview(frm) {
     }
 
     // 4) Update totals (like server recalc_doc_totals)
+    frm.refresh_field("items");  // ERP-TKT-42: single grid refresh for the whole pipeline
     update_doc_totals_preview(frm);
 }
 
