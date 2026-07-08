@@ -354,6 +354,10 @@ frappe.ui.form.on('Quotation', {
                 show_update_special_price_dialog(frm);
             });
         }
+
+        // Auto-fetch Item Price defaults for rows added via the Items
+        // grid's "Bulk Edit" CSV upload — see setup_bulk_upload_auto_fetch().
+        setup_bulk_upload_auto_fetch(frm);
     },
 
     onload(frm) {
@@ -364,12 +368,10 @@ frappe.ui.form.on('Quotation', {
 
     selling_price_list(frm) {
         if (!frm.doc.selling_price_list) return;
-        // Reload defaults for all existing items
-        frm.doc.items.forEach(item => {
-            if (item.item_code) {
-                load_item_defaults(frm, item.doctype, item.name);
-            }
-        });
+        // Reload defaults for all existing items in one batched call
+        let rows = (frm.doc.items || []).filter(item => item.item_code);
+        rows.forEach(item => { item.__defaults_fetched = true; });
+        load_item_defaults_bulk(frm, rows);
     },
 });
 
@@ -405,7 +407,11 @@ frappe.ui.form.on('Quotation Item', {
         // Load and render item info (with table population for backward compatibility)
         refresh_item_info_html(frm, row.item_code, true);
 
-        // Load item defaults (single server call)
+        // Load item defaults (single server call). Mark as fetched so the
+        // bulk-upload MutationObserver (setup_bulk_upload_auto_fetch) doesn't
+        // redundantly re-fetch this same row if it fires before this
+        // in-flight call resolves.
+        row.__defaults_fetched = true;
         load_item_defaults(frm, cdt, cdn);
 
         // Handle service items
@@ -550,8 +556,12 @@ frappe.ui.form.on('Quotation Item', {
  * Preview-only calculation — same formula as server calc_item_totals.
  * Writes directly to row properties for instant UI feedback.
  * Server recalculates authoritatively on save.
+ *
+ * Split into a pure compute step (no grid redraw) and a thin wrapper that
+ * also redraws — bulk callers (load_item_defaults_bulk) compute for every
+ * row first and redraw the grid once at the end, instead of once per row.
  */
-function calculate_all_preview(frm, cdt, cdn) {
+function compute_row_preview(cdt, cdn) {
     let row = locals[cdt][cdn];
 
     let qty = flt(row.qty) || 1;
@@ -593,7 +603,10 @@ function calculate_all_preview(frm, cdt, cdn) {
     row.custom_special_rate   = per_unit_selling;
     row.rate                  = per_unit_selling;
     row.amount                = selling_price;
+}
 
+function calculate_all_preview(frm, cdt, cdn) {
+    compute_row_preview(cdt, cdn);
     frm.refresh_field("items");
 }
 
@@ -618,36 +631,211 @@ function load_item_defaults(frm, cdt, cdn) {
         },
         callback(r) {
             if (!r.message) return;
-            let d = r.message;
-
-            // No Item Price for this company — show message
-            if (d.no_price_for_company) {
-                frappe.msgprint({
-                    title: __('No Item Price Found'),
-                    message: __('No Item Price found for <b>{0}</b> in company <b>{1}</b> and price list <b>{2}</b>. Please create an Item Price first.', [d.item_code, d.company, d.price_list]),
-                    indicator: 'orange'
-                });
-                return;
-            }
-
-            // Always set prices — special price defaults to standard price if not set
-            let std_price = d.custom_standard_price_ || 0;
-            let sp = d.custom_special_price || std_price;
-            frappe.model.set_value(cdt, cdn, "custom_standard_price_", std_price);
-            frappe.model.set_value(cdt, cdn, "custom_special_price", sp);
-
-            // Set defaults only if field is currently empty (preserve user edits)
-            if (!row.shipping_per)      frappe.model.set_value(cdt, cdn, "shipping_per", d.shipping_per_air || 0);
-            if (!row.custom_transport_) frappe.model.set_value(cdt, cdn, "custom_transport_", d.custom_transport_ || 0);
-            if (!row.custom_finance_)   frappe.model.set_value(cdt, cdn, "custom_finance_", d.custom_finance_ || 0);
-            if (!row.std_margin_per)    frappe.model.set_value(cdt, cdn, "std_margin_per", d.std_margin_per || 0);
-            if (!row.custom_customs_)   frappe.model.set_value(cdt, cdn, "custom_customs_", d.custom_customs_ || 0);
-            if (!row.custom_markup_)    frappe.model.set_value(cdt, cdn, "custom_markup_", d.custom_markup_ || 0);
-
-            // Run preview after defaults are loaded
-            calculate_all_preview(frm, cdt, cdn);
+            apply_item_defaults_to_row(frm, cdt, cdn, r.message);
         }
     });
+}
+
+
+/**
+ * Apply a get_item_defaults()-shaped response onto a single row via
+ * frappe.model.set_value: sets price fields, fills empty percentage
+ * fields (preserving user edits), and re-runs the preview calc.
+ * Used by load_item_defaults() for interactive single-item selection,
+ * where the field-change triggers it fires (final valuation rate,
+ * shipment-margin sync) are meaningful — the item's other data (Item
+ * Price popup, valuation_rate) is already loaded by that point, and
+ * one row's worth of cascading redraws is imperceptible.
+ *
+ * NOT used for bulk application (see apply_item_defaults_to_row_silent) —
+ * with 50-100 rows, firing every one of those triggers (each ending in a
+ * full grid redraw) per field per row froze the browser for ~20s.
+ */
+function apply_item_defaults_to_row(frm, cdt, cdn, d) {
+    let row = locals[cdt][cdn];
+
+    // No Item Price for this company — show message
+    if (d.no_price_for_company) {
+        frappe.msgprint({
+            title: __('No Item Price Found'),
+            message: __('No Item Price found for <b>{0}</b> in company <b>{1}</b> and price list <b>{2}</b>. Please create an Item Price first.', [d.item_code, d.company, d.price_list]),
+            indicator: 'orange'
+        });
+        return;
+    }
+
+    // Always set prices — special price defaults to standard price if not set
+    let std_price = d.custom_standard_price_ || 0;
+    let sp = d.custom_special_price || std_price;
+    frappe.model.set_value(cdt, cdn, "custom_standard_price_", std_price);
+    frappe.model.set_value(cdt, cdn, "custom_special_price", sp);
+
+    // Set defaults only if field is currently empty (preserve user edits)
+    if (!row.shipping_per)      frappe.model.set_value(cdt, cdn, "shipping_per", d.shipping_per_air || 0);
+    if (!row.custom_transport_) frappe.model.set_value(cdt, cdn, "custom_transport_", d.custom_transport_ || 0);
+    if (!row.custom_finance_)   frappe.model.set_value(cdt, cdn, "custom_finance_", d.custom_finance_ || 0);
+    if (!row.std_margin_per)    frappe.model.set_value(cdt, cdn, "std_margin_per", d.std_margin_per || 0);
+    if (!row.custom_customs_)   frappe.model.set_value(cdt, cdn, "custom_customs_", d.custom_customs_ || 0);
+    if (!row.custom_markup_)    frappe.model.set_value(cdt, cdn, "custom_markup_", d.custom_markup_ || 0);
+
+    // Run preview after defaults are loaded
+    calculate_all_preview(frm, cdt, cdn);
+}
+
+
+/**
+ * Bulk-safe version of apply_item_defaults_to_row: writes fields directly
+ * onto the row object (bypassing frappe.model.set_value) so no field
+ * triggers fire and no grid redraw happens per row. Caller computes for
+ * every row, then redraws the grid exactly once at the end.
+ *
+ * Replicates the one field-trigger side effect that matters here
+ * (custom_customs_ → custom_final_valuation_rate) inline. Skips
+ * sync_shipment_margin_percent — that only affects the item-info popup's
+ * shipment/margin table, which is empty for bulk-uploaded rows anyway
+ * (it's populated by clicking a row, not by this fetch).
+ *
+ * Returns the {item_code, company, price_list} of the row if it had no
+ * Item Price, so the caller can report all such rows in one message
+ * instead of one msgprint per row.
+ */
+function apply_item_defaults_to_row_silent(cdt, cdn, d) {
+    let row = locals[cdt][cdn];
+
+    // item_name/uom are mandatory on save — fill them regardless of price
+    // availability, since core's own item_code fetch never ran for this row.
+    if (!row.item_name) row.item_name = d.item_name || row.item_code;
+    if (!row.description) row.description = d.description || d.item_name;
+    if (!row.uom && d.stock_uom) {
+        row.uom = d.stock_uom;
+        row.stock_uom = d.stock_uom;
+        row.conversion_factor = 1;
+        row.stock_qty = flt(row.qty) * 1;
+    }
+
+    if (d.no_price_for_company) {
+        return { item_code: d.item_code, company: d.company, price_list: d.price_list };
+    }
+
+    let std_price = d.custom_standard_price_ || 0;
+    let sp = d.custom_special_price || std_price;
+    row.custom_standard_price_ = std_price;
+    row.custom_special_price = sp;
+
+    if (!row.shipping_per)      row.shipping_per = d.shipping_per_air || 0;
+    if (!row.custom_transport_) row.custom_transport_ = d.custom_transport_ || 0;
+    if (!row.custom_finance_)   row.custom_finance_ = d.custom_finance_ || 0;
+    if (!row.std_margin_per)    row.std_margin_per = d.std_margin_per || 0;
+    if (!row.custom_customs_)   row.custom_customs_ = d.custom_customs_ || 0;
+    if (!row.custom_markup_)    row.custom_markup_ = d.custom_markup_ || 0;
+
+    row.custom_final_valuation_rate = row.custom_customs_
+        ? (flt(row.custom_customs_) / 100) * flt(row.valuation_rate)
+        : 0;
+
+    compute_row_preview(cdt, cdn);
+    return null;
+}
+
+
+/**
+ * Batched version of load_item_defaults() — one request for many rows.
+ * Used for bulk-uploaded rows so a 50-100 row CSV import doesn't fire
+ * that many separate requests, and applies results silently (see
+ * apply_item_defaults_to_row_silent), redrawing the grid exactly once
+ * at the end instead of hundreds of times.
+ */
+function load_item_defaults_bulk(frm, rows) {
+    if (!rows.length || !frm.doc.selling_price_list) return;
+
+    let item_codes = [...new Set(rows.map(r => r.item_code))];
+
+    frappe.call({
+        method: "avientek.events.quotation.get_item_defaults_bulk",
+        args: {
+            item_codes: item_codes,
+            price_list: frm.doc.selling_price_list,
+            currency: frm.doc.currency,
+            price_list_currency: frm.doc.price_list_currency,
+            plc_conversion_rate: frm.doc.plc_conversion_rate || 1,
+            company: frm.doc.company,
+        },
+        callback(r) {
+            if (!r.message) return;
+            let results = r.message;
+            let missing_price = [];
+
+            rows.forEach(row => {
+                let d = results[row.item_code];
+                if (!d) return;
+                let missing = apply_item_defaults_to_row_silent(row.doctype, row.name, d);
+                if (missing) missing_price.push(missing.item_code);
+            });
+
+            frm.dirty();
+            frm.refresh_field("items");
+
+            frappe.show_alert({
+                message: __('Prices fetched for {0} item(s).', [rows.length - missing_price.length]),
+                indicator: 'green'
+            });
+
+            if (missing_price.length) {
+                frappe.msgprint({
+                    title: __('No Item Price Found'),
+                    message: __('No Item Price found for: {0}', [missing_price.join(', ')]),
+                    indicator: 'orange'
+                });
+            }
+        }
+    });
+}
+
+
+/**
+ * Auto-fetch Item Price defaults for rows added via the Items grid's
+ * "Bulk Edit" CSV upload (Download/Upload buttons on the grid). That core
+ * Frappe feature writes item_code (and other columns) directly onto new
+ * child rows and never fires the item_code field trigger — so the normal
+ * load_item_defaults() call in the item_code handler above never runs for
+ * those rows.
+ *
+ * Rather than patching Frappe's core Grid class (which runs during every
+ * grid's construction and previously caused the whole form to fail to
+ * render when it broke), this watches the Items grid's DOM with a
+ * MutationObserver and reacts only after rows have already been painted —
+ * it can't interfere with initial form layout since it only ever runs
+ * after the form already exists. All pending rows are fetched in a single
+ * batched call (load_item_defaults_bulk) so a 50-row upload fills in at
+ * once instead of trickling in via 50 separate requests.
+ */
+function setup_bulk_upload_auto_fetch(frm) {
+    if (frm.__bulk_upload_observer) return;  // set up once per form instance
+
+    let grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+    let wrapper = grid && grid.wrapper && grid.wrapper.get(0);
+    if (!wrapper) return;
+
+    let debounce_timer = null;
+    let observer = new MutationObserver(() => {
+        clearTimeout(debounce_timer);
+        debounce_timer = setTimeout(() => {
+            let pending = (frm.doc.items || []).filter(
+                item => item.item_code && !flt(item.custom_standard_price_) && !item.__defaults_fetched
+            );
+            if (!pending.length) return;
+
+            pending.forEach(item => { item.__defaults_fetched = true; });
+            frappe.show_alert({
+                message: __('Fetching item prices for {0} row(s)...', [pending.length]),
+                indicator: 'blue'
+            });
+            load_item_defaults_bulk(frm, pending);
+        }, 300);
+    });
+
+    observer.observe(wrapper, { childList: true, subtree: true });
+    frm.__bulk_upload_observer = observer;
 }
 
 
