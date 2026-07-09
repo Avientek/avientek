@@ -117,6 +117,22 @@ def validate_brand_pn(doc,method):
 		frappe.throw("There is already another item present with same brand and part number. Please review")
 
 
+def warn_missing_hsn_for_sales_item(doc, method=None):
+	"""Non-blocking reminder — HSN/SAC used to be hard-mandatory for sales
+	items (Item-gst_hsn_code-mandatory_depends_on Property Setter), which
+	blocked saving. Sridhar 2026-07-09: downgraded to a reminder instead —
+	save proceeds, but the user is nudged to add it for GST compliance.
+	See avientek.patches.remove_hsn_mandatory_depends_on for the removal
+	of the old mandatory rule.
+	"""
+	if doc.is_sales_item and not doc.gst_hsn_code:
+		frappe.msgprint(
+			_("HSN/SAC code is not set for this item, which is marked as a Sales Item. Please add it for GST compliance."),
+			title=_("HSN/SAC Missing"),
+			indicator="orange",
+		)
+
+
 @frappe.whitelist()
 def get_custom_duty(item=None,company=None):
 	d = frappe.db.sql("""select tid.custom_duty from `tabItem Default` tid where '{0}'=tid.parent and tid.company ='{1}'""".format(item,company),

@@ -541,7 +541,10 @@ doc_events = {
     },
     "Item": {
         "before_save": "avientek.events.item.auto_populate_defaults",
-        "validate": "avientek.events.item.validate_brand_pn",
+        "validate": [
+            "avientek.events.item.validate_brand_pn",
+            "avientek.events.item.warn_missing_hsn_for_sales_item",
+        ],
     },
     "Sales Order": {
         "before_validate": [
