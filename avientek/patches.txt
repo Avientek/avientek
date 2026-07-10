@@ -603,3 +603,22 @@ avientek.patches.add_dn_void_fields
 # "PRF Approval Rule Chain" (child).
 avientek.patches.add_prf_approval_chain_fields
 avientek.patches.backfill_blank_item_name
+# Sridhar 2026-07-09: downgrades Item.gst_hsn_code from hard-mandatory
+# (eval:doc.is_sales_item, added 2026-07-08) to a non-blocking reminder —
+# see avientek.events.item.warn_missing_hsn_for_sales_item (validate).
+# Sets the Property Setter's value to blank rather than deleting it —
+# deleting exposed the ORIGINAL broken mandatory_depends_on baked onto
+# the underlying is_system_generated Custom Field
+# ("gst_settings.validate_hsn_code && doc.is_sales_item", the dead
+# reference that caused the "Invalid depends_on expression" crash this
+# whole fix started from). The 2026-07-08 Property Setter was masking
+# that broken value, not fixing it — a blank override must stay in
+# place permanently, not be removed.
+avientek.patches.remove_hsn_mandatory_depends_on
+# Sridhar 2026-07-09: rogue Item-batch_number_series-reqd Property
+# Setter (is_system_generated=0, not tracked anywhere in this repo)
+# forces Batch Number Series mandatory on EVERY Item, even though core
+# ERPNext only shows this field when has_batch_no + create_new_batch
+# are both checked. Safe to delete outright — core's own field
+# definition has no reqd baked in underneath (unlike the HSN case).
+avientek.patches.remove_rogue_batch_number_series_reqd
