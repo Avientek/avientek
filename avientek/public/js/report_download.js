@@ -516,7 +516,12 @@ function _rd_export_all(rv, dt, headers, keys, parent_keys, col_types, col_optio
 	// the list view would use for its own refresh — same filters, same
 	// fields, same group_by — so the export matches what the user sees.
 	var CHUNK = 5000;
-	var MAX_ROWS = 100000;
+	// Jithin 2026-07-14: Item master has >100K rows and the full export was
+	// truncating at 100K. Export is chunked (5K/request, assembled client-
+	// side) so there's no single-response 413 risk — the cap is only a
+	// browser-memory / wall-clock safety limit. Raised to 500K so the full
+	// item master exports in one pass. Applies to ALL list-view exports.
+	var MAX_ROWS = 500000;
 	var all_data = [];
 
 	var base_call_args = (rv.get_call_args && rv.get_call_args()) || null;
