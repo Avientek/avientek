@@ -89,6 +89,12 @@ def on_state_change(doc, method=None):
         return  # no transition
 
     try:
+        # The stage we just left is over — whoever acted, acted for everyone.
+        # Close out any other approver's still-Open ToDo from that stage
+        # before assigning the next one, so assignees stop piling up on the
+        # doc across L1 → L2 → Approved/Rejected.
+        _close_stale_assignment_todos(doc)
+
         if new_state in ("Pending L1 Approval", "Pending For Approval"):
             _notify_approval_required(doc, stage="L1")
         elif new_state == "Pending L2 Approval":
@@ -385,6 +391,10 @@ def _assign_todo(doc, user, description):
             "assign_to": [user],
             "description": description,
             "notify": 0,
+            # Fixed sentinel (not frappe.session.user) so _close_stale_assignment_todos
+            # can reliably tell "created by this routing logic" apart from a human
+            # manually assigning a colleague via the Assign To widget.
+            "assigned_by": "Administrator",
         }
         if "ignore_permissions" in inspect.signature(add_assign).parameters:
             add_assign(payload, ignore_permissions=True)
@@ -401,3 +411,46 @@ def _assign_todo(doc, user, description):
             title="quotation_notifications: _assign_todo failed",
             message=frappe.get_traceback(),
         )
+
+
+def _close_stale_assignment_todos(doc):
+    """Cancel every Open ToDo this routing logic previously created on the
+    doc. Called at the top of a workflow_state transition, before the new
+    stage's approvers are assigned — so once anyone acts (moving the state
+    along), the other approvers who were pinged for the now-finished stage
+    no longer see it under "Assigned To".
+
+    Only touches ToDos this module created (allocated_by == "Administrator",
+    the fixed sentinel _assign_todo sets) — a ToDo a human created manually
+    via the Assign To widget has assigned_by == that user, so it's left
+    alone. Same enable_quotation_assignment gate as _assign_todo: if
+    assignment is off, there's nothing of ours to clean up."""
+    if not frappe.get_meta("Avientek Settings").has_field("enable_quotation_assignment"):
+        return
+    enabled = frappe.db.get_single_value("Avientek Settings", "enable_quotation_assignment")
+    if not enabled or str(enabled) == "0":
+        return
+
+    stale = frappe.get_all(
+        "ToDo",
+        filters={
+            "reference_type": "Quotation",
+            "reference_name": doc.name,
+            "status": "Open",
+            "assigned_by": "Administrator",
+        },
+        pluck="name",
+    )
+    for name in stale:
+        try:
+            # ToDo.save() (not a raw db.set_value) — its on_update hook is what
+            # syncs the Quotation's `_assign` field, which is what the
+            # "Assigned To" sidebar widget actually reads from.
+            todo = frappe.get_doc("ToDo", name)
+            todo.status = "Cancelled"
+            todo.save(ignore_permissions=True)
+        except Exception:
+            frappe.log_error(
+                title="quotation_notifications: _close_stale_assignment_todos failed",
+                message=frappe.get_traceback(),
+            )
