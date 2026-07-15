@@ -99,8 +99,18 @@ def _unblock_avientek_module():
 
 	frappe.db.commit()
 
+	# NOTE: Administrator's cache MUST be cleared when it was the blocked party.
+	# Frappe filters Number Card / Dashboard Chart visibility by
+	# get_modules_from_all_apps_for_user(), which subtracts *Administrator's*
+	# blocked modules GLOBALLY for every user (frappe/config/__init__.py) — on
+	# top of the per-user list. So a stale cached Administrator doc with Avientek
+	# still blocked hides all module=Avientek number cards for EVERY user, even
+	# though the workspace itself (filtered only by the user's own block list)
+	# still renders. This exact mismatch caused a long prod hunt on 2026-07-15
+	# (saudi.sales: workspace visible but body blank). Only Guest is skipped.
+	admin_was_blocked = "Administrator" in users
 	for u in users:
-		if u in ("Administrator", "Guest"):
+		if u == "Guest":
 			continue
 		try:
 			frappe.clear_cache(user=u)
@@ -114,6 +124,7 @@ def _unblock_avientek_module():
 	print(
 		f"[after_migrate] Unblocked Avientek module: cleared block rows on "
 		f"{len(profiles)} profile(s) + synced {len(users)} user(s)"
+		f"{' [Administrator was blocked — cleared its cache]' if admin_was_blocked else ''}"
 	)
 
 
