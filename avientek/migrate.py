@@ -43,6 +43,18 @@ def after_migrate():
 		("sync_payment_voucher_formats", _sync_payment_voucher_formats),
 		("sync_sales_team_workspace", _sync_sales_team_workspace),
 		("unblock_avientek_module", _unblock_avientek_module),
+		# saudi.sales 2026-07-15 (TSK-00519): non-admin users with a Report
+		# User Permission (apply_to_all_doctypes) got a fully BLANK workspace
+		# dashboard. With System Settings "Apply Strict User Permissions" ON,
+		# Frappe applies the Report restriction to a Number Card via its
+		# `report_name` Link→Report field; the sales cards have report_name
+		# EMPTY, and strict mode rejects the empty link → every number card is
+		# permission-filtered out of get_desktop_page (admins bypass, so it's
+		# invisible to them). Marking report_name to ignore user permissions
+		# makes the dashboard cards render regardless of a user's Report/report
+		# restrictions. Site-wide, idempotent. (Proven on a prod-data restore.)
+		("number_card_ignore_report_up", lambda: make_property_setter(
+			"Number Card", "report_name", "ignore_user_permissions", 1, "Check")),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
 	]
