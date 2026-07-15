@@ -55,11 +55,30 @@ def after_migrate():
 		# restrictions. Site-wide, idempotent. (Proven on a prod-data restore.)
 		("number_card_ignore_report_up", lambda: make_property_setter(
 			"Number Card", "report_name", "ignore_user_permissions", 1, "Check")),
+		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
 	]
 	for label, fn in steps:
 		_run_step(label, fn)
+
+
+def _allow_quotation_cost_fields_after_submit():
+	"""Rahul 2026-07-15 (QN-FZCO-26-00340): "Cannot Update After Submit —
+	Row #N: Not allowed to change Valuation Rate after submission from
+	4889.700565217 to 4889.700565217391" blocked post-submit edits (the
+	Request-for-Update / Cancellation-Check flow).
+
+	Cause: ERPNext refetches Quotation Item.valuation_rate from the Item
+	master on every save at full float precision; the stored value is rounded,
+	so on a submitted-doc edit the two differ and the immutable-field check
+	(the field is allow_on_submit=0) throws — even though nothing meaningful
+	changed. Marking the recomputed cost fields allow_on_submit lets the check
+	skip them, so a cosmetic valuation refresh no longer blocks the edit.
+	Idempotent. custom_final_valuation_rate derives from valuation_rate, so it
+	gets the same treatment to avoid the block simply shifting to it."""
+	for fieldname in ("valuation_rate", "custom_final_valuation_rate"):
+		make_property_setter("Quotation Item", fieldname, "allow_on_submit", 1, "Check")
 
 
 def _unblock_avientek_module():
