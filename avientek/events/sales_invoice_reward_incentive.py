@@ -77,8 +77,17 @@ def book_reward_incentive_jv(doc, method=None):
     else:
         reward_amt, incentive_amt = _compute_quotationwise(doc, quote)
 
-    reward_amt = flt(reward_amt, 2)
-    incentive_amt = flt(incentive_amt, 2)
+    # Jithin / Sammish 2026-07-17 (INV-FZCO-26-00885-1 → JV-FZCO-26-00450):
+    # the Quote's reward / incentive figures are in the QUOTE's currency
+    # (e.g. USD), but _post_jv books them into company-currency accounts
+    # (e.g. AED) via debit_in_account_currency — so on every foreign-currency
+    # quote a USD figure was posted as AED (2,840 USD booked as 2,840 AED
+    # instead of AED 10,429.90). Convert to company currency with the Quote's
+    # exchange rate. No-op (rate 1.0) for quotes already in company currency,
+    # so existing AED bookings are unchanged.
+    conversion_rate = flt(quote.get("conversion_rate")) or 1.0
+    reward_amt = flt(reward_amt * conversion_rate, 2)
+    incentive_amt = flt(incentive_amt * conversion_rate, 2)
     if reward_amt <= 0 and incentive_amt <= 0:
         _skip(doc, f"computed reward={reward_amt} + incentive={incentive_amt} both zero — JV skipped")
         return
@@ -176,11 +185,18 @@ def _resolve_quotation_for_si(si_doc):
 
 
 def _compute_quotationwise(si_doc, quote):
-    """Method 1: proportional to SI grand_total vs Quote grand_total."""
-    quote_total = flt(quote.get("grand_total"))
+    """Method 1: proportional to SI grand_total vs Quote grand_total.
+
+    Uses base_* (company-currency) totals so the ratio stays correct even when
+    the SI and the Quote are in different currencies — comparing raw
+    grand_totals across currencies would silently skew the proportion.
+    Identical to the old behaviour for company-currency documents. The returned
+    amounts are still in the QUOTE's currency; the caller converts them.
+    """
+    quote_total = flt(quote.get("base_grand_total")) or flt(quote.get("grand_total"))
     if quote_total <= 0:
         return 0.0, 0.0
-    si_total = flt(si_doc.get("grand_total"))
+    si_total = flt(si_doc.get("base_grand_total")) or flt(si_doc.get("grand_total"))
     proportion = si_total / quote_total
     if proportion <= 0:
         return 0.0, 0.0
