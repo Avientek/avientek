@@ -622,3 +622,14 @@ avientek.patches.remove_hsn_mandatory_depends_on
 # are both checked. Safe to delete outright — core's own field
 # definition has no reqd baked in underneath (unlike the HSN case).
 avientek.patches.remove_rogue_batch_number_series_reqd
+# Sammish 2026-07-17: corrects the 13 Reward & Incentive JVs booked from
+# foreign-currency (USD) quotes WITHOUT an exchange rate — the amount went
+# into the AED accounts as if it were AED, understating Sales Commission /
+# Sales Commission Payable by AED 41,350.39 in total. The forward fix is
+# c1d473f; this reverses and re-books the historical ones.
+#
+# 12 of the 13 post into June 2026, which was frozen (acc_frozen_upto
+# 2026-06-30). Jithin (Accounts) approved the correction and OPENED the
+# June period on 2026-07-17 specifically so this could run. Ask Accounts
+# to RE-FREEZE June once the post-deploy verification is done.
+avientek.patches.fix_incentive_jv_missing_fx_conversion
