@@ -784,20 +784,53 @@ def _get_quotation_for_po(po_name):
 	prevents infinite loops on corrupt prod data with circular
 	po_no references.
 	"""
+	quotations = _get_quotations_for_po(po_name)
+	return quotations[0] if quotations else None
+
+
+def _get_quotations_for_po(po_name):
+	"""ALL distinct Quotations behind a Purchase Order, in PO item order.
+
+	A single PO routinely consolidates MULTIPLE Sales Orders (one line
+	per customer deal), and each SO can itself carry items from more
+	than one Quotation. The singular resolver above stops at the first
+	hit, which silently dropped every other Quotation's Brand Summary
+	from the PRF print.
+
+	Rahul 2026-07-18, PRF AVFZC-02420:
+	    PO-FZCO-26-00889 item idx 1 → SO-FZCO-26-01428 → QN-FZCO-26-00305
+	                     item idx 2 → SO-FZCO-26-01423 → QN-FZCO-26-00298
+	Only QN-FZCO-26-00305 (idx 1) was rendered; the Al Nahla quote was
+	invisible on the voucher.
+
+	Returns an ordered, de-duplicated list (empty when nothing
+	resolves). Safe on empty/None input; never raises.
+	"""
 	if not po_name:
-		return None
+		return []
 	try:
-		so = frappe.db.get_value(
+		sales_orders = frappe.db.get_all(
 			"Purchase Order Item",
-			{"parent": po_name},
-			"sales_order",
+			filters={"parent": po_name},
+			pluck="sales_order",
 			order_by="idx asc",
 		)
-		if not so:
-			return None
-		return _resolve_quotation_through_so_chain(so)
 	except Exception:
-		return None
+		return []
+
+	quotations = []
+	seen_so = set()
+	for so in sales_orders:
+		if not so or so in seen_so:
+			continue
+		seen_so.add(so)
+		try:
+			for qn in _resolve_quotations_through_so_chain(so):
+				if qn not in quotations:
+					quotations.append(qn)
+		except Exception:
+			continue
+	return quotations
 
 
 def _resolve_quotation_through_so_chain(so_name, _depth=0, _seen=None):
@@ -811,26 +844,45 @@ def _resolve_quotation_through_so_chain(so_name, _depth=0, _seen=None):
 	    Linked SO  --(po_no)-->          Original SO      (recurse)
 	    Original SO --(prevdoc_docname)--> Original Quote (terminate)
 	"""
+	quotations = _resolve_quotations_through_so_chain(
+		so_name, _depth=_depth, _seen=_seen,
+	)
+	return quotations[0] if quotations else None
+
+
+def _resolve_quotations_through_so_chain(so_name, _depth=0, _seen=None):
+	"""Walk an SO back to ALL its Quotations (list form of the above).
+
+	Same walk, but collects EVERY distinct Quotation referenced by the
+	SO's items instead of stopping at the first — one SO can be raised
+	against more than one Quote. The intercompany `po_no` hop is taken
+	only when the SO references no Quotation at all, exactly as before.
+
+	Returns a list (possibly empty). Depth- and cycle-bounded.
+	"""
 	if not so_name:
-		return None
+		return []
 	if _depth > 5:
-		return None  # corrupt po_no cycle — bail
+		return []  # corrupt po_no cycle — bail
 	if not frappe.db.exists("Sales Order", so_name):
-		return None
+		return []
 	seen = _seen if _seen is not None else set()
 	if so_name in seen:
-		return None
+		return []
 	seen = seen | {so_name}
 
-	# Hop A — direct Quotation reference via prevdoc_docname
-	qn = frappe.db.get_value(
+	# Hop A — every distinct Quotation referenced by this SO's items.
+	quotations = []
+	for qn in frappe.db.get_all(
 		"Sales Order Item",
-		{"parent": so_name},
-		"prevdoc_docname",
+		filters={"parent": so_name},
+		pluck="prevdoc_docname",
 		order_by="idx asc",
-	)
-	if qn and frappe.db.exists("Quotation", qn):
-		return qn
+	):
+		if qn and qn not in quotations and frappe.db.exists("Quotation", qn):
+			quotations.append(qn)
+	if quotations:
+		return quotations
 
 	# Hop B — intercompany: follow SO.po_no if it points to another SO.
 	# Avientek's convention per Sridhar 2026-06-15: a Linked SO created
@@ -839,11 +891,11 @@ def _resolve_quotation_through_so_chain(so_name, _depth=0, _seen=None):
 	# stock ERPNext semantic of "customer's external PO number").
 	po_no_value = frappe.db.get_value("Sales Order", so_name, "po_no")
 	if po_no_value and frappe.db.exists("Sales Order", po_no_value):
-		return _resolve_quotation_through_so_chain(
+		return _resolve_quotations_through_so_chain(
 			po_no_value, _depth=_depth + 1, _seen=seen,
 		)
 
-	return None
+	return []
 
 
 @frappe.whitelist()
@@ -3535,15 +3587,25 @@ def get_voucher_print_data(docname):
             elif row_data.get("linked_po"):
                 _po_for_quote_chain = row_data["linked_po"]
             if _po_for_quote_chain:
-                _qn = _get_quotation_for_po(_po_for_quote_chain)
-                if _qn:
-                    row_data["linked_quotation"] = _qn
+                # A PO can consolidate several SOs / Quotes — render a
+                # Brand Summary for EACH, not just the first (Rahul
+                # 2026-07-18, AVFZC-02420). Legacy singular keys are
+                # still populated from the first Quote so older print
+                # formats keep working unchanged.
+                _qns = _get_quotations_for_po(_po_for_quote_chain)
+                if _qns:
+                    row_data["linked_quotation"] = _qns[0]
+                _summaries = []
+                for _qn in _qns:
                     try:
-                        row_data["quotation_brand_summary_html"] = (
-                            _build_brand_summary_html(_qn) or ""
-                        )
+                        _html = _build_brand_summary_html(_qn) or ""
                     except Exception:
-                        row_data["quotation_brand_summary_html"] = ""
+                        _html = ""
+                    if _html:
+                        _summaries.append({"quotation": _qn, "html": _html})
+                row_data["quotation_brand_summaries"] = _summaries
+                if _summaries:
+                    row_data["quotation_brand_summary_html"] = _summaries[0]["html"]
 
         row_attachments.append(row_data)
 
@@ -4530,15 +4592,25 @@ def get_payment_voucher_context(docname):
             elif row_data.get("linked_po"):
                 _po_for_quote_chain = row_data["linked_po"]
             if _po_for_quote_chain:
-                _qn = _get_quotation_for_po(_po_for_quote_chain)
-                if _qn:
-                    row_data["linked_quotation"] = _qn
+                # A PO can consolidate several SOs / Quotes — render a
+                # Brand Summary for EACH, not just the first (Rahul
+                # 2026-07-18, AVFZC-02420). Legacy singular keys are
+                # still populated from the first Quote so older print
+                # formats keep working unchanged.
+                _qns = _get_quotations_for_po(_po_for_quote_chain)
+                if _qns:
+                    row_data["linked_quotation"] = _qns[0]
+                _summaries = []
+                for _qn in _qns:
                     try:
-                        row_data["quotation_brand_summary_html"] = (
-                            _build_brand_summary_html(_qn) or ""
-                        )
+                        _html = _build_brand_summary_html(_qn) or ""
                     except Exception:
-                        row_data["quotation_brand_summary_html"] = ""
+                        _html = ""
+                    if _html:
+                        _summaries.append({"quotation": _qn, "html": _html})
+                row_data["quotation_brand_summaries"] = _summaries
+                if _summaries:
+                    row_data["quotation_brand_summary_html"] = _summaries[0]["html"]
 
         row_attachments.append(row_data)
 
