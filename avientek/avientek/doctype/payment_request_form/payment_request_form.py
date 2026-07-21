@@ -788,7 +788,7 @@ def _get_quotation_for_po(po_name):
 	return quotations[0] if quotations else None
 
 
-def _get_quotations_for_po(po_name):
+def _get_quotations_for_po(po_name, _depth=0, _seen=None):
 	"""ALL distinct Quotations behind a Purchase Order, in PO item order.
 
 	A single PO routinely consolidates MULTIPLE Sales Orders (one line
@@ -808,6 +808,13 @@ def _get_quotations_for_po(po_name):
 	"""
 	if not po_name:
 		return []
+	if _depth > 5:
+		return []  # corrupt intercompany cycle — bail
+	seen = _seen if _seen is not None else set()
+	if ("PO", po_name) in seen:
+		return []
+	seen.add(("PO", po_name))
+
 	try:
 		sales_orders = frappe.db.get_all(
 			"Purchase Order Item",
@@ -819,13 +826,13 @@ def _get_quotations_for_po(po_name):
 		return []
 
 	quotations = []
-	seen_so = set()
 	for so in sales_orders:
-		if not so or so in seen_so:
+		if not so:
 			continue
-		seen_so.add(so)
 		try:
-			for qn in _resolve_quotations_through_so_chain(so):
+			for qn in _resolve_quotations_through_so_chain(
+				so, _depth=_depth + 1, _seen=seen,
+			):
 				if qn not in quotations:
 					quotations.append(qn)
 		except Exception:
@@ -867,9 +874,9 @@ def _resolve_quotations_through_so_chain(so_name, _depth=0, _seen=None):
 	if not frappe.db.exists("Sales Order", so_name):
 		return []
 	seen = _seen if _seen is not None else set()
-	if so_name in seen:
+	if ("SO", so_name) in seen:
 		return []
-	seen = seen | {so_name}
+	seen.add(("SO", so_name))
 
 	# Hop A — every distinct Quotation referenced by this SO's items.
 	quotations = []
@@ -884,14 +891,38 @@ def _resolve_quotations_through_so_chain(so_name, _depth=0, _seen=None):
 	if quotations:
 		return quotations
 
-	# Hop B — intercompany: follow SO.po_no if it points to another SO.
-	# Avientek's convention per Sridhar 2026-06-15: a Linked SO created
-	# from a sibling-company PO stamps the ORIGINAL SO's name into
-	# `po_no` (a Data field on Sales Order — repurposed from its
+	# Hop B — intercompany. An SO created from a sibling-company
+	# document has no prevdoc_docname; it carries the sibling document's
+	# name in `po_no` (a Data field on Sales Order, repurposed from its
 	# stock ERPNext semantic of "customer's external PO number").
+	#
+	# `po_no` points at one of THREE things, so test each:
+	#   B1. a sibling SALES ORDER  — the shape Sridhar documented
+	#                                2026-06-15; recurse as an SO.
+	#   B2. a sibling PURCHASE ORDER — the shape actually produced by
+	#                                the intercompany flow (Rahul
+	#                                2026-07-18, PRF AVFZC-02431):
+	#                                  SO-FZCO-26-01482
+	#                                    .po_no = PO-LLC-26-00776   (a PO!)
+	#                                    → SO-LLC-26-00678
+	#                                    → QN-LLC-26-00659
+	#                                Only B1 was handled, so every
+	#                                intercompany PRF resolved to no
+	#                                Quotation at all and printed no
+	#                                costing.
+	#   B3. free text (a customer's real external PO number, e.g.
+	#       "PO-0655") — matches neither; give up cleanly.
 	po_no_value = frappe.db.get_value("Sales Order", so_name, "po_no")
-	if po_no_value and frappe.db.exists("Sales Order", po_no_value):
+	if not po_no_value:
+		return []
+
+	if frappe.db.exists("Sales Order", po_no_value):
 		return _resolve_quotations_through_so_chain(
+			po_no_value, _depth=_depth + 1, _seen=seen,
+		)
+
+	if frappe.db.exists("Purchase Order", po_no_value):
+		return _get_quotations_for_po(
 			po_no_value, _depth=_depth + 1, _seen=seen,
 		)
 
