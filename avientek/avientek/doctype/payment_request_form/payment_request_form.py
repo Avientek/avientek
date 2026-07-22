@@ -5317,20 +5317,21 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         except Exception:
             pass
 
-    # Rahul 2026-05-22 — surface a `linked_quotation` reference (just
-    # the name, NOT the rendered HTML) so the popup can show a small
-    # "View Quotation" link. Full inline HTML render was removed per
+    # Rahul 2026-05-22 — surface `linked_quotation` references (just
+    # the names, NOT the rendered HTML) so the popup can show small
+    # "View Quotation" links. Full inline HTML render was removed per
     # request; users open the Quotation in a new tab via the link.
-    linked_quotation = ""
+    # Rahul 2026-07-18 (AVFZC-02449): a PO can trace back to SEVERAL
+    # Quotations — return them ALL, keeping the singular key (first
+    # one) for backward compatibility with cached client bundles.
+    linked_quotations = []
     _po_for_quote_chain = ""
     if actual_doctype == "Purchase Order":
         _po_for_quote_chain = reference_name
     elif po_name:
         _po_for_quote_chain = po_name
     if _po_for_quote_chain:
-        _qn = _get_quotation_for_po(_po_for_quote_chain)
-        if _qn:
-            linked_quotation = _qn
+        linked_quotations = _get_quotations_for_po(_po_for_quote_chain)
 
     return {
         "attachment_images": att_images,
@@ -5340,7 +5341,8 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         "po_name": po_name,
         "costing_images": costing_images,
         "costing_url": costing_url,
-        "linked_quotation": linked_quotation,
+        "linked_quotation": linked_quotations[0] if linked_quotations else "",
+        "linked_quotations": linked_quotations,
         "resolved_doctype": actual_doctype or "",
         "resolved_exists": resolved_exists,
         "stated_doctype": reference_doctype or "",

@@ -2038,17 +2038,23 @@ frappe.ui.form.on('Payment Request Form', {
                 }
             }
 
-            // 4. Rahul 2026-05-22 — Linked Quotation reference. When
-            // the row's PO chain traces back to a Sales Quotation,
-            // surface it as a small "View Quotation" link. No inline
+            // 4. Rahul 2026-05-22 — Linked Quotation references. When
+            // the row's PO chain traces back to Sales Quotation(s),
+            // surface each as a small "View Quotation" link. No inline
             // HTML render (per request) — the link opens the
             // Quotation print in a new tab via the standard Frappe
             // /app/quotation route.
-            const linked_quotation = data.linked_quotation || "";
-            if (linked_quotation) {
+            // Rahul 2026-07-18 (AVFZC-02449): a PO can trace back to
+            // SEVERAL Quotations — render a link per Quote. Falls back
+            // to the legacy singular key if the server is older.
+            const linked_quotations =
+                (data.linked_quotations && data.linked_quotations.length)
+                    ? data.linked_quotations
+                    : (data.linked_quotation ? [data.linked_quotation] : []);
+            for (const linked_quotation of linked_quotations) {
                 const qn_form_url = "/app/quotation/" + encodeURIComponent(linked_quotation);
                 html += _section_header(`Linked Quotation: ${linked_quotation}`, qn_form_url);
-                html += `<a href="${qn_form_url}" target="_blank" class="btn btn-sm btn-default">View Quotation ${frappe.utils.escape_html(linked_quotation)}</a>`;
+                html += `<a href="${qn_form_url}" target="_blank" class="btn btn-sm btn-default" style="margin-bottom:8px;">View Quotation ${frappe.utils.escape_html(linked_quotation)}</a>`;
             }
 
             // 5. Costing Sheet from PRF row.
@@ -2064,7 +2070,7 @@ frappe.ui.form.on('Payment Request Form', {
                 html += `<a href="${costing_url}" target="_blank" class="btn btn-sm btn-default">Open Costing Sheet</a>`;
             }
 
-            if (!att_images.length && !file_list.length && !print_images.length && !po_images.length && !costing_images.length && !costing_url && !linked_quotation) {
+            if (!att_images.length && !file_list.length && !print_images.length && !po_images.length && !costing_images.length && !costing_url && !linked_quotations.length) {
                 html += `<div class="inv-att-no-files">No documents to show for ${frappe.utils.escape_html(doc_label)}</div>`;
             }
             $body.html(html);
