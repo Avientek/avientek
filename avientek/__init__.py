@@ -1155,3 +1155,48 @@ try:
 except Exception:
 	pass
 
+
+def _patch_apply_price_list_skips_unknown_items():
+	"""Guard erpnext's apply_price_list against non-existent item codes.
+
+	Users paste part numbers / descriptions ("VCM36-W Package",
+	"SBID-GX186-V3", even a stray bullet char) into the Quotation grid's
+	Item Code column. The Link field hasn't validated yet, but changing
+	the currency / price list fires the `apply_price_list` RPC with the
+	raw grid value, and erpnext's `apply_price_list_on_item` does:
+
+	    item_doc = frappe.db.get_value("Item", args.item_code, ...)  # -> None
+	    get_price_list_rate(args, item_doc)  # -> item_doc.name  ->
+	    AttributeError: 'NoneType' object has no attribute 'name'
+
+	i.e. a hard 500 "Server Error" popup instead of a validation message
+	(28 occurrences in the 5 days to 2026-07-22, ~20 distinct bogus
+	codes, mostly KSA quotes).
+
+	Patch: when the row's item_code does not exist, skip price-list
+	application for that row (return an empty dict — the row is left
+	untouched). The eventual SAVE still fails cleanly with frappe's own
+	"Could not find Item ..." link validation, which is the message the
+	user should see.
+	"""
+	import frappe
+	import erpnext.stock.get_item_details as _gid
+
+	_original = _gid.apply_price_list_on_item
+
+	# NB: signature differs across erpnext point releases (some pass
+	# doc=...) — forward everything verbatim.
+	def patched_apply_price_list_on_item(args, *a, **kw):
+		item_code = args.get("item_code") if hasattr(args, "get") else None
+		if item_code and not frappe.db.exists("Item", item_code):
+			return frappe._dict()
+		return _original(args, *a, **kw)
+
+	_gid.apply_price_list_on_item = patched_apply_price_list_on_item
+
+
+try:
+	_patch_apply_price_list_skips_unknown_items()
+except Exception:
+	pass
+
