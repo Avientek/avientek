@@ -19,13 +19,26 @@ class AvientekSettings(Document):
 		to skip the re-seed when an unrelated field on the Settings was
 		updated.
 		"""
+		if frappe.flags.in_install or frappe.flags.in_migrate:
+			# Fresh install / migrate: the Singles doc is being created,
+			# so has_value_changed() reports True for everything and the
+			# reseed would run against half-synced schema (e.g. the
+			# Payment Entry.payment_request_form custom field doesn't
+			# exist yet on a brand-new site). The workflow arrives via
+			# the fixtures / patches anyway — skip.
+			return
 		try:
 			if self.has_value_changed("issued_bank_edit_roles"):
 				_reseed_payment_request_form_workflow()
-		except Exception as e:
+		except Exception:
+			# NB argument order: frappe v15 log_error is (title, message)
+			# — an earlier version passed the exception text as the TITLE,
+			# which overflowed Error Log's 140-char `method` column and
+			# raised DataError INSIDE this except block, aborting the very
+			# save it was meant to protect (broke fresh-site installs).
 			frappe.log_error(
-				f"Avientek Settings on_update PRF reseed: {e}",
-				"AvientekSettings.on_update",
+				title="AvientekSettings.on_update PRF reseed failed",
+				message=frappe.get_traceback(),
 			)
 
 
