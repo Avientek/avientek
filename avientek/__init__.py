@@ -491,6 +491,131 @@ def _patch_validate_negative_batch_respect_setting():
 	sbb_mod.SerialandBatchBundle.validate_negative_batch = _patched_validate_negative_batch
 
 
+def _batch_valuation_zero_rate_guard(self):
+	"""Shared logic for the zero-rate safety net — factored out so the
+	smoke test (avientek/scripts/test_batch_valuation_zero_rate_guard.py)
+	can exercise the exact same code against a synthetic post-calculate_avg_rate
+	state, instead of a method the bug doesn't actually flow through.
+
+	Mutates self.batch_avg_rate (per-batch rate dict) and self.stock_value_change
+	(the running aggregate) in place for any batch that resolved to a false 0.
+	"""
+	import frappe
+	from frappe.utils import flt
+
+	if flt(self.sle.get("actual_qty")) >= 0:
+		return  # inward receipts value themselves from their own bundle
+
+	if not hasattr(self, "batch_avg_rate") or not hasattr(self, "batch_nos"):
+		return
+
+	voucher_type = self.sle.get("voucher_type")
+	voucher_detail_no = self.sle.get("voucher_detail_no")
+	ref_item_dt = {
+		"Stock Entry": "Stock Entry Detail",
+		"Purchase Invoice": "Purchase Invoice Item",
+		"Sales Invoice": "Sales Invoice Item",
+		"Delivery Note": "Delivery Note Item",
+		"Purchase Receipt": "Purchase Receipt Item",
+	}.get(voucher_type)
+	allow_zero = (
+		frappe.db.get_value(ref_item_dt, voucher_detail_no, "allow_zero_valuation_rate")
+		if ref_item_dt and voucher_detail_no
+		else False
+	)
+	if allow_zero:
+		return
+
+	bin_valuation = frappe.db.get_value(
+		"Bin", {"item_code": self.item_code, "warehouse": self.warehouse}, "valuation_rate"
+	)
+	if not flt(bin_valuation):
+		return
+
+	for batch_no, ledger in self.batch_nos.items():
+		qty = flt(getattr(ledger, "qty", None))
+		if qty >= 0:
+			continue  # only guard this batch's own outward qty in this bundle
+
+		if flt(self.batch_avg_rate.get(batch_no)):
+			continue  # already has a real rate, leave untouched
+
+		self.batch_avg_rate[batch_no] = flt(bin_valuation)
+		self.stock_value_change += flt(bin_valuation) * qty
+
+		frappe.log_error(
+			title="Batch valuation zero-rate safety net triggered",
+			message=(
+				f"item={self.item_code} warehouse={self.warehouse} batch={batch_no} "
+				f"voucher={voucher_type} {self.sle.get('voucher_no')}: "
+				f"batch_avg_rate computed 0 for an outward qty of {qty}; overridden to "
+				f"{bin_valuation} (Bin.valuation_rate)."
+			),
+		)
+
+
+def _patch_batch_valuation_zero_rate_safety_net():
+	"""Sridhar 2026-07-23 (MAT-STE-00774 / Item I030969, same symptom family
+	as I024926 / DN-AT-26-00397 — see
+	avientek/scripts/stock_valuation_zero_rate_bug_2026_07_23.md) — fifth
+	patch in the batch-valuation family, but a different kind of fix from
+	the other four.
+
+	Background: every OTHER valuation method reachable from
+	`erpnext.stock.utils.get_incoming_rate` (FIFO, LIFO, Moving Average)
+	has a safety net: if its own calculation can't produce a rate, it
+	falls back to `get_valuation_rate` (last SLE / Bin valuation) before
+	returning. The batch-valuation path does not: `BatchNoValuation.
+	calculate_avg_rate` populates a `self.batch_avg_rate` dict per batch,
+	and BOTH real callers that persist it —
+	`SerialAndBatchBundle.set_incoming_rate_for_outward_transaction`
+	(`d.incoming_rate = abs(flt(sn_obj.batch_avg_rate.get(d.batch_no)))`)
+	and `stock_ledger.get_incoming_rate_for_serial_and_batch`
+	(same lookup) — read straight from that dict with no fallback. If a
+	batch's ledgers sum to 0 for whatever reason (several candidate causes
+	— see the .md — none pinned as the deterministic trigger yet), that 0
+	ships straight to the Stock Ledger / GL as a real outgoing rate.
+
+	NOTE: an earlier version of this patch wrapped
+	`BatchNoValuation.get_incoming_rate()` instead. That method is NOT in
+	either persisted-write call path above (it's used by
+	`erpnext.stock.utils.get_incoming_rate`'s dispatcher and two narrower
+	legacy/lookup call sites in stock_ledger.py) — wrapping it would not
+	have prevented the DN-AT-26-00397 or MAT-STE-00774 zero. Fixed by
+	patching `calculate_avg_rate` itself, which is what both real callers'
+	`batch_avg_rate` reads ultimately depend on.
+
+	Fix: wrap `BatchNoValuation.calculate_avg_rate`. After the original
+	runs, for an OUTWARD transaction (actual_qty < 0) that isn't
+	intentionally zero-cost (`allow_zero_valuation_rate` on the voucher
+	item row), for each batch in this bundle whose own qty in this
+	transaction is negative and whose computed `batch_avg_rate` came back
+	falsy: if the item+warehouse demonstrably holds real stock value right
+	now (`Bin.valuation_rate > 0` — ground truth, same defensive style as
+	`avientek.stock.batch_negative_guard`), override that batch's rate
+	with the Bin valuation rate instead of persisting the false zero, and
+	correct `self.stock_value_change` by the same delta so the running
+	warehouse balance (`wh_data.valuation_rate`) for the NEXT ledger entry
+	doesn't inherit the error either. Logs an Error Log entry every time it
+	fires — it never fires silently.
+
+	Genuinely zero-cost batches (allow_zero_valuation_rate checked, or an
+	item/warehouse with no stock value at all) are left untouched. Inward
+	transactions are untouched.
+
+	Idempotent — replaces the bound method once at app load.
+	"""
+	from erpnext.stock.serial_batch_bundle import BatchNoValuation
+
+	_original_calculate_avg_rate = BatchNoValuation.calculate_avg_rate
+
+	def _patched_calculate_avg_rate(self):
+		_original_calculate_avg_rate(self)
+		_batch_valuation_zero_rate_guard(self)
+
+	BatchNoValuation.calculate_avg_rate = _patched_calculate_avg_rate
+
+
 _apply_patches()
 _patch_qb_get_query()
 try:
@@ -507,6 +632,10 @@ except Exception:
 	pass
 try:
 	_patch_validate_negative_batch_respect_setting()
+except Exception:
+	pass
+try:
+	_patch_batch_valuation_zero_rate_safety_net()
 except Exception:
 	pass
 
