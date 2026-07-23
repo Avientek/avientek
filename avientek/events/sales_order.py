@@ -116,6 +116,25 @@ def set_sales_order_confirmation_date(doc, method=None):
     doc.db_set("custom_sales_order_confirmation_date", frappe.utils.nowdate())
 
 
+def set_submission_datetime(doc, method=None):
+    """CR-01 (Rahul, spec final 2026-07-22): stamp the exact moment of
+    submission — the Stock Allocation priority key.
+
+    Why not transaction_date: an SO can sit in Draft for weeks (e.g.
+    awaiting advance payment) while keeping its original booking date,
+    which wrongly preserved its place in the FIFO allocation queue.
+
+    Why not custom_sales_order_confirmation_date (above): that field is
+    date-only; same-day orders need the TIME for tie-breaking (spec:
+    12:00 PM submission beats 12:01 PM).
+
+    The field is no_copy, so an amended SO starts blank and gets a fresh
+    stamp when IT is submitted — it does not inherit the cancelled
+    order's priority (confirmed expected behaviour, doc §1.5).
+    """
+    doc.db_set("custom_submission_datetime", frappe.utils.now_datetime())
+
+
 # ── Server Script: "Validate Customer Company" ──
 # DocType Event: Sales Order, Before Validate
 def validate_customer_company(doc, method=None):

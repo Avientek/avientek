@@ -67,6 +67,9 @@ fixtures = [
 					"Sales Order Item-avientek_eta",
 					"Sales Order Item-eta_history",
 					"Sales Order Item-eta",
+					# CR-01 (Rahul, spec final 2026-07-22): stamped at submit,
+					# drives Stock Allocation priority in avientek_reports.
+					"Sales Order-custom_submission_datetime",
 					"Sales Order-avientek_display_currency",
 					"Sales Order-avientek_exchange_rate",
 					"Sales Order-avientek_total",
@@ -605,7 +608,13 @@ doc_events = {
             "avientek.events.utils.validate_date_sanity",
         ],
         "after_save": "avientek.events.sales_order.sync_delivery_date_to_items",
-        "on_submit": "avientek.events.sales_order.set_sales_order_confirmation_date",
+        "on_submit": [
+            "avientek.events.sales_order.set_sales_order_confirmation_date",
+            # CR-01 (spec final 2026-07-22): exact submission timestamp —
+            # the Stock Allocation priority key. no_copy on the field
+            # means an amended SO gets a fresh stamp at ITS submission.
+            "avientek.events.sales_order.set_submission_datetime",
+        ],
     },
     "Quotation": {
         "before_validate": [
