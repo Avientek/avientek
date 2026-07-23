@@ -25,6 +25,24 @@ app_license = "mit"
 # ------------------
 
 fixtures = [
+	# MUST come before the Workflow fixture: the V3 workflow's states /
+	# transitions link to these custom Roles, and on a FRESH site (CI,
+	# new bench) fixture sync fails with LinkValidationError unless the
+	# Roles exist first. Fixture order follows this list. On prod these
+	# roles already exist — sync is an idempotent upsert of these fields.
+	{
+		"dt": "Role",
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"GM",
+					"GM-CS"
+				]
+			]
+		]
+	},
 	{
 		"dt": "Print Format",
 		"filters": [
