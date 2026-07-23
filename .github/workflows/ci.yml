@@ -26,6 +26,18 @@ jobs:
         ports:
           - 3306:3306
         options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+      # bench init runs with --skip-redis-config-generation, so the site
+      # expects redis on frappe's default ports (cache 13000, queue 11000).
+      # Without these services every PR died in `install-app` with
+      # "Error 111 connecting to 127.0.0.1:11000" — CI has never been green.
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
 
     steps:
       - name: Clone
