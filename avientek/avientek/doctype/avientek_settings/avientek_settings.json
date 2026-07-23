@@ -49,85 +49,83 @@
   },
   {
    "default": "Quotation Wise",
+   "description": "How to allocate Reward and Incentive amounts when a Sales Invoice is submitted. Quotation Wise = proportional to invoice value vs quote total. Item Wise = per Quotation Item using qty proportion.",
    "fieldname": "reward_incentive_method",
    "fieldtype": "Select",
    "label": "Reward & Incentive Method",
-   "options": "Quotation Wise\nItem Wise",
-   "description": "How to allocate Reward and Incentive amounts when a Sales Invoice is submitted. Quotation Wise = proportional to invoice value vs quote total. Item Wise = per Quotation Item using qty proportion."
+   "options": "Quotation Wise\nItem Wise"
   },
   {
+   "description": "Liability and expense accounts per company used when posting the Reward / Incentive Journal Entry on Sales Invoice submit.",
    "fieldname": "reward_incentive_company_accounts",
    "fieldtype": "Table",
    "label": "Company Account Mapping",
-   "options": "Avientek Reward Incentive Account",
-   "description": "Liability and expense accounts per company used when posting the Reward / Incentive Journal Entry on Sales Invoice submit."
+   "options": "Avientek Reward Incentive Account"
   },
   {
+   "description": "Roles that drive the High-Probability Quotation lock, the Document Approval flow (Request for Update / Cancellation Check), and the Restricted-Roles RBAC.",
    "fieldname": "quote_high_prob_section",
    "fieldtype": "Section Break",
-   "label": "Quotation High-Probability Workflow",
-   "description": "Roles that drive the High-Probability Quotation lock, the Document Approval flow (Request for Update / Cancellation Check), and the Restricted-Roles RBAC."
+   "label": "Quotation High-Probability Workflow"
   },
   {
+   "description": "Legacy single approver \u2014 kept for back-compat. Use the Approval Roles table below to assign multiple roles.",
    "fieldname": "quote_approval_role",
    "fieldtype": "Link",
-   "options": "Role",
    "label": "Quote Approval Role (legacy)",
-   "default": "CS",
-   "description": "Legacy single approver — kept for back-compat. Use the Approval Roles table below to assign multiple roles."
+   "options": "Role"
   },
   {
+   "description": "Any user with ANY of these roles can perform LEVEL 1 approvals on submitted high-probability quotes \u2014 first stage of the L1\u2192L2 approval chain (Approve Level 1 / Reject / Approve Cancellation Level 1). OR-logic. If empty, the legacy single role above is used.",
    "fieldname": "quote_approver_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quote Role",
    "label": "Level 1 Approval Roles",
-   "description": "Any user with ANY of these roles can perform LEVEL 1 approvals on submitted high-probability quotes — first stage of the L1→L2 approval chain (Approve Level 1 / Reject / Approve Cancellation Level 1). OR-logic. If empty, the legacy single role above is used."
+   "options": "Avientek Quote Role"
   },
   {
+   "description": "Any user with ANY of these roles can perform LEVEL 2 approvals \u2014 second stage of the L1\u2192L2 chain (Approve Level 2 / Approve Cancellation Level 2). OR-logic. If empty, the L1 approver pool is reused for L2 (single-stage fallback).",
    "fieldname": "quote_l2_approver_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quote Role",
    "label": "Level 2 Approval Roles",
-   "description": "Any user with ANY of these roles can perform LEVEL 2 approvals — second stage of the L1→L2 chain (Approve Level 2 / Approve Cancellation Level 2). OR-logic. If empty, the L1 approver pool is reused for L2 (single-stage fallback)."
+   "options": "Avientek Quote Role"
   },
   {
+   "description": "Any user with ANY of these roles can approve or reject a Pending Probability Change request on a submitted Quotation (per Probability BRD: downgrade from \u226575% to <75% requires management approval). OR-logic. If empty, falls back to Level 2 Approval Roles.",
    "fieldname": "probability_approver_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quote Role",
    "label": "Probability Approver Roles",
-   "description": "Any user with ANY of these roles can approve or reject a Pending Probability Change request on a submitted Quotation (per Probability BRD: downgrade from ≥75% to <75% requires management approval). OR-logic. If empty, falls back to Level 2 Approval Roles."
+   "options": "Avientek Quote Role"
   },
   {
    "fieldname": "quote_high_prob_column_break",
    "fieldtype": "Column Break"
   },
   {
+   "description": "Legacy single team role \u2014 kept for back-compat. Use the Team Roles table below to assign multiple roles.",
    "fieldname": "quote_high_prob_creator_role",
    "fieldtype": "Link",
-   "options": "Role",
    "label": "Quotation Team Role (legacy)",
-   "default": "Sales support L2",
-   "description": "Legacy single team role — kept for back-compat. Use the Team Roles table below to assign multiple roles."
+   "options": "Role"
   },
   {
+   "description": "Any user with ANY of these roles can own Quotations and submit Document Approval requests. Members are also auto-whitelisted for the High-Probability lock. OR-logic. If empty, the legacy single role above is used.",
    "fieldname": "quote_creator_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quote Role",
    "label": "Team Roles",
-   "description": "Any user with ANY of these roles can own Quotations and submit Document Approval requests. Members are also auto-whitelisted for the High-Probability lock. OR-logic. If empty, the legacy single role above is used."
+   "options": "Avientek Quote Role"
   },
   {
+   "description": "Roles whose users see only Quotations where workflow_state='Approved' AND probability=100. Typically downstream teams: Dispatch, Procurement, Supply Chain, Logistics.",
    "fieldname": "quote_high_prob_restricted_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quotation Restricted Role",
    "label": "Restricted Roles (Read-only on Approved+100)",
-   "description": "Roles whose users see only Quotations where workflow_state='Approved' AND probability=100. Typically downstream teams: Dispatch, Procurement, Supply Chain, Logistics."
+   "options": "Avientek Quotation Restricted Role"
   },
   {
+   "description": "Upload signature PNGs that render dynamically on Payment Voucher print formats. The 'Signature Slot' on each row is what the print template looks up \u2014 use a workflow role label ('Approved Level 1', 'Approved Level 2', 'Authorised', 'Released') for dynamic signers, or a free-form name ('Siby Joy', 'Siby Thomas John') for static signers.",
    "fieldname": "signature_images_section",
    "fieldtype": "Section Break",
-   "label": "Signature Images for Print Formats",
-   "description": "Upload signature PNGs that render dynamically on Payment Voucher print formats. The 'Signature Slot' on each row is what the print template looks up — use a workflow role label ('Approved Level 1', 'Approved Level 2', 'Authorised', 'Released') for dynamic signers, or a free-form name ('Siby Joy', 'Siby Thomas John') for static signers."
+   "label": "Signature Images for Print Formats"
   },
   {
    "fieldname": "signature_images",
@@ -136,102 +134,102 @@
    "options": "Avientek Signature Image"
   },
   {
+   "description": "Avientek-specific behaviour overrides for Payment Request Form.",
    "fieldname": "prf_section",
    "fieldtype": "Section Break",
-   "label": "Payment Request Form",
-   "description": "Avientek-specific behaviour overrides for Payment Request Form."
+   "label": "Payment Request Form"
   },
   {
+   "description": "Any user with ANY of these roles can edit the Issued Bank (and Payment Mode) on a Payment Request Form in ANY pre-Released state \u2014 Draft, Authorised, Pending L1, Approved L1, Pending L2, Approved L2. Once the PRF transitions to Released the field locks for everyone. The workflow allow_edit rows are regenerated for these roles every time the after_migrate workflow seeder runs, so add a role and run `bench migrate` to apply. Defaults to Finance Controller + System Manager when empty.",
    "fieldname": "issued_bank_edit_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quote Role",
    "label": "Issued Bank Edit Roles",
-   "description": "Any user with ANY of these roles can edit the Issued Bank (and Payment Mode) on a Payment Request Form in ANY pre-Released state — Draft, Authorised, Pending L1, Approved L1, Pending L2, Approved L2. Once the PRF transitions to Released the field locks for everyone. The workflow allow_edit rows are regenerated for these roles every time the after_migrate workflow seeder runs, so add a role and run `bench migrate` to apply. Defaults to Finance Controller + System Manager when empty."
+   "options": "Avientek Quote Role"
   },
   {
+   "description": "Any user with ANY of these roles sees the 'Revise' workflow action on a PRF in 'Authorised' state \u2014 clicking it routes the document back to 'Draft' for corrections (instead of forcing a Reject). User is prompted for a mandatory reason; creator gets notified. Defaults to Finance Manager + General Manager + Director when empty.",
    "fieldname": "prf_revise_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quote Role",
    "label": "PRF Revise Roles",
-   "description": "Any user with ANY of these roles sees the 'Revise' workflow action on a PRF in 'Authorised' state — clicking it routes the document back to 'Draft' for corrections (instead of forcing a Reject). User is prompted for a mandatory reason; creator gets notified. Defaults to Finance Manager + General Manager + Director when empty."
+   "options": "Avientek Quote Role"
   },
   {
+   "description": "Controls who can see supplier-linked Contact and Address records. Sales-team users are hidden from supplier details; procurement / accounts users keep access. Change the rule here without a code deploy.",
    "fieldname": "supplier_visibility_section",
    "fieldtype": "Section Break",
-   "label": "Supplier Contact & Address Visibility",
-   "description": "Controls who can see supplier-linked Contact and Address records. Sales-team users are hidden from supplier details; procurement / accounts users keep access. Change the rule here without a code deploy."
+   "label": "Supplier Contact & Address Visibility"
   },
   {
    "default": "Hide from Sales-Person users",
+   "description": "How supplier Contact/Address visibility is decided. 'Hide from Sales-Person users' (recommended): a user sees suppliers only if they have NO Sales Person User Permission \u2014 so sales-team-scoped users (incl. procurement.india1) are hidden, while true procurement/accounts (no Sales Person UP, e.g. operations2, accounts.india) keep access. 'Show to procurement/accounts roles': also allow anyone holding one of the Supplier-Facing Roles below, even if they have a Sales Person UP. 'Unrestricted': everyone sees suppliers. The Always-Deny / Always-Allow lists override the mode for specific users.",
    "fieldname": "supplier_visibility_mode",
    "fieldtype": "Select",
    "label": "Supplier Visibility Mode",
-   "options": "Hide from Sales-Person users\nShow to procurement/accounts roles\nUnrestricted (show to all)",
-   "description": "How supplier Contact/Address visibility is decided. 'Hide from Sales-Person users' (recommended): a user sees suppliers only if they have NO Sales Person User Permission — so sales-team-scoped users (incl. procurement.india1) are hidden, while true procurement/accounts (no Sales Person UP, e.g. operations2, accounts.india) keep access. 'Show to procurement/accounts roles': also allow anyone holding one of the Supplier-Facing Roles below, even if they have a Sales Person UP. 'Unrestricted': everyone sees suppliers. The Always-Deny / Always-Allow lists override the mode for specific users."
+   "options": "Hide from Sales-Person users\nShow to procurement/accounts roles\nUnrestricted (show to all)"
   },
   {
+   "description": "Only used by the 'Show to procurement/accounts roles' mode. Users holding ANY of these roles may see supplier Contact/Address even if they have a Sales Person UP. If empty, defaults to Purchase User / Purchase Manager / Purchase Master Manager / Accounts User / Accounts Manager.",
    "fieldname": "supplier_visibility_roles",
    "fieldtype": "Table",
-   "options": "Avientek Quote Role",
    "label": "Supplier-Facing Roles",
-   "description": "Only used by the 'Show to procurement/accounts roles' mode. Users holding ANY of these roles may see supplier Contact/Address even if they have a Sales Person UP. If empty, defaults to Purchase User / Purchase Manager / Purchase Master Manager / Accounts User / Accounts Manager."
+   "options": "Avientek Quote Role"
   },
   {
    "fieldname": "supplier_visibility_column_break",
    "fieldtype": "Column Break"
   },
   {
+   "description": "Users who are ALWAYS hidden from supplier Contact/Address, whatever the mode. One email per line (or comma-separated). Use this for an urgent per-user block, e.g. procurement.india1@avientek.com.",
    "fieldname": "supplier_visibility_deny_users",
    "fieldtype": "Small Text",
-   "label": "Always-Deny Users",
-   "description": "Users who are ALWAYS hidden from supplier Contact/Address, whatever the mode. One email per line (or comma-separated). Use this for an urgent per-user block, e.g. procurement.india1@avientek.com."
+   "label": "Always-Deny Users"
   },
   {
+   "description": "Users who ALWAYS see supplier Contact/Address, whatever the mode. One email per line (or comma-separated). Use for exceptions like a dispatch user who needs supplier addresses for logistics.",
    "fieldname": "supplier_visibility_allow_users",
    "fieldtype": "Small Text",
-   "label": "Always-Allow Users",
-   "description": "Users who ALWAYS see supplier Contact/Address, whatever the mode. One email per line (or comma-separated). Use for exceptions like a dispatch user who needs supplier addresses for logistics."
+   "label": "Always-Allow Users"
   },
   {
+   "description": "Master switch for Avientek-generated transactional emails (Quotation approval requests, approved / rejected confirmations, prob-100 alerts). Uses the default outgoing Email Account configured under Email Domain \u2192 Email Account.",
    "fieldname": "notifications_section",
    "fieldtype": "Section Break",
-   "label": "Notifications",
-   "description": "Master switch for Avientek-generated transactional emails (Quotation approval requests, approved / rejected confirmations, prob-100 alerts). Uses the default outgoing Email Account configured under Email Domain → Email Account."
+   "label": "Notifications"
   },
   {
    "default": "0",
+   "description": "When OFF, no Avientek-generated quotation emails are sent. ToDo creation continues regardless. Useful during testing or when the outgoing mailbox is rate-limited.",
    "fieldname": "enable_quotation_notifications",
    "fieldtype": "Check",
-   "label": "Enable Quotation Email Notifications",
-   "description": "When OFF, no Avientek-generated quotation emails are sent. ToDo creation continues regardless. Useful during testing or when the outgoing mailbox is rate-limited."
+   "label": "Enable Quotation Email Notifications"
   },
   {
    "default": "0",
+   "description": "Phase 2 opt-in. When ON, transitions to Pending For Approval / Pending L2 Approval / Approved / Rejected create ToDos for the relevant users and send templated emails (routed by Sales Person \u2192 User Permission match per BRD). ToDos are created regardless of the master email switch.",
    "fieldname": "enable_workflow_state_notifications",
    "fieldtype": "Check",
-   "label": "Enable Workflow-State Notifications",
-   "description": "Phase 2 opt-in. When ON, transitions to Pending For Approval / Pending L2 Approval / Approved / Rejected create ToDos for the relevant users and send templated emails (routed by Sales Person → User Permission match per BRD). ToDos are created regardless of the master email switch."
+   "label": "Enable Workflow-State Notifications"
   },
   {
    "default": "0",
+   "description": "When ON, sending a Probability Change Request triggers an email to all configured Probability Approvers, and Approve / Reject decisions email the original requester. When OFF, ToDos are still created but no emails are sent. Independent of the other notification switches above.",
    "fieldname": "enable_probability_change_emails",
    "fieldtype": "Check",
-   "label": "Enable Probability Change Emails",
-   "description": "When ON, sending a Probability Change Request triggers an email to all configured Probability Approvers, and Approve / Reject decisions email the original requester. When OFF, ToDos are still created but no emails are sent. Independent of the other notification switches above."
+   "label": "Enable Probability Change Emails"
   },
   {
    "default": "1",
+   "description": "When ON, quotation emails (incl. the 100%-probability alert) only go to users who took part in the document's workflow \u2014 the creator, configured sales persons on the quote, and anyone who acted on a Workflow Action for it. When OFF, the broader role-based recipient list is used (everyone with the approver role).",
    "fieldname": "restrict_notifications_to_workflow_participants",
    "fieldtype": "Check",
-   "label": "Restrict to Workflow Participants",
-   "description": "When ON, quotation emails (incl. the 100%-probability alert) only go to users who took part in the document's workflow — the creator, configured sales persons on the quote, and anyone who acted on a Workflow Action for it. When OFF, the broader role-based recipient list is used (everyone with the approver role)."
+   "label": "Restrict to Workflow Participants"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-14 00:00:00.000000",
+ "modified": "2026-07-23 16:30:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Avientek Settings",
