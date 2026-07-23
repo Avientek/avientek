@@ -1329,3 +1329,8 @@ try:
 except Exception:
 	pass
 
+# NB: the ksa_compliance e-invoice reconciliation patch (INV-AT-26-00369)
+# is applied LAZILY from avientek.events.sales_invoice_zatca on the first
+# Sales Invoice validate — importing ksa_compliance here would be a
+# circular import (ksa is still initializing while avientek loads).
+
