@@ -792,6 +792,15 @@ doc_events = {
             # before_submit) — an Invoice can't be saved without terms. Imports +
             # intercompany/internal + return/POS exempt (see the function).
             "avientek.events.utils.validate_payment_terms_mandatory",
+            # Sammish 2026-07-23 (INV-AT-26-00369, ZATCA BR-CO-14/15):
+            # ERPNext's Saudi regional hook recomputes each row's tax
+            # independently; the per-row roundings drift a few fils from
+            # the header VAT and ZATCA rejects the invoice. Reconcile
+            # rows to the header (residue onto the largest taxed row);
+            # free/rate-0 lines untouched. KSA companies only. Runs after
+            # calculate_taxes_and_totals + the regional recompute because
+            # doc_events validate hooks fire after the controller's own.
+            "avientek.events.sales_invoice_zatca.reconcile_ksa_item_tax_with_header",
         ],
         "before_save": [
             "avientek.events.sales_invoice.set_vat_emirate",
