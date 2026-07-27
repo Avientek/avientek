@@ -42,9 +42,22 @@ function _user_is_whitelisted_for_high_prob() {
     return _HIGH_PROB_WHITELIST.some(r => roles.indexOf(r) !== -1);
 }
 
+// Sridhar 2026-07-27: must match avientek.events.sales_order
+// .validate_quotation_approved's APPROVED_STATES exactly — that
+// server-side gate (the hard backstop for SO creation) treats
+// "Approved for Update" as equally valid to "Approved" ("the
+// post-amend approved state"). The client-side gate below previously
+// only matched the literal string "Approved", so a quote sitting in
+// "Approved for Update" (e.g. reopened for a price tweak via Update
+// Items, already at 100% probability) hid the Create→Sales Order
+// option entirely even though the server would have allowed it —
+// caught via a tested screenshot (QN-FZCO-26-00311, Approved for
+// Update, 100%, button not offered).
+const _SO_APPROVED_STATES = new Set(["Approved", "Approved for Update"]);
+
 function _so_button_conditions_met(frm) {
     if (frm.is_new()) { return false; }
-    const isApproved = (frm.doc.workflow_state || "") === "Approved";
+    const isApproved = _SO_APPROVED_STATES.has(frm.doc.workflow_state || "");
     const probRaw = (frm.doc.probabilities || "").toString().replace("%", "").trim();
     const probNum = parseInt(probRaw || frm.doc.probability || 0, 10) || 0;
     const has100 = (probNum === 100);
@@ -54,6 +67,35 @@ function _so_button_conditions_met(frm) {
     // yet we shouldn't let sales push to SO.
     const hasPendingProb = (frm.doc.pending_probability_status || "") === "Pending";
     return isApproved && has100 && !hasPendingProb;
+}
+
+// Sridhar 2026-07-24: base workflow gate only (Approved / Approved for
+// Update), ignoring probability. Used to decide whether the
+// Create→Sales Order option should be VISIBLE at all — the full
+// _so_button_conditions_met check still decides whether clicking it is
+// allowed to proceed. Previously the button was hidden outright
+// whenever probability wasn't 100%, so users who forgot to bump
+// probability first just saw no option and had no idea why. Now they
+// see it and get told what to fix.
+function _so_button_approved_gate(frm) {
+    if (frm.is_new()) { return false; }
+    return _SO_APPROVED_STATES.has(frm.doc.workflow_state || "");
+}
+
+// Human-readable reason the Sales Order/Invoice creation is blocked,
+// or null if it's fully allowed. Shown to the user at click-time
+// instead of just hiding the option.
+function _so_button_block_reason(frm) {
+    const hasPendingProb = (frm.doc.pending_probability_status || "") === "Pending";
+    if (hasPendingProb) {
+        return __("A Probability change request is pending L2 approval on this Quotation. Please wait until it's resolved before creating a Sales Order.");
+    }
+    const probRaw = (frm.doc.probabilities || "").toString().replace("%", "").trim();
+    const probNum = parseInt(probRaw || frm.doc.probability || 0, 10) || 0;
+    if (probNum !== 100) {
+        return __("Probability must be 100% before you can create a Sales Order from this Quotation. Please update the Probability field to 100% and save first.");
+    }
+    return null;
 }
 
 
@@ -72,11 +114,44 @@ function _install_so_button_interceptor(frm) {
     frm.add_custom_button = function(label, action, group) {
         const labelStr = (typeof label === "string") ? label : ((label && label.toString) ? label.toString() : "");
         const groupStr = (typeof group === "string") ? group : ((group && group.toString) ? group.toString() : "");
-        const blocked = (labelStr === __("Sales Order") || labelStr === __("Sales Invoice"))
+        const isSoOrSi = (labelStr === __("Sales Order") || labelStr === __("Sales Invoice"))
                         && (groupStr === __("Create") || groupStr === "Create");
-        if (blocked && !_so_button_conditions_met(frm)) {
-            // Silently skip — caller's button is never registered.
-            return;
+        if (isSoOrSi) {
+            if (!_so_button_approved_gate(frm)) {
+                // Quote hasn't reached Approved yet — creating a Sales
+                // Order/Invoice isn't valid at all, so keep hiding it.
+                return;
+            }
+            if (!_so_button_conditions_met(frm)) {
+                // Sridhar 2026-07-24: Approved but probability isn't 100%
+                // (or an approval is pending) — show the option so the
+                // user isn't confused, but clicking explains what to fix
+                // instead of silently doing nothing / hiding the option.
+                const wrapped_action = function() {
+                    const reason = _so_button_block_reason(frm);
+                    frappe.msgprint({
+                        title: __("Cannot Create {0}", [labelStr]),
+                        message: reason || __("This Quotation isn't ready for {0} creation yet.", [labelStr]),
+                        indicator: "orange",
+                    });
+                };
+                return orig_add(label, wrapped_action, group);
+            }
+        }
+        if (labelStr === __("Update Items")) {
+            // Sridhar 2026-07-24 (meeting decision 2026-07-22): swap out
+            // ERPNext's native Update Items dialog for our own. The core
+            // one edits the raw `rate` field directly, which this app
+            // treats as a MIRROR of custom_special_price/custom_markup_
+            // (see calc_item_totals server-side) — so a user's "Rate"
+            // edit there never actually moved the Selling Price, just
+            // silently sat unused. `_strip_update_items` in refresh()
+            // still controls whether this button exists at all
+            // (workflow_state "Approved for Update" only); this just
+            // changes what clicking it does.
+            return orig_add(label, function () {
+                show_update_items_selling_price_dialog(frm);
+            }, group);
         }
         return orig_add(label, action, group);
     };
@@ -90,7 +165,12 @@ function _toggle_create_button_visibility(frm) {
     // ALWAYS in the DOM (not lazy), so this works reliably regardless
     // of Frappe's render timing.
     if (frm.is_new()) { return; }
-    const show = _so_button_conditions_met(frm);
+    // Sridhar 2026-07-24: show the Create button once the base Approved
+    // gate is met, even if probability isn't 100% yet — the SO/SI menu
+    // items themselves now explain the probability requirement at
+    // click-time (see _install_so_button_interceptor) instead of the
+    // whole Create button vanishing with no explanation.
+    const show = _so_button_approved_gate(frm);
     const _apply = function() {
         // Sridhar 2026-05-29 — exact snippet pattern that worked when
         // pasted into DevTools (Hidden count: 1, Create button gone).
@@ -127,7 +207,7 @@ function _toggle_create_button_visibility(frm) {
         try {
             const obs = new MutationObserver(function() {
                 // Re-evaluate show flag in case workflow_state changed
-                const _show = _so_button_conditions_met(frm);
+                const _show = _so_button_approved_gate(frm);
                 $('.custom-actions .inner-group-button').each(function() {
                     const $g = $(this);
                     const $btn = $g.children('button').first();
@@ -206,17 +286,19 @@ function _strip_create_buttons_unless_approved(frm) {
     _toggle_create_button_visibility(frm);
     if (frm.is_new()) { return; }
 
-    const APPROVED_STATES = new Set(["Approved"]);
-    const isApproved = APPROVED_STATES.has(frm.doc.workflow_state || "");
+    // Sridhar 2026-07-27: must match _SO_APPROVED_STATES above (and the
+    // server-side APPROVED_STATES in sales_order.py) — was previously
+    // Set(["Approved"]) only, which stripped the SO/SI buttons straight
+    // back off on every refresh for a quote in "Approved for Update",
+    // undoing what _install_so_button_interceptor had just registered.
+    const isApproved = _SO_APPROVED_STATES.has(frm.doc.workflow_state || "");
 
-    // Probability lives in EITHER `probabilities` (Data, "100%") OR
-    // `probability` (Int). Read whichever is set; tolerate "%" suffix
-    // and whitespace.
-    const probRaw = (frm.doc.probabilities || "").toString().replace("%", "").trim();
-    const probNum = parseInt(probRaw || frm.doc.probability || 0, 10) || 0;
-    const is100 = (probNum === 100);
-
-    if (isApproved && is100) { return; }
+    // Sridhar 2026-07-24: once Approved, leave the SO/SI buttons alone
+    // even if probability isn't 100% yet — the interceptor in
+    // _install_so_button_interceptor already swapped their action for a
+    // click-time explanation instead of the real make_sales_order/
+    // make_sales_invoice call, so there's nothing left to strip here.
+    if (isApproved) { return; }
 
     const _strip = function() {
         // Try Frappe's API first
@@ -594,6 +676,34 @@ frappe.ui.form.on('Quotation', {
         frm._discount_applied = true;
         toggle_apply_discount_button(frm);
 
+        // Sridhar 2026-07-24: on a Draft, frm.dirty() + a later Save is
+        // enough to persist — the standard save pipeline runs
+        // run_calculation_pipeline. On a submitted ("Approved for
+        // Update") quote there's no later Save available for these
+        // fields (not allow_on_submit — a plain Save would throw "Not
+        // allowed to change after submission"), so persist immediately
+        // via the same bypass-save pattern Update Items uses.
+        if (frm.doc.docstatus === 1) {
+            frappe.call({
+                method: "avientek.events.quotation.apply_discount_on_submitted",
+                args: {
+                    quotation_name: frm.doc.name,
+                    discount_type: discount_type,
+                    discount_percentage: frm.doc.custom_discount_,
+                    discount_amount: frm.doc.custom_discount_amount_value,
+                },
+                freeze: true,
+                freeze_message: __("Saving Discount..."),
+                callback(r) {
+                    if (r.message) {
+                        frm.reload_doc();
+                        frappe.show_alert({message: __("Discount applied"), indicator: "green"});
+                    }
+                },
+            });
+            return;
+        }
+
         frm.dirty();
         frappe.show_alert({message: __("Discount applied"), indicator: "green"});
     },
@@ -704,6 +814,31 @@ frappe.ui.form.on('Quotation', {
         // Mark incentive as applied and hide button
         frm._incentive_applied = true;
         toggle_apply_incentive_button(frm);
+
+        // Sridhar 2026-07-24: sibling to the same branch in
+        // custom_apply_discount above — persist immediately on a
+        // submitted ("Approved for Update") quote, since there's no
+        // later Save available for these fields there.
+        if (frm.doc.docstatus === 1) {
+            frappe.call({
+                method: "avientek.events.quotation.apply_incentive_on_submitted",
+                args: {
+                    quotation_name: frm.doc.name,
+                    incentive_type: incentive_type,
+                    incentive_percentage: frm.doc.custom_incentive_,
+                    incentive_amount: frm.doc.custom_incentive_amount,
+                },
+                freeze: true,
+                freeze_message: __("Saving Incentive..."),
+                callback(r) {
+                    if (r.message) {
+                        frm.reload_doc();
+                        frappe.show_alert({message: __("Incentive applied"), indicator: "green"});
+                    }
+                },
+            });
+            return;
+        }
 
         frm.dirty();
         frappe.show_alert({message: __("Incentive applied"), indicator: "green"});
@@ -892,6 +1027,17 @@ frappe.ui.form.on('Quotation', {
             // Make it stand out
             frm.change_custom_button_type(__("Create Address"), null, "primary");
         }
+
+        // Sridhar 2026-07-24: Frappe auto-locks every field lacking
+        // allow_on_submit once docstatus=1 — including the whole
+        // Discount and Incentive section. Explicitly unlock it while
+        // workflow_state is "Approved for Update" (the same state that
+        // unlocks Update Items), so the toggle_* calls below have
+        // something to actually show as editable. Must run BEFORE
+        // those toggles — it only removes Frappe's blanket submit-lock,
+        // toggle_discount_fields/toggle_incentive_fields still decide
+        // which of the two (percentage vs amount) is the editable one.
+        _unlock_discount_incentive_for_update(frm);
 
         // Toggle discount fields based on type selection
         toggle_discount_fields(frm);
@@ -2136,6 +2282,52 @@ function enforce_discount_mutual_exclusion(frm, source) {
     }
 }
 
+/**
+ * Sridhar 2026-07-24 (round 2 — tested feedback: fields still read-only
+ * after the first fix): setting read_only=0 alone does NOT unlock a
+ * field on a submitted doc. Traced Frappe's actual field-status logic
+ * (frappe/public/js/frappe/model/perm.js get_field_display_status):
+ * once docstatus > 0, status is forced to "Read" outright — read_only
+ * is a SEPARATE, later check that can only lock a field further, never
+ * unlock one. The ONLY thing that flips it back to "Write" on a
+ * submitted doc is `df.allow_on_submit`:
+ *
+ *   if (status === "Write" && docstatus > 0) status = "Read";
+ *   if (status === "Read" && allow_on_submit && docstatus === 1 && p.write)
+ *       status = "Write";
+ *
+ * So this must set allow_on_submit, not read_only. Scoped to
+ * workflow_state "Approved for Update" only (the one submitted state
+ * the V3 workflow explicitly reopens for edits) — every other
+ * submitted state stays locked by Frappe's default behavior since this
+ * function simply isn't called for those. Doesn't touch the server-side
+ * field definitions (avientek/fixtures/custom_field.json) — this is a
+ * client-only override of the docfield object already loaded in the
+ * browser, and persistence for these fields goes through the
+ * apply_discount_on_submitted / apply_incentive_on_submitted bypass
+ * RPCs (quotation.py) which never rely on allow_on_submit anyway (they
+ * write via doc.save() + ignore_validate_update_after_submit, same as
+ * Update Items).
+ */
+function _unlock_discount_incentive_for_update(frm) {
+    if (frm.is_new()) return;
+    if (frm.doc.docstatus !== 1) return;
+    if ((frm.doc.workflow_state || "") !== "Approved for Update") return;
+
+    const fields = [
+        "custom_discount_type", "custom_discount_amount_value", "custom_discount_",
+        "custom_apply_discount",
+        "custom_incentive_type", "custom_incentive_", "custom_incentive_amount",
+        "custom_distribute_incentive_based_on", "custom_apply_incentive",
+    ];
+    fields.forEach(f => {
+        if (frm.fields_dict[f]) {
+            frm.set_df_property(f, "allow_on_submit", 1);
+            frm.set_df_property(f, "read_only", 0);
+        }
+    });
+}
+
 function toggle_discount_fields(frm) {
     let discount_type = frm.doc.custom_discount_type || "Amount";
 
@@ -2718,6 +2910,309 @@ function show_update_special_price_dialog(frm) {
     });
 
     // Widen dialog beyond extra-large default for better table readability
+    d.$wrapper.find(".modal-dialog").css("max-width", "1100px");
+}
+
+
+/**
+ * Sridhar 2026-07-24 (meeting decision 2026-07-22, extended same day
+ * after Sales feedback on the first cut): replaces ERPNext's native
+ * "Update Items" dialog (erpnext.utils.update_child_items) for
+ * Quotation. That dialog edits the core `rate` field directly — but
+ * `rate` is a MIRROR field here (see calc_item_totals server-side),
+ * always overwritten from custom_special_price + custom_markup_. So a
+ * "Rate" edit there never moved the actual Selling Price, which is the
+ * confusion the meeting notes describe.
+ *
+ * This dialog edits Item Code / Qty / Standard Price (RO) / Special
+ * Price / Selling Price / Total (RO) / Margin % (RO), supports adding
+ * new rows (native Table "+ Add Row" — cannot_add_rows left at its
+ * default false), and routes everything through
+ * avientek.events.quotation.update_items_selling_price, which
+ * back-solves markup% so the entered Selling Price actually persists —
+ * same server-side pattern show_update_special_price_dialog() above
+ * uses for submitted-doc price edits, extended to also insert brand
+ * new Quotation Item rows.
+ *
+ * Only reachable while workflow_state is "Approved for Update" — see
+ * _strip_update_items() in the refresh() handler and the server-side
+ * guard in update_items_selling_price(). Existing rows' Item Code is
+ * left editable in the grid for UI consistency with new rows, but the
+ * server only ever reads item_code for BRAND NEW rows (no `name` yet)
+ * — changing item_code on an already-saved row is a no-op server-side,
+ * so re-pointing an existing line to a different item isn't supported
+ * here.
+ *
+ * Sridhar 2026-07-24 (same day, round 2 — tested feedback: "no remove
+ * button"): row deletion is now supported (native Table delete
+ * checkbox — cannot_delete_rows removed). The dialog always sends the
+ * FULL current item list on Update, so update_items_selling_price()
+ * treats any existing row missing from that payload as a deliberate
+ * removal and deletes it server-side, then rebuilds Brand Summary /
+ * totals / taxes / Discount & Incentive around the remaining items —
+ * same as an add or a price edit.
+ */
+function show_update_items_selling_price_dialog(frm) {
+    const doc_currency = frm.doc.currency || frappe.defaults.get_global_default("currency") || "AED";
+
+    // Cost drivers per row, keyed by grid array index (0-based) rather
+    // than row name — new rows added via "+" don't have a name yet.
+    // Mirrors calc_item_totals' COGS + markup formula (server-side) so
+    // the live preview matches what Update will actually compute.
+    const cost_map = {};
+    (frm.doc.items || []).forEach((row, i) => {
+        cost_map[i] = {
+            std_price:     flt(row.custom_standard_price_),
+            sp:            flt(row.custom_special_price),
+            shipping_per:  flt(row.shipping_per),
+            finance_per:   flt(row.custom_finance_),
+            transport_per: flt(row.custom_transport_),
+            reward_per:    flt(row.reward_per),
+            incentive_per: flt(row.custom_incentive_),
+            customs_per:   flt(row.custom_customs_),
+            markup_per:    flt(row.custom_markup_),
+        };
+    });
+
+    // Full calc_item_totals cascade (incl. markup layer) — used to
+    // derive a SUGGESTED Selling Price whenever Qty/Special Price
+    // change and the user hasn't manually overridden Selling Price
+    // for that row yet. cogs is also reused for the margin preview
+    // when the user HAS typed a specific Selling Price directly.
+    function compute_full(c, qty) {
+        const shipping  = flt(c.shipping_per  * c.std_price / 100 * qty, 4);
+        const finance   = flt(c.finance_per   * c.sp        / 100 * qty, 4);
+        const transport = flt(c.transport_per * c.std_price / 100 * qty, 4);
+        const reward    = flt(c.reward_per    * c.sp        / 100 * qty, 4);
+        const base_amt  = flt(c.sp * qty + shipping + finance + transport + reward, 4);
+        const incentive = flt(c.incentive_per * c.sp * qty / 100, 4);
+        const cogs_before_customs = flt(base_amt + incentive, 4);
+        const customs = flt(c.customs_per * cogs_before_customs / 100, 4);
+        const cogs = flt(cogs_before_customs + customs, 4);
+        const markup = flt(c.markup_per * cogs / 100, 4);
+        const selling = flt(cogs + markup, 4);
+        return { cogs, selling, per_unit: qty ? flt(selling / qty, 4) : 0 };
+    }
+
+    let items = (frm.doc.items || []).map(row => ({
+        name: row.name,
+        item_code: row.item_code,
+        qty: row.qty,
+        custom_standard_price_: row.custom_standard_price_,
+        custom_special_price: row.custom_special_price,
+        custom_special_rate: row.custom_special_rate,
+        custom_total_: row.custom_total_,
+        custom_margin_: row.custom_margin_,
+        currency_code: doc_currency,
+    }));
+
+    let d = new frappe.ui.Dialog({
+        title: __("Update Items"),
+        fields: [
+            {
+                fieldtype: "Table",
+                fieldname: "items",
+                label: __("Items"),
+                in_place_edit: true,
+                data: items,
+                fields: [
+                    { fieldname: "name", fieldtype: "Data", hidden: 1 },
+                    { fieldname: "currency_code", fieldtype: "Data", hidden: 1 },
+                    {
+                        fieldname: "item_code", fieldtype: "Link", options: "Item",
+                        label: __("Item Code"), in_list_view: 1, columns: 3,
+                        get_query: function () {
+                            let filters = { disabled: 0 };
+                            if (frm._permitted_brands && frm._permitted_brands.length) {
+                                filters.brand = ["in", frm._permitted_brands];
+                            }
+                            if (frm._permitted_item_groups && frm._permitted_item_groups.length) {
+                                filters.item_group = ["in", frm._permitted_item_groups];
+                            }
+                            return { filters: filters };
+                        },
+                        change: function () {
+                            const item_code = this.value;
+                            const row_doc = this.doc;
+                            if (!item_code) return;
+                            const arr = d.fields_dict.items.df.data || [];
+                            const idx = arr.indexOf(row_doc);
+                            if (idx < 0) return;
+
+                            frappe.call({
+                                method: "avientek.events.quotation.get_item_defaults",
+                                args: {
+                                    item_code: item_code,
+                                    price_list: frm.doc.selling_price_list,
+                                    currency: frm.doc.currency,
+                                    price_list_currency: frm.doc.price_list_currency,
+                                    plc_conversion_rate: frm.doc.plc_conversion_rate || 1,
+                                    company: frm.doc.company,
+                                },
+                                callback: function (r) {
+                                    if (!r.message) return;
+                                    const dd = r.message;
+                                    if (dd.no_price_for_company) {
+                                        frappe.msgprint({
+                                            title: __("No Item Price Found"),
+                                            message: __("No Item Price found for {0} in company {1} / price list {2}. Set one up before adding it here.", [item_code, frm.doc.company, frm.doc.selling_price_list]),
+                                            indicator: "orange",
+                                        });
+                                        return;
+                                    }
+                                    const row = arr[idx];
+                                    if (!row) return;
+
+                                    if (!(flt(row.qty) > 0)) row.qty = 1;
+                                    const c = {
+                                        std_price:     flt(dd.custom_standard_price_),
+                                        sp:            flt(dd.custom_special_price),
+                                        shipping_per:  flt(dd.shipping_per_air),
+                                        finance_per:   flt(dd.custom_finance_),
+                                        transport_per: flt(dd.custom_transport_),
+                                        reward_per:    0,
+                                        incentive_per: 0,
+                                        customs_per:   flt(dd.custom_customs_),
+                                        markup_per:    flt(dd.custom_markup_),
+                                    };
+                                    cost_map[idx] = c;
+
+                                    const calc = compute_full(c, flt(row.qty));
+                                    row.custom_standard_price_ = c.std_price;
+                                    row.custom_special_price = c.sp;
+                                    row.custom_special_rate = calc.per_unit;
+                                    row.custom_total_ = calc.selling;
+                                    row.custom_margin_ = calc.selling ? flt((calc.selling - calc.cogs) / calc.selling * 100, 4) : 0;
+                                    row.__manual_rate = false;
+
+                                    d.fields_dict.items.grid.refresh();
+                                },
+                            });
+                        },
+                    },
+                    { fieldname: "qty", fieldtype: "Float", label: __("Qty"), in_list_view: 1, columns: 1 },
+                    { fieldname: "custom_standard_price_", fieldtype: "Currency", options: "currency_code", label: __("Standard Price"), in_list_view: 1, read_only: 1, columns: 2 },
+                    { fieldname: "custom_special_price", fieldtype: "Currency", options: "currency_code", label: __("Special Price"), in_list_view: 1, columns: 2 },
+                    { fieldname: "custom_special_rate", fieldtype: "Currency", options: "currency_code", label: __("Selling Price"), in_list_view: 1, columns: 2 },
+                    { fieldname: "custom_total_", fieldtype: "Currency", options: "currency_code", label: __("Total"), in_list_view: 1, read_only: 1, columns: 2 },
+                    { fieldname: "custom_margin_", fieldtype: "Percent", label: __("Margin %"), in_list_view: 1, read_only: 1, columns: 1 },
+                ],
+            },
+        ],
+        size: "extra-large",
+        primary_action_label: __("Update"),
+        primary_action(values) {
+            let rows = values.items || [];
+            if (!rows.length) {
+                frappe.msgprint(__("Add at least one item."));
+                return;
+            }
+            let invalid = rows.some(row => !(flt(row.qty) > 0) || !(flt(row.custom_special_rate) > 0));
+            if (invalid) {
+                frappe.msgprint(__("Qty and Selling Price must both be greater than 0 for every item."));
+                return;
+            }
+            let missing_item = rows.some(row => !row.name && !row.item_code);
+            if (missing_item) {
+                frappe.msgprint(__("Select an Item Code for every newly added row."));
+                return;
+            }
+
+            let updated_items = rows.map(row => ({
+                name: row.name,
+                item_code: row.item_code,
+                qty: row.qty,
+                custom_special_price: row.custom_special_price,
+                custom_special_rate: row.custom_special_rate,
+            }));
+
+            frappe.call({
+                method: "avientek.events.quotation.update_items_selling_price",
+                args: {
+                    quotation_name: frm.doc.name,
+                    items: JSON.stringify(updated_items),
+                },
+                freeze: true,
+                freeze_message: __("Updating Items..."),
+                callback(r) {
+                    if (r.message) {
+                        d.hide();
+                        frm.reload_doc();
+                        frappe.show_alert({ message: __("Items updated"), indicator: "green" });
+                    }
+                },
+            });
+        },
+    });
+
+    d.show();
+
+    // Live Total / Margin % preview on Qty / Special Price / Selling
+    // Price edits — DOM-level binding is the reliable cross-version
+    // pattern for Dialog Tables (field-def `change` doesn't fire on
+    // dialog tables in v15 the way it does on form child grids).
+    // Mirrors show_update_special_price_dialog above.
+    //
+    // Qty/Special Price changes RECOMPUTE the suggested Selling Price
+    // (formula-driven, like editing custom_special_price on the main
+    // form) UNLESS the user has directly typed into Selling Price for
+    // this row this session (__manual_rate) — then their number wins
+    // and only Margin % re-derives around it, same split the main
+    // form's custom_special_price vs custom_special_rate handlers use.
+    $(d.$wrapper).on("change input keyup", '[data-fieldname="qty"] input, [data-fieldname="custom_special_price"] input, [data-fieldname="custom_special_rate"] input', function () {
+        const $row = $(this).closest(".grid-row");
+        const idx_attr = $row.attr("data-idx");
+        if (!idx_attr) return;
+        const idx = parseInt(idx_attr, 10) - 1;
+        const data = d.fields_dict.items.df.data || [];
+        const row = data[idx];
+        if (!row) return;
+
+        const fieldname = $(this).closest("[data-fieldname]").attr("data-fieldname");
+        const raw = flt(($(this).val() + "").replace(/,/g, ""));
+
+        if (fieldname === "qty") {
+            row.qty = raw;
+        } else if (fieldname === "custom_special_price") {
+            row.custom_special_price = raw;
+        } else if (fieldname === "custom_special_rate") {
+            row.custom_special_rate = raw;
+            row.__manual_rate = true;
+        }
+
+        const c = cost_map[idx];
+        if (c) {
+            // Special Price edits change the cost basis — keep cost_map
+            // in sync so qty-only edits afterwards use the new value.
+            if (fieldname === "custom_special_price") c.sp = raw;
+            const qty = Math.max(flt(row.qty) || 0, 0.0001);
+            const calc = compute_full(c, qty);
+
+            if (!row.__manual_rate) {
+                row.custom_special_rate = calc.per_unit;
+            }
+            row.custom_total_ = flt(flt(row.custom_special_rate) * qty, 4);
+            const selling = row.custom_total_;
+            row.custom_margin_ = selling ? flt((selling - calc.cogs) / selling * 100, 4) : 0;
+        } else {
+            // No cost basis loaded (e.g. new row before Item Code is
+            // picked) — Total still reflects Qty * Selling Price.
+            row.custom_total_ = flt(flt(row.custom_special_rate) * flt(row.qty || 0), 4);
+        }
+
+        const set_cell_text = (fname, text) => {
+            const $cell = $row.find(`[data-fieldname="${fname}"]`).first();
+            if (!$cell.length) return;
+            const $static = $cell.find(".static-area, .ellipsis").first();
+            if ($static.length) $static.text(text); else $cell.text(text);
+        };
+        if (fieldname !== "custom_special_rate") {
+            set_cell_text("custom_special_rate", format_currency(row.custom_special_rate, doc_currency));
+        }
+        set_cell_text("custom_total_", format_currency(row.custom_total_, doc_currency));
+        set_cell_text("custom_margin_", flt(row.custom_margin_, 2) + " %");
+    });
+
     d.$wrapper.find(".modal-dialog").css("max-width", "1100px");
 }
 
