@@ -918,6 +918,192 @@ def validate_item_tax_template(doc, method=None):
 
 
 # ──────────────────────────────────────────────────────────────
+# 4c) DISCOUNT / INCENTIVE — Percentage <-> Amount sync for the
+#     submitted-doc ("Approved for Update") bypass endpoints below.
+#     Mirrors the client-side math in custom_apply_discount /
+#     custom_apply_incentive (quotation.js) exactly, so the server
+#     produces the same number the button preview already showed.
+# ──────────────────────────────────────────────────────────────
+def _sync_discount_fields(doc):
+    """Keep custom_discount_ (%) and custom_discount_amount_value ($)
+    consistent against the CURRENT item total. Percentage is
+    authoritative when custom_discount_type == "Percentage" — the
+    amount is recomputed from it, so a discount entered as a percentage
+    automatically rebases when the item set (and therefore total
+    selling value) changes, e.g. via Update Items adding/removing rows.
+    Amount is authoritative otherwise — the percentage is recomputed
+    from it purely for display; distribute_discount_server() always
+    redistributes whatever amount ends up here across the current items.
+    """
+    total_selling = sum(flt(it.custom_selling_price) for it in doc.items)
+    if (doc.custom_discount_type or "Amount") == "Percentage":
+        if flt(doc.custom_discount_) and total_selling > 0:
+            doc.custom_discount_amount_value = flt(total_selling * flt(doc.custom_discount_) / 100, 4)
+    else:
+        if flt(doc.custom_discount_amount_value) and total_selling > 0:
+            doc.custom_discount_ = flt(flt(doc.custom_discount_amount_value) / total_selling * 100, 4)
+
+
+def _sync_incentive_fields(doc):
+    """Same idea as _sync_discount_fields() for Incentive — driven by
+    total (Special Price x Qty), matching custom_apply_incentive."""
+    total_sp = sum(flt(it.custom_special_price) * (flt(it.qty) or 1) for it in doc.items)
+    if (doc.custom_incentive_type or "Percentage") == "Percentage":
+        if flt(doc.custom_incentive_) and total_sp > 0:
+            doc.custom_incentive_amount = flt(total_sp * flt(doc.custom_incentive_) / 100, 4)
+    else:
+        if flt(doc.custom_incentive_amount) and total_sp > 0:
+            doc.custom_incentive_ = flt(flt(doc.custom_incentive_amount) / total_sp * 100, 4)
+
+
+def _guard_quotation_editable_for_update(doc):
+    """Shared entry guard for update_items_selling_price() /
+    apply_discount_on_submitted() / apply_incentive_on_submitted() —
+    previously duplicated (and, for the third check below, missing
+    entirely) across all three.
+
+    Sridhar 2026-07-27 (BRD review, sammish — "confirm 'Approved for
+    Update' is always pre-conversion, no SO/SI created yet"): checked
+    the actual workflow transitions (seed_quotation_approval_v3_
+    workflow.py) — "Request for Update" only requires workflow_state ==
+    "Approved" plus the checkbox; nothing checks whether a Sales Order
+    already exists against this Quotation. And creating a Sales Order
+    does NOT change workflow_state at all — only ERPNext's own core
+    `status` field moves to "Ordered" / "Partially Ordered". So a
+    Quotation that already has a submitted Sales Order against it CAN
+    still reach "Approved for Update" today — the answer to sammish's
+    question is "not guaranteed by the workflow," not "confirmed
+    impossible." Repricing/removing items in that state would desync
+    the already-created Sales Order, which never sees the change.
+    Blocking on `doc.status` here (reliable — ERPNext sets it via
+    Quotation.set_status()/get_ordered_status() whenever a Sales Order
+    references this Quotation) closes the gap rather than just noting
+    it as an assumption.
+    """
+    if doc.docstatus != 1:
+        frappe.throw(_("This action is only allowed on submitted Quotations."))
+    if (doc.workflow_state or "") != "Approved for Update":
+        frappe.throw(_(
+            "This action can only be used while the Quotation is in the "
+            "'Approved for Update' state."
+        ))
+    if doc.status in ("Ordered", "Partially Ordered"):
+        frappe.throw(_(
+            "This Quotation already has a Sales Order created against it "
+            "({0}). Editing items or pricing here would desync the "
+            "existing Sales Order, which will not reflect this change — "
+            "not allowed."
+        ).format(doc.status))
+
+
+def _finalize_submitted_quotation_save(doc, notify_discount_incentive_reapply=False):
+    """Shared save tail for every "Approved for Update" bypass endpoint
+    (update_items_selling_price, apply_discount_on_submitted,
+    apply_incentive_on_submitted). See update_items_selling_price's
+    docstring for the full trace of why doc.save() is safe here and why
+    the ordering below matters (validate/before_save hooks never fire
+    for a docstatus 1->1 save, so anything from that chain that still
+    matters — GST/tax-template validation, Sales Taxes and Charges,
+    payment schedule — has to be called explicitly, in the right order,
+    since nothing does it automatically).
+
+    Incentive is applied before Discount (matches run_calculation_
+    pipeline's Draft-time order) since Discount distributes across the
+    incentive-adjusted selling price, not the pre-incentive one.
+
+    Sridhar 2026-07-27 (BRD review, sammish — "must-answer": does
+    repricing on a submitted quote re-trigger margin approval?):
+    set_margin_flags() is the ONLY thing that recomputes
+    custom_auto_approve_ok / custom_level_1_approve_ok and each Brand
+    Summary row's approval_status, and — same root cause as everything
+    else in this docstring — it's normally called from
+    run_calculation_pipeline (a before_save hook), which never fires
+    here. Without this call, a repriced-down quote would keep whatever
+    STALE approve-ok flags it had from before the edit (rebuild_brand_
+    summary() even resets approval_status to blank), so the mandatory
+    "Send for Approval" step a user must take to leave "Approved for
+    Update" would show an L1 reviewer incorrect/blank margin data and
+    could let a quote that actually needs Level 2 slip through on an L1
+    approval alone. Calling it here — right after Brand Summary is
+    rebuilt, since it reads doc.custom_quotation_brand_summary — closes
+    that gap: the flags and Brand Summary the approver sees are always
+    current as of the latest Update Items / Discount / Incentive save.
+    """
+    validate_item_tax_template(doc)
+
+    had_incentive = flt(doc.custom_incentive_amount) > 0 or flt(doc.custom_incentive_) > 0
+    had_discount = flt(doc.custom_discount_amount_value) > 0 or flt(doc.custom_discount_) > 0
+
+    if had_incentive:
+        _sync_incentive_fields(doc)
+        distribute_incentive_server(doc)
+
+    if had_discount:
+        _sync_discount_fields(doc)
+        distribute_discount_server(doc)
+
+    if notify_discount_incentive_reapply and (had_incentive or had_discount):
+        frappe.msgprint(
+            _(
+                "Discount / Incentive were automatically re-applied at "
+                "their existing percentage against the updated items."
+            ),
+            alert=True,
+            indicator="blue",
+        )
+
+    # Our own custom Brand Summary + parent total fields — separate from
+    # ERPNext's native net_total/taxes/grand_total, which
+    # calculate_taxes_and_totals() below derives straight from the
+    # item.rate/amount fields already finalized above.
+    rebuild_brand_summary(doc)
+
+    # Re-evaluate margin approval against the NEW pricing — see the
+    # docstring above. Must run after rebuild_brand_summary (reads its
+    # output) and before doc.save() so the persisted flags/Brand
+    # Summary are what an L1/L2 approver actually sees.
+    was_auto_approve_ok = cint(doc.get("custom_auto_approve_ok"))
+    set_margin_flags(doc)
+    if was_auto_approve_ok and not cint(doc.custom_auto_approve_ok):
+        need_l2 = not cint(doc.custom_level_1_approve_ok)
+        frappe.msgprint(
+            _(
+                "This change dropped one or more brands below the auto-approve "
+                "margin threshold — {0} approval will be required. Use "
+                "'Send for Approval' when you're done editing; the approver "
+                "will see the updated margin."
+            ).format(_("Level 2") if need_l2 else _("Level 1")),
+            title=_("Margin Approval Required"),
+            indicator="orange",
+        )
+
+    recalc_doc_totals(doc)
+
+    for idx, row in enumerate(doc.items, start=1):
+        row.idx = idx
+
+    # Standard ERPNext recalculation of Sales Taxes and Charges + net/
+    # grand totals from the item rate/amount fields, matching default
+    # ERPNext's own update_child_qty_rate call sequence. Must run last —
+    # it's the only thing that correctly repopulates item.item_tax_rate
+    # from item.item_tax_template (needed for a newly added item with a
+    # different GST rate than the rest of the quote), and everything
+    # above this point can still change item.rate/amount.
+    doc.set_qty_as_per_stock_uom()
+    doc.calculate_taxes_and_totals()
+    # payment_schedule is the one field calculate_taxes_and_totals()
+    # does NOT recompute (it's a separate method) — call explicitly so
+    # it doesn't go stale relative to the just-corrected grand_total.
+    doc.set_payment_schedule()
+    doc.set_total_in_words()
+
+    # Same flag ERPNext's own update_child_qty_rate uses so a submitted
+    # doc's non-allow_on_submit fields can be saved in place.
+    doc.flags.ignore_validate_update_after_submit = True
+    doc.save()
+
+
+# ──────────────────────────────────────────────────────────────
 # 5)  MASTER PIPELINE  (called from before_save hook)
 # ──────────────────────────────────────────────────────────────
 def _apply_manual_selling_rate(it, user_rate, discount_total=0.0, pre_discount_total=0.0):
@@ -2668,6 +2854,244 @@ def update_special_price(quotation_name, items):
     frappe.db.commit()
 
     return {"message": "Special Price updated successfully"}
+
+
+@frappe.whitelist()
+def update_items_selling_price(quotation_name, items):
+    """Update Qty / Special Price / Selling Price (incl. adding new
+    rows) on a submitted Quotation from the "Update Items" flow (only
+    reachable while workflow_state is "Approved for Update" — see
+    quotation.js _strip_update_items).
+
+    Sridhar 2026-07-24 (meeting decision 2026-07-22): ERPNext's native
+    Update Items dialog (erpnext.utils.update_child_items) edits the
+    core `rate` field directly. But `rate` is a MIRROR field here —
+    calc_item_totals always overwrites it from custom_special_price +
+    custom_markup_. This dialog instead edits Special Price / Selling
+    Price directly and back-solves markup% (_apply_manual_selling_rate,
+    same formula a manual rate edit gets on a Draft quote) so the
+    entered price is what actually persists.
+
+    Sridhar 2026-07-24 (same-day rewrite #2 — Sales feedback: "how does
+    Tax work here, make this behave like default ERPNext"): the first
+    cut of this function persisted via raw frappe.db.set_value,
+    bypassing doc.save() entirely — which also skipped Sales Taxes and
+    Charges recalculation. Root cause of the original "bypass" design:
+    submitted-doc fields here aren't allow_on_submit, so a plain
+    doc.save() throws "Not allowed to change after submission".
+
+    ERPNext's own update_child_qty_rate (erpnext/controllers/
+    accounts_controller.py) solves the same problem the same way: it
+    sets `doc.flags.ignore_validate_update_after_submit = True`, which
+    Frappe's Document.validate_update_after_submit() checks first and
+    short-circuits on (frappe/model/document.py:932-943), then calls
+    `parent.calculate_taxes_and_totals()` and `parent.save()`. Adopted
+    below.
+
+    Correction (same day, caught while answering a follow-up question):
+    an earlier version of this docstring claimed the switch to
+    doc.save() ALSO restores validate-time hooks like
+    validate_item_tax_template (GST/tax-template auto-fill). That's
+    wrong — verified against Frappe's actual source. This save is
+    docstatus 1 -> 1, which Frappe tags `_action = "update_after_submit"`
+    (Document.check_docstatus_transition). In that branch,
+    run_before_save_methods() calls ONLY before_update_after_submit —
+    it skips the entire "validate" and "before_save" hook lists
+    (document.py:1142-1151), unconditionally, regardless of doc.save()
+    vs raw SQL. So run_calculation_pipeline, validate_item_tax_template,
+    validate_margin_approval_required, validate_total_discount, etc.
+    NEVER fire here — not because their own guards happen to allow it,
+    but because Frappe doesn't call them at all for this action. Only
+    `on_update_after_submit` hooks fire (post-save) — checked those are
+    safe: quotation_high_probability's hook explicitly allows
+    workflow_state "Approved for Update", validate_probability_change_
+    approval / notify_probability_100 no-op since probability is
+    untouched, sync_workflow_status is idempotent.
+
+    Net effect: anything from the normal validate/before_save chain
+    that still matters here must be called explicitly — see
+    _finalize_submitted_quotation_save() below, shared with
+    apply_discount_on_submitted() / apply_incentive_on_submitted().
+
+    Sridhar 2026-07-24 (same day, 4th pass — remove-row support +
+    Discount/Incentive rebasing): row removal is a set-diff against
+    what the dialog sent (see below); an existing parent-level Discount
+    or Incentive (percentage-driven) is automatically rebased against
+    the changed item total via _finalize_submitted_quotation_save(),
+    with a msgprint telling the user it happened — items were bought at
+    a % off/incentive, adding or removing rows shouldn't silently leave
+    that stale against the old total.
+    """
+    items = frappe.parse_json(items)
+    doc = frappe.get_doc("Quotation", quotation_name)
+    _guard_quotation_editable_for_update(doc)
+
+    existing_by_name = {r.name: r for r in doc.items}
+    touched_any = False
+
+    for item_update in items:
+        row_name = item_update.get("name")
+        item_code = item_update.get("item_code")
+        new_qty = flt(item_update.get("qty"))
+        new_rate = flt(item_update.get("custom_special_rate"))
+        sp_override = item_update.get("custom_special_price")
+        if new_qty <= 0 or new_rate <= 0:
+            continue
+
+        row = existing_by_name.get(row_name) if row_name else None
+
+        if row:
+            # ── Existing row: Qty / Special Price / Selling Price edit ──
+            row.qty = new_qty
+            if sp_override not in (None, ""):
+                row.custom_special_price = flt(sp_override)
+            # Qty-scaled cost components (shipping/finance/transport/
+            # reward/incentive/customs) + a formula rate we override next.
+            calc_item_totals(row)
+            # Back-solve custom_markup_ so the entered per-unit price is
+            # what persists — same formula a manual rate edit on a Draft
+            # quote uses.
+            _apply_manual_selling_rate(row, new_rate)
+            touched_any = True
+
+        else:
+            # ── New row: item added via "Add Row" while Approved for
+            # Update. item_code is mandatory — the client already blocks
+            # submitting without one, this is the server-side backstop.
+            if not item_code:
+                continue
+
+            item_master = frappe.db.get_value(
+                "Item", item_code,
+                ["item_name", "description", "stock_uom", "disabled"],
+                as_dict=True,
+            )
+            if not item_master:
+                frappe.throw(_("Item {0} not found.").format(item_code))
+            if item_master.disabled:
+                frappe.throw(_("Item {0} is disabled.").format(item_code))
+
+            defaults = get_item_defaults(
+                item_code, doc.selling_price_list, doc.currency,
+                doc.price_list_currency, doc.plc_conversion_rate, doc.company,
+            )
+            if defaults.get("no_price_for_company"):
+                frappe.throw(_(
+                    "No Item Price found for {0} in company {1}. Please set "
+                    "up an Item Price before adding it here."
+                ).format(item_code, doc.company))
+
+            std_price = flt(defaults.get("custom_standard_price_"))
+            new_special_price = flt(sp_override) if sp_override not in (None, "") else flt(defaults.get("custom_special_price"))
+            if not std_price and not new_special_price:
+                frappe.throw(_(
+                    "No Item Price found for {0}. Set one up, or provide a "
+                    "Special Price manually, before adding it here."
+                ).format(item_code))
+
+            new_row = doc.append("items", {})
+            new_row.item_code = item_code
+            new_row.item_name = item_master.item_name or item_code
+            new_row.description = item_master.description or item_master.item_name
+            new_row.uom = item_master.stock_uom
+            new_row.stock_uom = item_master.stock_uom
+            new_row.conversion_factor = 1
+            new_row.qty = new_qty
+
+            new_row.custom_standard_price_ = std_price
+            new_row.custom_special_price = new_special_price
+            new_row.shipping_per = flt(defaults.get("shipping_per_air"))
+            new_row.custom_transport_ = flt(defaults.get("custom_transport_"))
+            new_row.custom_finance_ = flt(defaults.get("custom_finance_"))
+            new_row.std_margin_per = flt(defaults.get("std_margin_per"))
+            new_row.custom_customs_ = flt(defaults.get("custom_customs_"))
+            new_row.custom_markup_ = flt(defaults.get("custom_markup_"))
+
+            calc_item_totals(new_row)
+            _apply_manual_selling_rate(new_row, new_rate)
+            touched_any = True
+
+    # ── Row removal ── the dialog always sends the FULL current item
+    # list (it's a whole-table editor, not a delta view — every existing
+    # row starts pre-populated), so any existing row whose name is
+    # missing from the payload was deliberately removed by the user via
+    # the grid's delete checkbox. Diffing against what was sent is a
+    # reliable "delete" signal here for exactly that reason; it would
+    # NOT be safe for a partial-update API.
+    sent_names = {u.get("name") for u in items if u.get("name")}
+    removed_names = set(existing_by_name.keys()) - sent_names
+    if removed_names:
+        doc.set("items", [r for r in doc.items if r.name not in removed_names])
+        touched_any = True
+
+    if not touched_any:
+        frappe.throw(_("No valid item changes to apply."))
+    if not doc.items:
+        frappe.throw(_("A Quotation must have at least one item — cannot remove all items."))
+
+    # Correction (Sridhar 2026-07-24, same day): this save is docstatus
+    # 1 -> 1, which Frappe tags _action = "update_after_submit"
+    # (frappe/model/document.py check_docstatus_transition). In THAT
+    # branch, run_before_save_methods() calls ONLY
+    # before_update_after_submit — it skips the "validate" and
+    # "before_save" hook lists entirely (document.py:1142-1151). So NONE
+    # of Quotation's validate/before_save hooks fire here regardless of
+    # doc.save() vs raw SQL. _finalize_submitted_quotation_save() below
+    # is what replaces them: GST/tax-template validation, Discount/
+    # Incentive redistribution (rebased against the now-changed item
+    # set — the mixed-GST / add-remove-row concern this function exists
+    # for), Brand Summary + custom total fields, and ERPNext's own Sales
+    # Taxes and Charges / payment schedule recalculation, all in the
+    # order that keeps them mutually consistent (see that function's
+    # docstring for exactly why the order matters).
+    _finalize_submitted_quotation_save(doc, notify_discount_incentive_reapply=True)
+
+    return {"message": "Items updated successfully"}
+
+
+@frappe.whitelist()
+def apply_discount_on_submitted(quotation_name, discount_type, discount_percentage=0, discount_amount=0):
+    """Apply Discount (custom_discount_type / custom_discount_ /
+    custom_discount_amount_value) on a submitted Quotation, while
+    workflow_state is "Approved for Update". Sridhar 2026-07-24: the
+    Discount and Incentive section's Apply buttons only ever computed a
+    client-side preview and relied on a later full frm.save() to
+    persist — which hard-fails on a submitted doc (these fields aren't
+    allow_on_submit). This is the bypass-save persistence layer for
+    that button when frm.doc.docstatus === 1, mirroring
+    update_items_selling_price's pattern exactly.
+    """
+    doc = frappe.get_doc("Quotation", quotation_name)
+    _guard_quotation_editable_for_update(doc)
+
+    doc.custom_discount_type = discount_type or "Amount"
+    doc.custom_discount_ = flt(discount_percentage)
+    doc.custom_discount_amount_value = flt(discount_amount)
+    if not doc.custom_discount_ and not doc.custom_discount_amount_value:
+        frappe.throw(_("Enter a discount percentage or amount."))
+
+    _finalize_submitted_quotation_save(doc)
+
+    return {"message": "Discount applied successfully"}
+
+
+@frappe.whitelist()
+def apply_incentive_on_submitted(quotation_name, incentive_type, incentive_percentage=0, incentive_amount=0):
+    """Apply Incentive (custom_incentive_type / custom_incentive_ /
+    custom_incentive_amount) on a submitted Quotation — sibling to
+    apply_discount_on_submitted() above, same rationale."""
+    doc = frappe.get_doc("Quotation", quotation_name)
+    _guard_quotation_editable_for_update(doc)
+
+    doc.custom_incentive_type = incentive_type or "Percentage"
+    doc.custom_incentive_ = flt(incentive_percentage)
+    doc.custom_incentive_amount = flt(incentive_amount)
+    if not doc.custom_incentive_ and not doc.custom_incentive_amount:
+        frappe.throw(_("Enter an incentive percentage or amount."))
+
+    _finalize_submitted_quotation_save(doc)
+
+    return {"message": "Incentive applied successfully"}
 
 
 # Venkatesh/Rahul 2026-06-11 ERP-TKT-31: Quote print should be gated
