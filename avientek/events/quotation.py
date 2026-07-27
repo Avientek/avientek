@@ -346,6 +346,37 @@ def _clamp_21_9(v) -> float:
     return n
 
 
+# Every decimal(21,9) margin-family field that is derived by dividing by a
+# selling price / cost that can be near-zero — and therefore can overflow
+# MySQL 1264 on save. The per-item calc guards only exact-zero denominators
+# (`... if selling else 0`), so a tiny non-zero (e.g. 0.0001) still blows
+# up; and Shipment and Margin.margin is written CLIENT-SIDE (quotation.js
+# copies item.custom_margin_ into it) with no clamp at all.
+_CLAMP_FIELDS = {
+    "items": ("custom_margin_", "custom_markup_"),
+    "custom_shipment_and_margin": ("margin", "std_margin", "ship_air", "ship_sea"),
+    "custom_brand_summary": ("margin", "margin_percent", "std_margin_percent"),
+    "custom_quotation_brand_summary": ("margin", "margin_percent", "std_margin_percent"),
+}
+
+
+def clamp_decimal_overflow_fields(doc, method=None):
+    """validate hook — last line of defence against MySQL 1264
+    "Out of range value for column 'margin'" on Quotation save.
+
+    Runs server-side AFTER the client sets values (quotation.js) and after
+    the per-item calc, so it catches BOTH the server-computed item
+    percentages and the JS-populated Shipment and Margin rows before the
+    row is inserted. Support ticket 2026-07-27: a brand whose selling
+    total is ~0 makes margin% = value/selling*100 overflow decimal(21,9).
+    """
+    for table, fields in _CLAMP_FIELDS.items():
+        for row in (doc.get(table) or []):
+            for fn in fields:
+                if row.get(fn) is not None:
+                    row.set(fn, _clamp_21_9(row.get(fn)))
+
+
 # ──────────────────────────────────────────────────────────────
 # 1)  PER-ITEM CALCULATION  (server-side — single source of truth)
 #     Verified formula from client spreadsheet (ERP_Next.ods)

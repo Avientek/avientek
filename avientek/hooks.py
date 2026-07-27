@@ -650,6 +650,12 @@ doc_events = {
         ],
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",
+            # Sammish 2026-07-27 (support ticket): clamp margin-family
+            # decimal(21,9) fields AFTER the calc pipeline recomputes them
+            # (and after quotation.js has populated Shipment and Margin),
+            # so a near-zero selling total can't overflow MySQL 1264
+            # "Out of range value for column 'margin'" on save.
+            "avientek.events.quotation.clamp_decimal_overflow_fields",
             "avientek.events.quotation.validate_total_discount",
             # Sridhar 2026-05-06 — lock fields when probability >= 75.
             "avientek.api.quotation_high_probability.before_save",
