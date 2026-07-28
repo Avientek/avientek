@@ -353,6 +353,15 @@ def _clamp_21_9(v) -> float:
 def calc_item_totals(it):
     qty = max(cint(it.qty), 1)
 
+    # EXW / DDP: customer collects / delivers themselves, so no Air % or
+    # Sea % shipping charge applies — always zero-rated, regardless of
+    # whatever value is sitting on shipping_per (manual entry, stale bulk
+    # import row, etc.). This is the single authoritative enforcement
+    # point since every calc_item_totals() caller (Draft save pipeline,
+    # submitted-quote "Update Items" flow) routes through here.
+    if it.custom_shipping_mode in ("EXW", "DDP"):
+        it.shipping_per = 0
+
     std_price = _to_flt(it.custom_standard_price_)
     sp        = _to_flt(it.custom_special_price)
 
@@ -1159,6 +1168,22 @@ def backfill_item_core_fields(doc):
             it.stock_qty = flt(it.qty) * 1
 
 
+def _default_shipping_per_for_mode(mode, defaults):
+    """Pick the correct starting shipping_per for a Shipping Mode from an
+    Item Price defaults dict (see get_item_defaults). EXW/DDP are always
+    zero-rated and never pull a percentage from the Item Price master —
+    the customer collects/pays for their own shipping under those terms.
+    Blank/unrecognised modes fall back to Air, matching the pre-EXW/DDP/DDU
+    default."""
+    if mode in ("EXW", "DDP"):
+        return 0
+    if mode == "Sea":
+        return flt(defaults.get("shipping_per_sea")) or 0
+    if mode == "DDU":
+        return flt(defaults.get("shipping_per_ddu")) or 0
+    return flt(defaults.get("shipping_per_air")) or 0
+
+
 def backfill_item_price_defaults(doc):
     """Same root cause as backfill_item_core_fields: rows added via bulk CSV
     upload / Data Import / API never fire the item_code trigger, so
@@ -1185,7 +1210,8 @@ def backfill_item_price_defaults(doc):
         if not _to_flt(it.custom_special_price):
             it.custom_special_price = defaults["custom_special_price"]
         if not _to_flt(it.shipping_per):
-            it.shipping_per = defaults.get("shipping_per_air") or 0
+            mode = it.custom_shipping_mode or doc.custom_shipping_mode
+            it.shipping_per = _default_shipping_per_for_mode(mode, defaults)
         if not _to_flt(it.custom_transport_):
             it.custom_transport_ = defaults.get("custom_transport_") or 0
         if not _to_flt(it.custom_finance_):
@@ -1453,6 +1479,7 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
         "price_list_rate",
         "custom_shipping__air_",
         "custom_shipping__sea_",
+        "custom_shipping__ddu_",
         "custom_processing_",
         "custom_min_finance_charge_",
         "custom_min_margin_",
@@ -1495,6 +1522,7 @@ def get_item_defaults(item_code, price_list, currency, price_list_currency, plc_
         result["custom_special_price"]   = std_price  # default SP = standard
         result["shipping_per_air"]       = flt(ip.custom_shipping__air_)
         result["shipping_per_sea"]       = flt(ip.custom_shipping__sea_)
+        result["shipping_per_ddu"]       = flt(ip.custom_shipping__ddu_)
         result["custom_transport_"]      = flt(ip.custom_processing_)
         result["custom_finance_"]        = flt(ip.custom_min_finance_charge_)
         result["std_margin_per"]         = flt(ip.custom_min_margin_)
@@ -1554,6 +1582,7 @@ def get_item_defaults_bulk(item_codes, price_list, currency, price_list_currency
                 "price_list_rate",
                 "custom_shipping__air_",
                 "custom_shipping__sea_",
+                "custom_shipping__ddu_",
                 "custom_processing_",
                 "custom_min_finance_charge_",
                 "custom_min_margin_",
@@ -1612,6 +1641,7 @@ def get_item_defaults_bulk(item_codes, price_list, currency, price_list_currency
             item_result["custom_special_price"]   = std_price
             item_result["shipping_per_air"]       = flt(ip.custom_shipping__air_)
             item_result["shipping_per_sea"]       = flt(ip.custom_shipping__sea_)
+            item_result["shipping_per_ddu"]       = flt(ip.custom_shipping__ddu_)
             item_result["custom_transport_"]      = flt(ip.custom_processing_)
             item_result["custom_finance_"]        = flt(ip.custom_min_finance_charge_)
             item_result["std_margin_per"]         = flt(ip.custom_min_margin_)
@@ -2969,7 +2999,12 @@ def update_items_selling_price(quotation_name, items):
 
             new_row.custom_standard_price_ = std_price
             new_row.custom_special_price = new_special_price
-            new_row.shipping_per = flt(defaults.get("shipping_per_air"))
+            # This dialog's item payload has no per-row Shipping Mode column
+            # (see show_update_items_selling_price_dialog) — a newly added
+            # row inherits the quotation's own mode, same effective-mode
+            # fallback the Draft-time JS/server logic uses elsewhere.
+            new_row.custom_shipping_mode = doc.custom_shipping_mode
+            new_row.shipping_per = _default_shipping_per_for_mode(doc.custom_shipping_mode, defaults)
             new_row.custom_transport_ = flt(defaults.get("custom_transport_"))
             new_row.custom_finance_ = flt(defaults.get("custom_finance_"))
             new_row.std_margin_per = flt(defaults.get("std_margin_per"))
@@ -3061,6 +3096,60 @@ def apply_incentive_on_submitted(quotation_name, incentive_type, incentive_perce
     _finalize_submitted_quotation_save(doc)
 
     return {"message": "Incentive applied successfully"}
+
+
+@frappe.whitelist()
+def apply_shipping_on_submitted(quotation_name, shipping_mode):
+    """Apply a new doc-level Shipping Mode on a submitted Quotation, while
+    workflow_state is "Approved for Update" — sibling to
+    apply_discount_on_submitted() / apply_incentive_on_submitted() above.
+
+    Unlike Discount/Incentive (a post-hoc adjustment layered ON TOP of an
+    already-computed selling price via distribute_discount_server /
+    distribute_incentive_server), Shipping % is itself one of
+    calc_item_totals' Layer-1 cost inputs — changing it changes COGS,
+    which cascades through markup and selling price. So this can't just
+    redistribute a fixed amount across rows the way Discount/Incentive
+    do; every item has to be re-run through calc_item_totals from its own
+    new shipping_per (mirroring what changing the doc-level Shipping Mode
+    does on a Draft, per update_items_shipping_percent in quotation.js).
+    Any existing Discount/Incentive is then re-applied against those
+    recomputed prices by _finalize_submitted_quotation_save, exactly like
+    it already does for update_items_selling_price's add/remove/reprice
+    flow (notify_discount_incentive_reapply)."""
+    doc = frappe.get_doc("Quotation", quotation_name)
+    _guard_quotation_editable_for_update(doc)
+
+    doc.custom_shipping_mode = shipping_mode
+
+    # Cascade to every row's own custom_shipping_mode too, not just
+    # shipping_per — mirrors the Draft-time fix in update_items_shipping_
+    # percent() (quotation.js): a doc-level change is a full reset of
+    # every line's mode, matching what the Items grid column then shows.
+    # A user can still override any individual row afterward (the normal
+    # per-row edit path, untouched by this).
+    for it in doc.items:
+        if not it.item_code:
+            continue
+        it.custom_shipping_mode = shipping_mode
+        if shipping_mode in ("EXW", "DDP"):
+            it.shipping_per = 0
+        else:
+            defaults = get_item_defaults(
+                it.item_code,
+                doc.selling_price_list,
+                doc.currency,
+                doc.price_list_currency,
+                doc.plc_conversion_rate,
+                doc.company,
+            )
+            if not defaults.get("no_price_for_company"):
+                it.shipping_per = _default_shipping_per_for_mode(shipping_mode, defaults)
+        calc_item_totals(it)
+
+    _finalize_submitted_quotation_save(doc, notify_discount_incentive_reapply=True)
+
+    return {"message": "Shipping mode applied successfully"}
 
 
 # Venkatesh/Rahul 2026-06-11 ERP-TKT-31: Quote print should be gated
