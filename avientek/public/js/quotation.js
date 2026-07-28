@@ -42,18 +42,20 @@ function _user_is_whitelisted_for_high_prob() {
     return _HIGH_PROB_WHITELIST.some(r => roles.indexOf(r) !== -1);
 }
 
-// Sridhar 2026-07-27: must match avientek.events.sales_order
-// .validate_quotation_approved's APPROVED_STATES exactly — that
-// server-side gate (the hard backstop for SO creation) treats
-// "Approved for Update" as equally valid to "Approved" ("the
-// post-amend approved state"). The client-side gate below previously
-// only matched the literal string "Approved", so a quote sitting in
-// "Approved for Update" (e.g. reopened for a price tweak via Update
-// Items, already at 100% probability) hid the Create→Sales Order
-// option entirely even though the server would have allowed it —
-// caught via a tested screenshot (QN-FZCO-26-00311, Approved for
-// Update, 100%, button not offered).
-const _SO_APPROVED_STATES = new Set(["Approved", "Approved for Update"]);
+// Sridhar 2026-07-27 (reverted same day — tested on qcs-avntk-test,
+// QN-FZCO-26-00251): briefly included "Approved for Update" here to
+// match avientek.events.sales_order.validate_quotation_approved's
+// APPROVED_STATES (that server-side hard backstop does allow it — "the
+// post-amend approved state"). But tested in the browser, that let a
+// quote still MID-REVISION (Update Items reopened it specifically to
+// let prices/items change) create a Sales Order before the revision
+// was finished and re-approved — items could still be in flux. Client
+// now deliberately stricter than the server: only the terminal
+// "Approved" state offers Create→Sales Order. The server keeps
+// allowing "Approved for Update" too (unchanged, not touched here) —
+// that's its own pre-existing escape hatch for admin/API paths, which
+// never goes through this JS gate anyway.
+const _SO_APPROVED_STATES = new Set(["Approved"]);
 
 function _so_button_conditions_met(frm) {
     if (frm.is_new()) { return false; }
@@ -69,14 +71,13 @@ function _so_button_conditions_met(frm) {
     return isApproved && has100 && !hasPendingProb;
 }
 
-// Sridhar 2026-07-24: base workflow gate only (Approved / Approved for
-// Update), ignoring probability. Used to decide whether the
-// Create→Sales Order option should be VISIBLE at all — the full
-// _so_button_conditions_met check still decides whether clicking it is
-// allowed to proceed. Previously the button was hidden outright
-// whenever probability wasn't 100%, so users who forgot to bump
-// probability first just saw no option and had no idea why. Now they
-// see it and get told what to fix.
+// Sridhar 2026-07-24: base workflow gate only (Approved), ignoring
+// probability. Used to decide whether the Create→Sales Order option
+// should be VISIBLE at all — the full _so_button_conditions_met check
+// still decides whether clicking it is allowed to proceed. Previously
+// the button was hidden outright whenever probability wasn't 100%, so
+// users who forgot to bump probability first just saw no option and
+// had no idea why. Now they see it and get told what to fix.
 function _so_button_approved_gate(frm) {
     if (frm.is_new()) { return false; }
     return _SO_APPROVED_STATES.has(frm.doc.workflow_state || "");
@@ -85,7 +86,18 @@ function _so_button_approved_gate(frm) {
 // Human-readable reason the Sales Order/Invoice creation is blocked,
 // or null if it's fully allowed. Shown to the user at click-time
 // instead of just hiding the option.
+//
+// Sridhar 2026-07-27 (same-day, 2nd revision): the option is now
+// ALWAYS offered under Create, in every workflow_state — previously
+// the button was hidden entirely until Approved, but that gave no
+// explanation either, and ERPNext only attempts to register it itself
+// once docstatus==1 anyway, so a Draft/Pending quote never even
+// reached this logic before. See the proactive frm.add_custom_button
+// call in refresh() that now registers it unconditionally.
 function _so_button_block_reason(frm) {
+    if (!_SO_APPROVED_STATES.has(frm.doc.workflow_state || "")) {
+        return __("This Quotation must be Approved before you can create a Sales Order. Current status: {0}.", [frm.doc.workflow_state || "Draft"]);
+    }
     const hasPendingProb = (frm.doc.pending_probability_status || "") === "Pending";
     if (hasPendingProb) {
         return __("A Probability change request is pending L2 approval on this Quotation. Please wait until it's resolved before creating a Sales Order.");
@@ -117,16 +129,11 @@ function _install_so_button_interceptor(frm) {
         const isSoOrSi = (labelStr === __("Sales Order") || labelStr === __("Sales Invoice"))
                         && (groupStr === __("Create") || groupStr === "Create");
         if (isSoOrSi) {
-            if (!_so_button_approved_gate(frm)) {
-                // Quote hasn't reached Approved yet — creating a Sales
-                // Order/Invoice isn't valid at all, so keep hiding it.
-                return;
-            }
+            // Sridhar 2026-07-27 (same-day, 2nd revision): the option is
+            // now ALWAYS registered, in every workflow_state — clicking
+            // it explains exactly what's missing instead of the option
+            // being hidden with no feedback. See _so_button_block_reason.
             if (!_so_button_conditions_met(frm)) {
-                // Sridhar 2026-07-24: Approved but probability isn't 100%
-                // (or an approval is pending) — show the option so the
-                // user isn't confused, but clicking explains what to fix
-                // instead of silently doing nothing / hiding the option.
                 const wrapped_action = function() {
                     const reason = _so_button_block_reason(frm);
                     frappe.msgprint({
@@ -286,11 +293,9 @@ function _strip_create_buttons_unless_approved(frm) {
     _toggle_create_button_visibility(frm);
     if (frm.is_new()) { return; }
 
-    // Sridhar 2026-07-27: must match _SO_APPROVED_STATES above (and the
-    // server-side APPROVED_STATES in sales_order.py) — was previously
-    // Set(["Approved"]) only, which stripped the SO/SI buttons straight
-    // back off on every refresh for a quote in "Approved for Update",
-    // undoing what _install_so_button_interceptor had just registered.
+    // Shares _SO_APPROVED_STATES with the interceptor above (currently
+    // just "Approved" — see that constant's comment for the same-day
+    // back-and-forth on whether "Approved for Update" should count).
     const isApproved = _SO_APPROVED_STATES.has(frm.doc.workflow_state || "");
 
     // Sridhar 2026-07-24: once Approved, leave the SO/SI buttons alone
@@ -846,6 +851,25 @@ frappe.ui.form.on('Quotation', {
 
     // ── Refresh / Onload ────────────────────────────────────
     refresh(frm) {
+        // Sridhar 2026-07-27 (same-day, 2nd revision — tested feedback:
+        // "show a popup for whichever condition isn't satisfying, don't
+        // just hide the option"): ERPNext's own Quotation controller
+        // only ever attempts to register Create -> Sales Order once
+        // docstatus == 1 (erpnext/selling/doctype/quotation/quotation.js)
+        // — for a Draft or not-yet-Approved submitted quote it never
+        // calls add_custom_button for this at all, so the interceptor in
+        // _install_so_button_interceptor had nothing to intercept and the
+        // option simply didn't exist. Registering it ourselves,
+        // unconditionally, every refresh, gives the interceptor
+        // something to catch in every state — it still decides real
+        // action vs. explain-why-not popup via _so_button_conditions_met.
+        // frm.cscript.make_sales_order is the exact method ERPNext's own
+        // button would have called (same pattern as the
+        // calculate_taxes_and_totals override elsewhere in this file).
+        if (!frm.is_new()) {
+            frm.add_custom_button(__("Sales Order"), () => frm.cscript.make_sales_order(), __("Create"));
+        }
+
         // Diagnostic button — for the India company, surfaces why any
         // items in this Quotation will trip the "Items not covered under
         // GST cannot be clubbed..." validator. Pulls item codes straight
