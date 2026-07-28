@@ -46,6 +46,7 @@ def make_item(**kwargs):
         "qty": 1,
         "custom_standard_price_": 0,
         "custom_special_price": 0,
+        "custom_shipping_mode": None,
         "shipping_per": 0,
         "custom_finance_": 0,
         "custom_transport_": 0,
@@ -255,6 +256,45 @@ class TestCalcItemTotals(unittest.TestCase):
         self.assertAlmostEqual(it.custom_markup_value, 27.80, places=1)
         self.assertAlmostEqual(it.custom_selling_price, 213.14, places=0)
         self.assertAlmostEqual(it.custom_margin_, 13.04, places=0)
+
+    def test_exw_locks_shipping_to_zero(self):
+        """EXW ignores whatever shipping_per was on the row — always 0."""
+        it = make_item(
+            qty=1, custom_standard_price_=160, custom_special_price=140,
+            custom_shipping_mode="EXW",
+            shipping_per=20, custom_finance_=2, custom_transport_=1.5,
+            reward_per=1.5, custom_incentive_=3, custom_markup_=15,
+            custom_customs_=1,
+        )
+        calc_item_totals(it)
+
+        self.assertEqual(it.shipping_per, 0)
+        self.assertAlmostEqual(it.shipping, 0, places=2)
+        # Everything else still calculates normally, just without shipping
+        self.assertAlmostEqual(it.custom_finance_value, 2.10, places=2)
+
+    def test_ddp_locks_shipping_to_zero(self):
+        """DDP behaves exactly like EXW — always 0, regardless of input."""
+        it = make_item(
+            qty=2, custom_standard_price_=100, custom_special_price=100,
+            custom_shipping_mode="DDP",
+            shipping_per=50,
+        )
+        calc_item_totals(it)
+
+        self.assertEqual(it.shipping_per, 0)
+        self.assertAlmostEqual(it.shipping, 0, places=2)
+
+    def test_ddu_shipping_calculates_normally(self):
+        """DDU is a plain editable %, calculated like Air/Sea — not locked."""
+        it = make_item(
+            qty=1, custom_standard_price_=100, custom_special_price=100,
+            custom_shipping_mode="DDU",
+            shipping_per=12,
+        )
+        calc_item_totals(it)
+
+        self.assertAlmostEqual(it.shipping, 12.0, places=2)
 
     def test_zero_charges(self):
         """Only standard/special price set, all charges zero."""
