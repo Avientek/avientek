@@ -143,8 +143,24 @@ def _reconcile_item_lines_to_header(item_lines, doc):
     if getattr(doc, "doctype", None) != "Sales Invoice":
         return
     header_vat = flt(doc.get("total_taxes_and_charges"), 2)
+
+    # Zero-rated / zero-VAT invoice (e.g. intercompany export, INV-AT-26-00372):
+    # the whole invoice carries 0 VAT, so every ZATCA line tax MUST be 0
+    # (BR-Z-09). ksa_compliance's installed version miscomputes the line tax
+    # at the standard 15% rate on zero-rated lines and even duplicates the
+    # first line's figure onto the others (1168.20 on both lines of
+    # INV-AT-26-00372, category shown as Z @ 0% — impossible), producing
+    # BT-117 != 0 and BT-110 != Σ BT-117. Force every line tax to 0 here so
+    # the XML matches the 0-VAT header. Only fires when the header booked no
+    # tax at all, so standard-rated invoices are untouched.
     if not header_vat:
+        for il in item_lines:
+            if flt(il.get("tax_amount")):
+                il.tax_amount = 0.0
+                if "rounding_amount" in il:
+                    il.rounding_amount = flt(il.get("amount"))
         return
+
     line_sum = flt(sum(flt(il.get("tax_amount")) for il in item_lines), 2)
     residue = flt(header_vat - line_sum, 2)
     if not residue or abs(residue) > _MAX_RECONCILE:
