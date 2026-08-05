@@ -543,6 +543,11 @@ doc_events = {
     "Purchase Order": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
+            # Sammish 2026-08-05 (AVFZC-02535): a foreign-currency PO saved
+            # with conversion_rate 1.0 booked base/AED amounts equal to the
+            # foreign amounts. Auto-fill the real rate BEFORE the controller
+            # computes base amounts (must precede calculate_taxes_and_totals).
+            "avientek.events.purchase_order.autofill_foreign_conversion_rate",
             # Rahul 2026-05-22 (POLTD26-27-00015): suppress
             # india_compliance's "Items not covered under GST cannot be
             # clubbed" error on PO. PO is a commercial agreement, not

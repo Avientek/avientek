@@ -146,6 +146,59 @@ def make_purchase_order(source_name, target_doc=None):
 	
 	return doclist
 
+def autofill_foreign_conversion_rate(doc, method=None):
+	"""before_validate: guarantee a foreign-currency Purchase Order carries
+	the real transaction-currency -> company-currency exchange rate, so its
+	base (company-currency) amounts are actually converted.
+
+	Sammish 2026-08-05 (AVFZC-02535 / PO-FZCO-26-00955): a EUR PO was saved
+	with conversion_rate = 1.0, so every base/AED amount equalled the EUR
+	amount (EUR 7,742.70 shown as AED 7,742.70 instead of ~AED 30,900), and
+	the PRF Payment Voucher inherited the wrong figure. The existing
+	check_exchange_rate() below only runs when currency == price_list_currency;
+	this PO was EUR transaction / USD price list, so that guard was skipped
+	entirely and the 1.0 rate slipped through.
+
+	Fix: whenever the transaction currency differs from the company's
+	default currency but conversion_rate is missing or 1.0 (the tell-tale of
+	an unconverted foreign document — no currency the company deals in is
+	pegged 1:1 to AED), pull the real rate from Currency Exchange and set it
+	here, in before_validate, so the controller's calculate_taxes_and_totals
+	then recomputes every base amount correctly. If no system rate exists,
+	block the save with a clear message rather than persist a wrong 1.0.
+
+	A genuine, non-1.0 rate the user/ERPNext already set is left untouched.
+	"""
+	if not doc.currency:
+		return
+	company_currency = frappe.get_cached_value("Company", doc.company, "default_currency")
+	if not company_currency or doc.currency == company_currency:
+		return  # base-currency PO — conversion_rate 1.0 is correct
+
+	rate = flt(doc.conversion_rate)
+	if rate and abs(rate - 1.0) > 1e-9:
+		return  # a real (non-1.0) foreign rate is already set — respect it
+
+	txn_date = doc.transaction_date or nowdate()
+	sys_rate = flt(get_exchange_rate(doc.currency, company_currency, txn_date))
+	if sys_rate and abs(sys_rate - 1.0) > 1e-9:
+		doc.conversion_rate = sys_rate
+		frappe.msgprint(
+			_("Exchange rate for {0} → {1} was set to {2} from Currency Exchange "
+			  "(it was left at 1.0). Base amounts recalculated.").format(
+				doc.currency, company_currency, sys_rate),
+			indicator="blue", alert=True,
+		)
+	else:
+		frappe.throw(
+			_("Purchase Order is in {0} but has no valid exchange rate to the "
+			  "company currency {1} for {2}. Set the correct conversion rate "
+			  "(or add a Currency Exchange record) before saving — a rate of 1.0 "
+			  "would book base amounts equal to the {0} amounts.").format(
+				doc.currency, company_currency, txn_date)
+		)
+
+
 def check_exchange_rate(doc,method):
 	po_validate(doc,method)
 	if doc.currency == doc.price_list_currency:
