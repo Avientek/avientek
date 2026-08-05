@@ -53,9 +53,33 @@ def before_tests():
     _ensure_test_holiday_list()
     _ensure_test_fiscal_years()
     _ensure_test_tax_categories()
+    _ensure_test_warehouse_types()
     _ensure_test_users()
     _ensure_test_companies()
     _ensure_test_items()
+
+
+def _ensure_test_warehouse_types():
+    """Create the standard 'Transit' Warehouse Type if missing.
+
+    When a Company is created, ERPNext's Company.on_update runs
+    create_default_warehouses(), which inserts a Transit warehouse linked
+    to Warehouse Type 'Transit'. On a fresh CI test site that Warehouse
+    Type record may be absent, so _ensure_test_companies() fails with
+    `LinkValidationError: Could not find Warehouse Type: Transit`. Seed it
+    before any company is created. Warehouse Type's name is its only
+    required field.
+    """
+    for wtype in ("Transit",):
+        if frappe.db.exists("Warehouse Type", wtype):
+            continue
+        try:
+            frappe.get_doc({
+                "doctype": "Warehouse Type",
+                "name": wtype,
+            }).insert(ignore_permissions=True, ignore_mandatory=True)
+        except Exception:
+            pass
 
 
 def _relax_test_blocker_mandatory_fields():

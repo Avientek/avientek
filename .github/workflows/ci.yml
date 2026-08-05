@@ -4,11 +4,12 @@ name: CI
 on:
   push:
     branches:
+      - master
       - develop
   pull_request:
 
 concurrency:
-  group: develop-avientek-${{ github.event.number }}
+  group: ci-avientek-${{ github.event.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -99,3 +100,17 @@ jobs:
         working-directory: /home/runner/frappe-bench
         run: |
           bench --site test_site list-apps
+
+      # Best-effort for now (continue-on-error): the suite runs and its
+      # results are visible in the log, but it does NOT yet gate the build.
+      # Reason: running the full app suite pulls in ERPNext's make_test_records,
+      # which needs the whole ERPNext test-master bootstrap seeded on a fresh
+      # CI DB (root Supplier/Item groups, Department Approver version-compat,
+      # etc.). Completing that bootstrap so this can gate is tracked separately;
+      # flip continue-on-error off once green. The Install step above still gates.
+      - name: Run Tests (best-effort)
+        continue-on-error: true
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --app avientek
