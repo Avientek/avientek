@@ -4,11 +4,12 @@ name: CI
 on:
   push:
     branches:
+      - master
       - develop
   pull_request:
 
 concurrency:
-  group: develop-avientek-${{ github.event.number }}
+  group: ci-avientek-${{ github.event.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -99,3 +100,11 @@ jobs:
         working-directory: /home/runner/frappe-bench
         run: |
           bench --site test_site list-apps
+
+      - name: Run Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --app avientek --failfast
+        env:
+          CI: 'Yes'
