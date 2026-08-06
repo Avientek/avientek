@@ -116,6 +116,49 @@ def set_sales_order_confirmation_date(doc, method=None):
     doc.db_set("custom_sales_order_confirmation_date", frappe.utils.nowdate())
 
 
+def clear_cross_company_project(doc, method=None):
+	"""Drop a Project (parent or item level) that belongs to a different
+	company than the Sales Order's own company.
+
+	Sammish 2026-08-06 (ticket #0489, INT-C001 / PO-LLC-26-00905-2): an
+	intercompany Sales Order created in the receiving company (Avientek FZCO)
+	inherited the originating LLC document's Project (PROJ-0069, company
+	'Avientek Electronics Trading L.L.C'). ERPNext's
+	accounts_controller.validate_company then blocks the save:
+	  'Project: PROJ-0069 does not belong to the Company: Avientek FZCO'.
+
+	A Project belongs to exactly one company, so it can't legitimately carry
+	across an intercompany order — clear it (and any item-level project) when
+	it belongs to a different company. A same-company project is left intact;
+	only genuinely cross-company values (which would error anyway) are removed.
+	Runs in before_validate so it precedes validate_company.
+	"""
+	if not doc.get("company"):
+		return
+
+	def _belongs(project):
+		if not project:
+			return True
+		pc = frappe.db.get_value("Project", project, "company")
+		return (not pc) or pc == doc.company
+
+	cleared = False
+	if doc.get("project") and not _belongs(doc.project):
+		doc.project = None
+		cleared = True
+	for it in (doc.get("items") or []):
+		if it.get("project") and not _belongs(it.project):
+			it.project = None
+			cleared = True
+
+	if cleared:
+		frappe.msgprint(
+			_("A Project from the originating document belongs to a different "
+			  "company and was cleared for this intercompany Sales Order."),
+			indicator="orange", alert=True,
+		)
+
+
 def set_submission_datetime(doc, method=None):
     """CR-01 (Rahul, spec final 2026-07-22): stamp the exact moment of
     submission — the Stock Allocation priority key.

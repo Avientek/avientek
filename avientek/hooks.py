@@ -575,6 +575,11 @@ doc_events = {
     "Sales Order": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
+            # Sammish 2026-08-06 (ticket #0489): an intercompany SO inherits
+            # the originating company's Project, which fails validate_company
+            # ("Project X does not belong to Company Y"). Clear cross-company
+            # projects before validation. Must precede validate_company.
+            "avientek.events.sales_order.clear_cross_company_project",
             # Sridhar/Jithin 2026-06-12: India SOs saved without
             # taxes_and_charges trigger india_compliance's
             # set_for_no_taxes → 'Nil-Rated' override → 0% GST.
