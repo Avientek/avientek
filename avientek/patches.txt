@@ -603,3 +603,4 @@ avientek.patches.add_dn_void_fields
 # "PRF Approval Rule Chain" (child).
 avientek.patches.add_prf_approval_chain_fields
 avientek.patches.backfill_blank_item_name
+avientek.patches.show_brand_column_in_sales_order_items

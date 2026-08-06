@@ -522,6 +522,12 @@ doc_events = {
     "Purchase Order": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
+            # Sridhar 2026-08-05: see Sales Order block below for why this
+            # also has to be hooked at before_update_after_submit — this
+            # before_validate entry only covers Draft-save / CSV-import /
+            # mapped-doc paths, not the "Update Items" dialog on a
+            # submitted PO.
+            "avientek.events.utils.backfill_item_brand",
             # Rahul 2026-05-22 (POLTD26-27-00015): suppress
             # india_compliance's "Items not covered under GST cannot be
             # clubbed" error on PO. PO is a commercial agreement, not
@@ -529,7 +535,18 @@ doc_events = {
             # Invoice. Same patch shared with Quotation / SO / DN / PR.
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
-        "before_update_after_submit": "avientek.events.purchase_order.po_validate",
+        "before_update_after_submit": [
+            "avientek.events.purchase_order.po_validate",
+            # Sridhar 2026-08-05: brand is dropped by ERPNext core's
+            # "Update Items" dialog when adding a new row to a submitted
+            # PO (accounts_controller.set_order_defaults only copies
+            # item_code/item_name/description/item_group). That save is
+            # docstatus 1->1 ("update_after_submit"), which skips
+            # validate/before_validate entirely — before_update_after_submit
+            # is the only hook that actually fires in time. See
+            # backfill_item_brand's docstring for the full trace.
+            "avientek.events.utils.backfill_item_brand",
+        ],
         "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": [
             "avientek.events.purchase_order.check_exchange_rate",
@@ -546,6 +563,13 @@ doc_events = {
     "Sales Order": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
+            # Sridhar 2026-08-05: covers Draft-save / CSV-import / mapped-
+            # doc paths only — the "Update Items" dialog on a submitted SO
+            # is a docstatus 1->1 save (_action="update_after_submit"),
+            # which skips before_validate entirely, so it's ALSO hooked at
+            # before_update_after_submit below. See backfill_item_brand's
+            # docstring for the full trace of why both are needed.
+            "avientek.events.utils.backfill_item_brand",
             # Sridhar/Jithin 2026-06-12: India SOs saved without
             # taxes_and_charges trigger india_compliance's
             # set_for_no_taxes → 'Nil-Rated' override → 0% GST.
@@ -560,7 +584,14 @@ doc_events = {
             # india_compliance clubbing rule belongs at Sales Invoice.
             "avientek.overrides.india_gst_quotation.install_patch",
         ],
-        "before_update_after_submit": "avientek.events.sales_order.update_eta_in_po",
+        "before_update_after_submit": [
+            "avientek.events.sales_order.update_eta_in_po",
+            # Sridhar 2026-08-05: brand backfill for items added via
+            # "Update Items" on a submitted SO — see backfill_item_brand's
+            # docstring for why before_update_after_submit is the only
+            # hook that fires on this save path.
+            "avientek.events.utils.backfill_item_brand",
+        ],
         "validate": [
             "avientek.events.sales_order.validate_customer_company",
             "avientek.events.sales_order.validate_exchange_rate_v2",
