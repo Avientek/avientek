@@ -184,19 +184,35 @@ def _data(filters):
             (SELECT default_currency FROM `tabCompany` WHERE name = prf.company)
                 AS base_currency_code,
 
-            /* Beneficiary Name — pulled from the linked supplier bank
-               account when set (custom field added 2026-05-21). */
-            (
-                SELECT ba.beneficiary_name
-                FROM `tabBank Account` ba
-                WHERE ba.name = prf.supplier_bank_account
-                LIMIT 1
-            ) AS beneficiary_name,
+            /* Beneficiary bank — for Internal Transfer the destination is
+               prf.receiving_bank (there is no supplier_bank_account on an
+               IT); for every other payment type it's prf.supplier_bank_account
+               (custom beneficiary_name field added 2026-05-21). Jithin
+               2026-08-10: IT PRFs were showing blank Beneficiary columns
+               because they have no supplier_bank_account — resolve to the
+               receiving bank on the voucher instead. */
+            CASE
+                WHEN prf.payment_type = 'Internal Transfer' THEN (
+                    /* IT: the company's own receiving bank rarely has the
+                       custom beneficiary_name filled — fall back to the
+                       Bank Account's account_name (the account holder). */
+                    SELECT COALESCE(NULLIF(ba.beneficiary_name, ''), ba.account_name)
+                    FROM `tabBank Account` ba
+                    WHERE ba.name = prf.receiving_bank
+                    LIMIT 1
+                )
+                ELSE (
+                    SELECT ba.beneficiary_name
+                    FROM `tabBank Account` ba
+                    WHERE ba.name = prf.supplier_bank_account
+                    LIMIT 1
+                )
+            END AS beneficiary_name,
 
             /* Issued / Beneficiary bank account no + IBAN — Jithin
-               2026-08-08. Issued side = prf.issued_bank; beneficiary
-               side = prf.supplier_bank_account (same source as the
-               beneficiary name above). */
+               2026-08-08. Issued side = prf.issued_bank; beneficiary side =
+               receiving_bank (IT) / supplier_bank_account (others), matching
+               the beneficiary_name resolution above. */
             (
                 SELECT ba.bank_account_no
                 FROM `tabBank Account` ba
@@ -212,13 +228,19 @@ def _data(filters):
             (
                 SELECT ba.bank_account_no
                 FROM `tabBank Account` ba
-                WHERE ba.name = prf.supplier_bank_account
+                WHERE ba.name = CASE
+                    WHEN prf.payment_type = 'Internal Transfer' THEN prf.receiving_bank
+                    ELSE prf.supplier_bank_account
+                END
                 LIMIT 1
             ) AS beneficiary_account_no,
             (
                 SELECT ba.iban
                 FROM `tabBank Account` ba
-                WHERE ba.name = prf.supplier_bank_account
+                WHERE ba.name = CASE
+                    WHEN prf.payment_type = 'Internal Transfer' THEN prf.receiving_bank
+                    ELSE prf.supplier_bank_account
+                END
                 LIMIT 1
             ) AS beneficiary_iban
 
