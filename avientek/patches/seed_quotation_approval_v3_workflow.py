@@ -100,15 +100,19 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         l2_approvers = approvers  # single-stage fallback
 
     CANCEL_COND = "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"
-    # Rahul 2026-06-30: direct (single-click) Cancel from Approved is allowed
-    # only for LOW-probability (<75%) quotes whose margin is "up to mark"
-    # (custom_auto_approve_ok == 1). High-prob / below-margin quotes still go
-    # through the L1->L2 cancellation chain (Sridhar 2026-06-01 audit rule).
-    # This previously lived in the standalone patch
-    # add_quotation_direct_cancel_from_approved.py, but that transition was
-    # wiped on every migrate because this seeder rebuilds all transitions —
-    # so the cancel option kept disappearing. Encoded here so it survives.
-    DIRECT_CANCEL_COND = CANCEL_COND + " and doc.custom_auto_approve_ok == 1"
+    # Rahul 2026-06-30: direct (single-click) Cancel from Approved was originally
+    # allowed only for LOW-probability (<75%) quotes whose margin was "up to mark"
+    # (custom_auto_approve_ok == 1), routing below-margin quotes through the
+    # L1->L2 cancellation chain.
+    # Rahul 2026-08-10: relaxed — ANY <75% quote must be directly cancellable by
+    # the creator/L1/L2, regardless of margin (cancelling a low-probability quote
+    # is routine cleanup; the margin gate only blocked users). High-probability
+    # quotes still use the Request Cancellation -> L1 -> L2 chain via CANCEL_COND's
+    # probability filter. The margin clause (custom_auto_approve_ok == 1) is
+    # dropped, so DIRECT_CANCEL_COND == CANCEL_COND. Existing sites are updated by
+    # patch relax_low_prob_direct_cancel_condition (the seeder is create-only
+    # since PR #21, so it no longer re-applies on an existing workflow).
+    DIRECT_CANCEL_COND = CANCEL_COND
 
     # Each entry: (state, action, next_state, role_key_or_literal, self_approval, condition).
     # role_key_or_literal is either:
