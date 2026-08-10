@@ -7,12 +7,17 @@ single approver, doc-level checkboxes (`custom_request_for_update`,
 `custom_cancellation_check`) drive transitions, mandatory note fields
 gate the save.
 
-Idempotent. Runs from after_migrate every time so the role config from
-Avientek Settings (`quote_approval_role`, default `CS`) propagates on
-each migrate. Renaming the role in the UI takes effect on the next
-migrate.
+Runs from after_migrate on every `bench migrate`, but is now a
+create-only seed (Sridhar 2026-08-06): it builds the workflow ONLY the
+first time, when no `Quotation Approval Workflow Avientek (V3)` row
+exists yet. Once it exists, later migrates leave it alone entirely, so
+any live edit in the Workflow UI (allow_self_approval, roles, added/
+removed transitions, anything) survives future deploys instead of being
+silently rebuilt from the template below. See seed()'s docstring for
+why this changed and what it costs (role-rename propagation, future
+template changes no longer auto-apply to existing sites).
 
-What it does:
+What it does (first run only):
   1. Resolve approver + creator roles from Avientek Settings.
   2. Deactivate every other Quotation workflow (Frappe enforces only
      one active workflow per doctype).
@@ -285,6 +290,28 @@ def execute():
 
 
 def seed():
+    # Sridhar 2026-08-06: this used to unconditionally rebuild every
+    # state/transition from the template below on EVERY migrate (that's
+    # what "runs from after_migrate every time" in the module docstring
+    # meant) — so any live edit in the Workflow UI (e.g. toggling Allow
+    # Self Approval on an approval-gate transition) silently reverted on
+    # the next deploy. Confirmed 2026-08-06: 14 approval-gate transitions
+    # had been manually flipped to allow_self_approval=1 live and were
+    # getting wiped back to the hardcoded 0 on every `bench migrate`.
+    #
+    # Per explicit instruction: once the workflow exists on a site,
+    # migrate must leave it untouched — whatever's live stays live, full
+    # stop, not just self_approval. Only a brand-new site (no workflow
+    # row yet) gets the code-defined seed below.
+    #
+    # Trade-off, deliberately accepted: approver-role renames in Avientek
+    # Settings and any future template changes here (new states, new
+    # transitions) no longer auto-propagate to existing sites via
+    # migrate. Ship those via a one-off patch (or a manual re-seed call)
+    # instead of relying on this function running again.
+    if frappe.db.exists("Workflow", WORKFLOW_NAME):
+        return
+
     cfg = _resolved_roles()
     creators = cfg.get("creator_roles") or (cfg["creator_role"],)
     approvers = cfg.get("approver_roles") or (cfg["approver_role"],)

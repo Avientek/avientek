@@ -633,3 +633,4 @@ avientek.patches.remove_rogue_batch_number_series_reqd
 # June period on 2026-07-17 specifically so this could run. Ask Accounts
 # to RE-FREEZE June once the post-deploy verification is done.
 avientek.patches.fix_incentive_jv_missing_fx_conversion
+avientek.patches.show_brand_column_in_sales_order_items

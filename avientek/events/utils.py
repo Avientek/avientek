@@ -101,6 +101,59 @@ def fill_missing_item_defaults(doc, method=None):
             it.conversion_factor = 1
 
 
+def backfill_item_brand(doc, method=None):
+    """Populate blank `brand` on item rows from the Item master.
+
+    Sridhar 2026-08-05: ERPNext core's "Update Items" dialog
+    (erpnext.utils.update_child_items -> accounts_controller.
+    update_child_qty_rate -> set_order_defaults) only copies item_code /
+    item_name / description / item_group onto a newly added row — brand
+    is silently dropped even though the field exists on Sales Order Item
+    / Purchase Order Item.
+
+    That save is also docstatus 1->1, which Frappe tags `_action =
+    "update_after_submit"` (document.py check_docstatus_transition). In
+    that branch, run_before_save_methods() fires ONLY
+    before_update_after_submit — validate/before_validate never run
+    (document.py run_before_save_methods, gated on
+    `self._action in ("save", "submit")`). So a before_validate hook
+    like fill_missing_item_defaults can never reach this path; this
+    function is hooked at before_update_after_submit instead (Sales
+    Order, Purchase Order) so it actually runs. Quotation's own "Update
+    Items" dialog (avientek.events.quotation.update_items_selling_price)
+    is fully custom but ends in the same doc.save() +
+    ignore_validate_update_after_submit pattern, so the same hook works
+    there too.
+
+    Also wired to before_validate on all items-table doctypes (Quotation,
+    SO, PO, PR, PI, SI, DN) as a general safety net for Draft saves / CSV
+    imports / mapped docs, where before_validate does run normally.
+    """
+    tables = []
+    for fieldname in ("items", "custom_service_items", "optional_items"):
+        rows = doc.get(fieldname)
+        if rows:
+            tables.extend(rows)
+
+    needs = [it for it in tables
+             if getattr(it, "item_code", None) and not getattr(it, "brand", None)]
+    if not needs:
+        return
+
+    codes = list({it.item_code for it in needs})
+    rows = frappe.get_all(
+        "Item",
+        filters={"name": ["in", codes]},
+        fields=["name", "brand"],
+    )
+    brand_by_code = {r["name"]: r["brand"] for r in rows if r["brand"]}
+
+    for it in needs:
+        brand = brand_by_code.get(it.item_code)
+        if brand:
+            it.brand = brand
+
+
 def autofill_item_tax_template(doc, required_company=None):
     """Try to auto-populate `item_tax_template` on every items row that
     has it blank, picking from the Item's own Item Tax child table.

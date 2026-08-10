@@ -1106,6 +1106,29 @@ def _finalize_submitted_quotation_save(doc, notify_discount_incentive_reapply=Fa
     doc.set_payment_schedule()
     doc.set_total_in_words()
 
+    # Sridhar 2026-07-29 (found via downloaded-Excel review, QN-FZCO-26-00251
+    # showing Taxable Value = 0 despite a real IGST amount already charged):
+    # india_compliance (installed on test/production, NOT in this local
+    # bench — see project_local_vs_prod_app_mismatch memory) sets
+    # Quotation Item.taxable_value (= base_net_amount) from a hook on the
+    # *child item doctype's* on_change event (gst_india/overrides/
+    # transaction.py on_change_item), which only runs `update_taxable_values`
+    # (and india_compliance's other GST recalculation: HSN validation,
+    # item-wise tax detail, GST treatment) when frappe.flags.through_
+    # update_item is True. That flag is only ever set BY that same
+    # on_change_item hook, gated on child_item.flags.ignore_validate_
+    # update_after_submit — which fires because ERPNext's own
+    # update_child_qty_rate saves each child row INDIVIDUALLY
+    # (child_item.save(...)). We instead mutate doc.items in memory and
+    # do one parent-level doc.save() — cleaner, but the child rows'
+    # on_change never fires, so india_compliance's flag never gets set,
+    # so it silently skips its whole GST recalculation block and returns
+    # early. Setting the flag ourselves reproduces the same effect
+    # without switching to per-row saves. Harmless when india_compliance
+    # isn't installed (frappe.flags is just a dict-like bag; nothing
+    # reads this key if the app isn't there).
+    frappe.flags.through_update_item = True
+
     # Same flag ERPNext's own update_child_qty_rate uses so a submitted
     # doc's non-allow_on_submit fields can be saved in place.
     doc.flags.ignore_validate_update_after_submit = True
