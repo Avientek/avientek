@@ -405,6 +405,7 @@
    "label": "SWIFT Code"
   },
   {
+   "allow_on_submit": 1,
    "description": "Fetched from Supplier master",
    "fieldname": "bank_letter",
    "fieldtype": "Attach",
@@ -658,7 +659,7 @@
    "link_fieldname": "custom_payment_request_form"
   }
  ],
- "modified": "2026-03-06 13:31:56.629928",
+ "modified": "2026-08-10 16:05:00.000000",
  "modified_by": "support@quarkcs.com",
  "module": "Avientek",
  "name": "Payment Request Form",
