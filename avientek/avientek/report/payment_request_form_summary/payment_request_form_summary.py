@@ -83,7 +83,15 @@ def _columns():
          "options": "Mode of Payment", "width": 130},
         {"label": _("Issued Bank"), "fieldname": "issued_bank", "fieldtype": "Link",
          "options": "Bank Account", "width": 160},
+        {"label": _("Issued Bank A/c No"), "fieldname": "issued_bank_account_no",
+         "fieldtype": "Data", "width": 160},
+        {"label": _("Issued Bank IBAN"), "fieldname": "issued_bank_iban",
+         "fieldtype": "Data", "width": 180},
         {"label": _("Beneficiary Name"), "fieldname": "beneficiary_name",
+         "fieldtype": "Data", "width": 180},
+        {"label": _("Beneficiary A/c No"), "fieldname": "beneficiary_account_no",
+         "fieldtype": "Data", "width": 160},
+        {"label": _("Beneficiary IBAN"), "fieldname": "beneficiary_iban",
          "fieldtype": "Data", "width": 180},
         {"label": _("Created By"), "fieldname": "owner", "fieldtype": "Link",
          "options": "User", "width": 250},
@@ -183,7 +191,36 @@ def _data(filters):
                 FROM `tabBank Account` ba
                 WHERE ba.name = prf.supplier_bank_account
                 LIMIT 1
-            ) AS beneficiary_name
+            ) AS beneficiary_name,
+
+            /* Issued / Beneficiary bank account no + IBAN — Jithin
+               2026-08-08. Issued side = prf.issued_bank; beneficiary
+               side = prf.supplier_bank_account (same source as the
+               beneficiary name above). */
+            (
+                SELECT ba.bank_account_no
+                FROM `tabBank Account` ba
+                WHERE ba.name = prf.issued_bank
+                LIMIT 1
+            ) AS issued_bank_account_no,
+            (
+                SELECT ba.iban
+                FROM `tabBank Account` ba
+                WHERE ba.name = prf.issued_bank
+                LIMIT 1
+            ) AS issued_bank_iban,
+            (
+                SELECT ba.bank_account_no
+                FROM `tabBank Account` ba
+                WHERE ba.name = prf.supplier_bank_account
+                LIMIT 1
+            ) AS beneficiary_account_no,
+            (
+                SELECT ba.iban
+                FROM `tabBank Account` ba
+                WHERE ba.name = prf.supplier_bank_account
+                LIMIT 1
+            ) AS beneficiary_iban
 
         FROM `tabPayment Request Form` prf
         WHERE prf.docstatus < 2
