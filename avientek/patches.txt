@@ -634,4 +634,3 @@ avientek.patches.remove_rogue_batch_number_series_reqd
 # to RE-FREEZE June once the post-deploy verification is done.
 avientek.patches.fix_incentive_jv_missing_fx_conversion
 avientek.patches.show_brand_column_in_sales_order_items
-avientek.patches.relax_low_prob_direct_cancel_condition
