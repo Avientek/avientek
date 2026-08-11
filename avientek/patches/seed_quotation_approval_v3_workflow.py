@@ -100,19 +100,17 @@ def _build_transitions(creators, approvers, l2_approvers=None):
         l2_approvers = approvers  # single-stage fallback
 
     CANCEL_COND = "(doc.probability or 0) < 75 and doc.probabilities not in ('75%', '80%', '85%', '90%', '95%', '100%')"
-    # Rahul 2026-06-30: direct (single-click) Cancel from Approved was originally
-    # allowed only for LOW-probability (<75%) quotes whose margin was "up to mark"
-    # (custom_auto_approve_ok == 1), routing below-margin quotes through the
-    # L1->L2 cancellation chain.
-    # Rahul 2026-08-10: relaxed — ANY <75% quote must be directly cancellable by
-    # the creator/L1/L2, regardless of margin (cancelling a low-probability quote
-    # is routine cleanup; the margin gate only blocked users). High-probability
-    # quotes still use the Request Cancellation -> L1 -> L2 chain via CANCEL_COND's
-    # probability filter. The margin clause (custom_auto_approve_ok == 1) is
-    # dropped, so DIRECT_CANCEL_COND == CANCEL_COND. Existing sites are updated by
-    # patch relax_low_prob_direct_cancel_condition (the seeder is create-only
-    # since PR #21, so it no longer re-applies on an existing workflow).
-    DIRECT_CANCEL_COND = CANCEL_COND
+    # Rahul 2026-06-30: direct (single-click) Cancel from Approved is allowed
+    # only for LOW-probability (<75%) quotes whose margin is "up to mark"
+    # (custom_auto_approve_ok == 1). High-prob / below-margin quotes still go
+    # through the L1->L2 cancellation chain (Sridhar 2026-06-01 audit rule).
+    #
+    # NOTE (2026-08-11): PR #24 briefly dropped the margin clause, but that was
+    # reverted — the real "users can't cancel <75%" bug was that V3 wasn't the
+    # ACTIVE workflow (V2 fixture was winning), fixed in PR #25. Per Rahul's
+    # instruction "don't change the existing conditions", this condition is
+    # kept exactly as it was originally.
+    DIRECT_CANCEL_COND = CANCEL_COND + " and doc.custom_auto_approve_ok == 1"
 
     # Each entry: (state, action, next_state, role_key_or_literal, self_approval, condition).
     # role_key_or_literal is either:
