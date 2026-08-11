@@ -289,6 +289,23 @@ def _deactivate_other_workflows():
     return [o["name"] for o in others]
 
 
+def _ensure_v3_active():
+    """Idempotent existing-site guard: make V3 the single ACTIVE Quotation
+    workflow, without touching its states/transitions. Counteracts the V2
+    'Quotation Final' fixture re-activating itself on every migrate. Returns
+    True if anything changed."""
+    changed = False
+    if not frappe.db.get_value("Workflow", WORKFLOW_NAME, "is_active"):
+        frappe.db.set_value("Workflow", WORKFLOW_NAME, "is_active", 1,
+                            update_modified=False)
+        changed = True
+        print(f"  re-activated {WORKFLOW_NAME}")
+    deactivated = _deactivate_other_workflows()
+    if changed or deactivated:
+        frappe.clear_cache(doctype=DOCTYPE)
+    return changed or bool(deactivated)
+
+
 def execute():
     return seed()
 
@@ -314,6 +331,18 @@ def seed():
     # migrate. Ship those via a one-off patch (or a manual re-seed call)
     # instead of relying on this function running again.
     if frappe.db.exists("Workflow", WORKFLOW_NAME):
+        # Create-only for states/transitions (see above) — but activation is
+        # NOT create-only. The stale "Quotation Final" (V2) workflow ships as
+        # a fixture with is_active=1 (avientek/fixtures/workflow.json), so
+        # `sync_fixtures()` re-activates it on EVERY migrate and Frappe's
+        # Workflow.on_update deactivates V3 in turn — leaving users on V2,
+        # whose Cancel needs "Sales Manager" (Rahul 2026-08-10: users below
+        # 75% could not cancel). Before this early return existed, the full
+        # re-seed below re-activated V3 every migrate and masked it. Re-assert
+        # V3 as the single active Quotation workflow here WITHOUT rebuilding it
+        # (preserves live UI edits like the flipped self-approval flags).
+        # sync_fixtures() runs before after_migrate, so this always wins.
+        _ensure_v3_active()
         return
 
     cfg = _resolved_roles()

@@ -2,7 +2,7 @@
   {
     "workflow_name": "Quotation Final",
     "document_type": "Quotation",
-    "is_active": 1,
+    "is_active": 0,
     "override_status": 0,
     "send_email_alert": 0,
     "custom_enable_confirmation": 1,
