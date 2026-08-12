@@ -63,15 +63,17 @@ def backfill_missing_posting_datetime():
     covers the normal save/submit paths, but we cannot prove every exotic /
     programmatic creation path (intercompany auto-docs, repost, direct API)
     fires it. This catches ANY submitted, non-cancelled bundle that still has
-    a NULL posting_datetime — from any path — and stamps it from the linked
-    SLE (authoritative) or its own posting_date. Idempotent; a no-op when
-    there is nothing to fix, so it is safe to run every hour.
+    a NULL posting_datetime — from any path — and stamps it. Derivation order:
+    linked SLE (authoritative) -> the bundle's own posting_date+time -> the
+    linked VOUCHER's posting_date+time. Idempotent; a no-op when there is
+    nothing to fix, so it is safe to run every hour.
 
     This is the 'no recurrence' guarantee that does not depend on knowing
     which path created the NULL."""
     rows = frappe.db.sql(
         """
-        SELECT sbb.name, sbb.posting_date, sbb.posting_time, sle.posting_datetime AS sle_dt
+        SELECT sbb.name, sbb.posting_date, sbb.posting_time, sbb.creation,
+               sbb.voucher_type, sbb.voucher_no, sle.posting_datetime AS sle_dt
         FROM `tabSerial and Batch Bundle` sbb
         LEFT JOIN `tabStock Ledger Entry` sle
                ON sle.serial_and_batch_bundle = sbb.name AND sle.is_cancelled = 0
@@ -82,7 +84,15 @@ def backfill_missing_posting_datetime():
     )
     fixed = 0
     for r in rows:
+        # Derivation order: linked SLE -> own posting_date+time -> voucher ->
+        # the bundle's own creation timestamp. creation is NEVER null, so NO
+        # bundle can be left NULL/invisible to valuation (rule: a check that
+        # can pass while some rows stay broken is not a check).
         dt = r.sle_dt or (f"{r.posting_date} {r.posting_time or '00:00:00'}" if r.posting_date else None)
+        if not dt:
+            dt = _voucher_datetime(r.voucher_type, r.voucher_no)
+        if not dt:
+            dt = r.creation
         if not dt:
             continue
         frappe.db.set_value(
@@ -102,12 +112,17 @@ def backfill_missing_posting_datetime():
 
 
 def _from_voucher(doc):
-    if not (doc.get("voucher_type") and doc.get("voucher_no")):
+    return _voucher_datetime(doc.get("voucher_type"), doc.get("voucher_no"))
+
+
+def _voucher_datetime(voucher_type, voucher_no):
+    """posting datetime from a stock voucher's posting_date + posting_time."""
+    if not (voucher_type and voucher_no):
         return None
-    if not frappe.db.exists(doc.voucher_type, doc.voucher_no):
+    if not frappe.db.exists(voucher_type, voucher_no):
         return None
     vals = frappe.db.get_value(
-        doc.voucher_type, doc.voucher_no, ["posting_date", "posting_time"], as_dict=True
+        voucher_type, voucher_no, ["posting_date", "posting_time"], as_dict=True
     )
     if vals and vals.get("posting_date"):
         return get_datetime(f"{vals.posting_date} {vals.get('posting_time') or '00:00:00'}")
