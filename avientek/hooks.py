@@ -502,6 +502,13 @@ doc_events = {
     "Bank Account": {
         "validate": "avientek.events.bank_account.auto_link_internal_company_account",
     },
+    # Guard: a Serial and Batch Bundle with NULL posting_datetime is silently
+    # excluded from ERPNext's batch valuation, which caused batch rates to
+    # explode to billions (helpdesk #0492/#0493). Always stamp it.
+    "Serial and Batch Bundle": {
+        "before_save": "avientek.events.serial_batch_bundle.ensure_posting_datetime",
+        "before_submit": "avientek.events.serial_batch_bundle.ensure_posting_datetime",
+    },
     "Payment Entry": {
         "before_save": "avientek.events.utils.validate_date_sanity",
         "on_submit": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
