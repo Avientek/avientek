@@ -985,6 +985,11 @@ doc_events = {
 # ---------------
 
 scheduler_events = {
+    "hourly": [
+        # Backstop: stamp posting_datetime on any batch bundle that slipped
+        # through without it, so batch valuation never excludes it (#0492/#0493).
+        "avientek.events.serial_batch_bundle.backfill_missing_posting_datetime",
+    ],
     "daily": [
         "avientek.events.demo_movement.send_return_reminders",
         "avientek.events.warranty.expire_warranties",

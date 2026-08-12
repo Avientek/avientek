@@ -58,6 +58,49 @@ def _from_own_fields(doc):
     return None
 
 
+def backfill_missing_posting_datetime():
+    """Scheduled backstop (hourly). The before_save/before_submit hook above
+    covers the normal save/submit paths, but we cannot prove every exotic /
+    programmatic creation path (intercompany auto-docs, repost, direct API)
+    fires it. This catches ANY submitted, non-cancelled bundle that still has
+    a NULL posting_datetime — from any path — and stamps it from the linked
+    SLE (authoritative) or its own posting_date. Idempotent; a no-op when
+    there is nothing to fix, so it is safe to run every hour.
+
+    This is the 'no recurrence' guarantee that does not depend on knowing
+    which path created the NULL."""
+    rows = frappe.db.sql(
+        """
+        SELECT sbb.name, sbb.posting_date, sbb.posting_time, sle.posting_datetime AS sle_dt
+        FROM `tabSerial and Batch Bundle` sbb
+        LEFT JOIN `tabStock Ledger Entry` sle
+               ON sle.serial_and_batch_bundle = sbb.name AND sle.is_cancelled = 0
+        WHERE sbb.posting_datetime IS NULL
+          AND sbb.docstatus = 1 AND sbb.is_cancelled = 0
+        """,
+        as_dict=True,
+    )
+    fixed = 0
+    for r in rows:
+        dt = r.sle_dt or (f"{r.posting_date} {r.posting_time or '00:00:00'}" if r.posting_date else None)
+        if not dt:
+            continue
+        frappe.db.set_value(
+            "Serial and Batch Bundle", r.name,
+            {"posting_datetime": dt, "posting_date": get_datetime(dt).date()},
+            update_modified=False,
+        )
+        fixed += 1
+    if fixed:
+        frappe.db.commit()
+        frappe.log_error(
+            title="SBB posting_datetime backstop",
+            message=f"Backstop stamped posting_datetime on {fixed} bundle(s) that "
+                    f"were created without it. Investigate the creation path.",
+        )
+    return fixed
+
+
 def _from_voucher(doc):
     if not (doc.get("voucher_type") and doc.get("voucher_no")):
         return None
