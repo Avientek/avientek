@@ -35,6 +35,7 @@ def after_migrate():
 			"Payment Request Form", None, "default_print_format",
 			"Payment Voucher Fast", "Data", for_doctype="Doctype")),
 		("create_asset_dam_fields", _create_asset_dam_fields),
+		("create_so_po_special_price_fields", _create_so_po_special_price_fields),
 		("deactivate_old_quotation_workflows", _deactivate_old_quotation_workflows),
 		("fix_quotation_item_calc_layout", _fix_quotation_item_calc_layout),
 		("fix_global_field_settings", _fix_global_field_settings),
@@ -297,6 +298,56 @@ def _create_asset_dam_fields():
 				update_vals["options"] = f["options"]
 			if update_vals:
 				frappe.db.set_value("Custom Field", cf_name, update_vals)
+
+
+def _create_so_po_special_price_fields():
+	"""Surface Quotation Item's Special Price / Special Price Note on the
+	connected Sales Order and Purchase Order item grids.
+
+	Orders.Mea (Avientek Electronics Trading LLC) — client request 2026-08-17:
+	these two columns, already on Quotation Item, need to be visible on SO/PO
+	so buyers can see what special price was quoted without opening the
+	Quotation. Read-only here — the Quotation stays the source of truth.
+	Values are populated by avientek.events.sales_order.carry_forward_quotation_fields
+	(Quotation -> SO) and avientek.events.purchase_order.sync_special_price_from_sales_order
+	/ update_eta (SO -> PO, only for PO rows linked via sales_order_item).
+	"""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+	fields = []
+	for dt in ("Sales Order Item", "Purchase Order Item"):
+		fields += [
+			{
+				"dt": dt,
+				"fieldname": "custom_special_price",
+				"fieldtype": "Currency",
+				"label": "Special Price",
+				"options": "currency",
+				"insert_after": "rate",
+				"read_only": 1,
+				"in_list_view": 1,
+			},
+			{
+				"dt": dt,
+				"fieldname": "custom_special_price_note",
+				"fieldtype": "Data",
+				"label": "Special Price Note",
+				"insert_after": "custom_special_price",
+				"read_only": 1,
+				"in_list_view": 1,
+			},
+		]
+
+	for f in fields:
+		cf_name = f"{f['dt']}-{f['fieldname']}"
+		if not frappe.db.exists("Custom Field", cf_name):
+			create_custom_field(f["dt"], f)
+		else:
+			frappe.db.set_value("Custom Field", cf_name, {
+				"fieldtype": f["fieldtype"],
+				"read_only": f["read_only"],
+				"in_list_view": f["in_list_view"],
+			})
 
 
 def _fix_quotation_item_calc_layout():

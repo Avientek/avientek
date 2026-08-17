@@ -528,6 +528,11 @@ doc_events = {
             # mapped-doc paths, not the "Update Items" dialog on a
             # submitted PO.
             "avientek.events.utils.backfill_item_brand",
+            # Orders.Mea 2026-08-17: keep Special Price / Special Price
+            # Note in sync with whichever Sales Order Item a PO row is
+            # linked to. Same before_validate / before_update_after_submit
+            # split as backfill_item_brand above, for the same reason.
+            "avientek.events.purchase_order.sync_special_price_from_sales_order",
             # Rahul 2026-05-22 (POLTD26-27-00015): suppress
             # india_compliance's "Items not covered under GST cannot be
             # clubbed" error on PO. PO is a commercial agreement, not
@@ -546,6 +551,7 @@ doc_events = {
             # is the only hook that actually fires in time. See
             # backfill_item_brand's docstring for the full trace.
             "avientek.events.utils.backfill_item_brand",
+            "avientek.events.purchase_order.sync_special_price_from_sales_order",
         ],
         "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": [

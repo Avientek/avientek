@@ -100,6 +100,28 @@ def carry_forward_quotation_fields(doc, method=None):
         doc.tc_name = qt.tc_name
         doc.terms = qt.terms
 
+    # Belt-and-braces alongside get_mapped_doc's automatic same-fieldname
+    # copy: backfill Special Price / Special Price Note per item from the
+    # linked Quotation Item, in case a row's copy was skipped (e.g. rows
+    # added after the initial mapping).
+    qi_names = [it.quotation_item for it in doc.items if getattr(it, "quotation_item", None)]
+    if qi_names:
+        qi_map = {
+            qi.name: qi for qi in frappe.db.get_all(
+                "Quotation Item",
+                filters={"name": ["in", qi_names]},
+                fields=["name", "custom_special_price", "custom_special_price_note"],
+            )
+        }
+        for item in doc.items:
+            qi = qi_map.get(getattr(item, "quotation_item", None))
+            if not qi:
+                continue
+            if not item.custom_special_price:
+                item.custom_special_price = qi.custom_special_price
+            if not item.custom_special_price_note:
+                item.custom_special_price_note = qi.custom_special_price_note
+
 
 # ── Server Script: "Delivery Date" ──
 # DocType Event: Sales Order, After Save
