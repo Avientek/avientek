@@ -2019,6 +2019,20 @@ def set_margin_flags(doc, method=None):
             else:
                 bs_row.approval_status = "LEVEL_1"
                 level_1_required = True
+                # #0502 (Rahul/Orders.Mea 2026-08-18): the L1 branch was the
+                # ONLY decision path that emitted no warning, so a quote routed
+                # to L1 gave the user no reason ("went for approval, no warning").
+                # Explain exactly why: this brand is in the 60-80%-of-standard
+                # band and the salesperson's historical overall margin isn't
+                # high enough to auto-approve it.
+                warnings.append(
+                    _("Brand <b>{0}</b>: current margin {1}% is below 80% of standard "
+                      "{2}% (needs {3}%), and historical overall margin ({4}%) is not "
+                      "high enough — Level 1 approval required.").format(
+                        brand, round(new_margin, 2), round(std_margin, 2),
+                        round(0.80 * std_margin, 2), round(overall, 2)
+                    )
+                )
                 continue
 
         # Rule 4: Critical — below 60%
