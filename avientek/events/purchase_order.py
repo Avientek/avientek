@@ -211,6 +211,42 @@ def check_exchange_rate(doc,method):
 		    	if (exc_rate != doc.conversion_rate) or (exc_rate != doc.plc_conversion_rate):
 		    		frappe.throw("Exchange rate is wrong!")
 
+def sync_special_price_from_sales_order(doc, method=None):
+	"""Refresh read-only Special Price / Special Price Note on each PO Item
+	that's linked to a Sales Order Item (via sales_order_item).
+
+	Orders.Mea 2026-08-17: client wants Quotation's Special Price /
+	Special Price Note visible on the connected SO and PO. On the SO side
+	these are copied from the Quotation (see
+	avientek.events.sales_order.carry_forward_quotation_fields). On the PO
+	side there's no single mapper path — rows get linked to an SO Item via
+	the standard "Get Items From" mapper, the "Swap Sales Order" dialog, or
+	direct entry — so this hook re-fetches from whichever SO Item is
+	currently linked, on every save. Rows with no sales_order_item are left
+	untouched (not every PO is tied to a Sales Order).
+	"""
+	if not doc.items:
+		return
+
+	so_items = [it.sales_order_item for it in doc.items if getattr(it, "sales_order_item", None)]
+	if not so_items:
+		return
+
+	so_map = {
+		so.name: so for so in frappe.db.get_all(
+			"Sales Order Item",
+			filters={"name": ["in", so_items]},
+			fields=["name", "custom_special_price", "custom_special_price_note"],
+		)
+	}
+	for item in doc.items:
+		so_item = so_map.get(getattr(item, "sales_order_item", None))
+		if not so_item:
+			continue
+		item.custom_special_price = so_item.custom_special_price
+		item.custom_special_price_note = so_item.custom_special_price_note
+
+
 # def po_validate(doc, method):
 	# doc_before_save = doc.get_doc_before_save()
 	# if doc.items:
@@ -266,9 +302,9 @@ def update_eta(item):
 	# Proceed if Sales Order and Sales Order Item are present
 	if item.sales_order and item.sales_order_item:
 		so_child_doc = frappe.db.get_value(
-			"Sales Order Item", 
-			item.sales_order_item, 
-			["eta_history", "purchase_order_item"], 
+			"Sales Order Item",
+			item.sales_order_item,
+			["eta_history", "purchase_order_item", "custom_special_price", "custom_special_price_note"],
 			as_dict=True
 		)
 
@@ -279,6 +315,14 @@ def update_eta(item):
 			"avientek_eta": item.avientek_eta,
 			"eta_history": json.dumps(so_eta_history),
 			"eta_history_text": so_eta_history_text
+		}, update_modified=False)
+
+		# Orders.Mea 2026-08-17: this PO row is now (re)linked to this SO
+		# row via the "Swap Sales Order" dialog — refresh the read-only
+		# Special Price / Special Price Note columns from the SO Item.
+		frappe.db.set_value("Purchase Order Item", item.name, {
+			"custom_special_price": so_child_doc.custom_special_price,
+			"custom_special_price_note": so_child_doc.custom_special_price_note,
 		}, update_modified=False)
 
 		# Handle Purchase Order Item ETA history if linked to Sales Order
