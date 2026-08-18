@@ -36,6 +36,7 @@ def after_migrate():
 			"Payment Voucher Fast", "Data", for_doctype="Doctype")),
 		("create_asset_dam_fields", _create_asset_dam_fields),
 		("create_so_po_special_price_fields", _create_so_po_special_price_fields),
+		("prf_bank_fields_allow_on_submit", _prf_bank_fields_allow_on_submit),
 		("deactivate_old_quotation_workflows", _deactivate_old_quotation_workflows),
 		("fix_quotation_item_calc_layout", _fix_quotation_item_calc_layout),
 		("fix_global_field_settings", _fix_global_field_settings),
@@ -62,6 +63,27 @@ def after_migrate():
 	]
 	for label, fn in steps:
 		_run_step(label, fn)
+
+
+def _prf_bank_fields_allow_on_submit():
+	"""Jithin/Orders.Mea 2026-08-18 (SUP-2026-00014): Finance Controller must be
+	able to change bank/party Details on a submitted (pre-release) Payment
+	Request Form. Editing Issued Bank / Party Bank Account / Receiving Bank /
+	Party fires JS handlers that re-populate dependent fields — and any field
+	with allow_on_submit=0 then throws "Cannot Update After Submit" (e.g.
+	"Account No", "Address"). The issued-side fields (account, account_no,
+	bank_letter, issued_currency) were already allow_on_submit=1 — which is why
+	#0491's bank_letter-only fix was incomplete. This covers the full set of
+	AUTO-POPULATED party/bank/address fields so editing any bank detail before
+	release no longer trips the guard. Read-only/derived fields; workflow
+	role/state still govern who may edit. Idempotent (Property Setter)."""
+	for fieldname in (
+		"account_number", "iban", "bank", "swift_code",          # party bank account
+		"address_display", "supplier_address", "party_name",     # party / address
+		"receiving_bank", "receiving_account",                    # internal-transfer bank
+		"receving_account_no", "receiving_currency",              # (sic) IT account no + currency
+	):
+		make_property_setter("Payment Request Form", fieldname, "allow_on_submit", 1, "Check")
 
 
 def _allow_quotation_cost_fields_after_submit():
