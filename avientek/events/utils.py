@@ -382,6 +382,21 @@ _AETPL_OUTSTATE_TEMPLATE = "Output GST Out-state - AETPL"
 _AETPL_TEMPLATES = (_AETPL_INSTATE_TEMPLATE, _AETPL_OUTSTATE_TEMPLATE)
 _INDIA_GST_DOCTYPES = {"Quotation", "Sales Order", "Sales Invoice"}
 
+# Sridhar 2026-08-19 (LTD-26-27-00798, The Marketing Hub S.L. / Spain):
+# GST categories that are NOT a domestic supply. The In-state /
+# Out-state templates above are DOMESTIC templates — neither one is
+# ever correct for an export or an SEZ supply, whichever way the state
+# codes happen to compare. See the guard in
+# autofill_india_sales_taxes_template for the full write-up.
+_NON_DOMESTIC_GST_CATEGORIES = frozenset({
+    "Overseas",
+    "SEZ Unit",
+    "SEZ Developer",
+})
+
+# place_of_supply for an export is always "96-Other Countries".
+_EXPORT_PLACE_OF_SUPPLY_CODE = "96"
+
 # Fields safe to copy from a Sales Taxes and Charges template row across
 # Frappe versions. `category` was dropped on some versions — exclude
 # the auto-set audit fields and any unknown-future fields. Smoke
@@ -479,6 +494,30 @@ def _apply_template_rows(doc, template_name):
             doc.append("taxes", new_row)
 
 
+def _is_non_domestic_supply(doc):
+    """True when this sales doc is an export / SEZ supply rather than a
+    domestic one.
+
+    Reads THREE independent signals because none of them is reliably
+    populated at `before_validate` — the same race
+    `_resolve_aetpl_state_pair` documents. Any one of them is enough:
+
+      1. `gst_category`   — Overseas / SEZ Unit / SEZ Developer. Set by
+         india_compliance from the customer's GST Category.
+      2. `tax_category`   — "Overseas". Already the idiom used by
+         `avientek.events.sales_order.validate_...` (see sales_order.py).
+      3. `place_of_supply` starting "96" — "96-Other Countries", which
+         ERPNext stamps on every export regardless of the other two.
+    """
+    if doc.get("gst_category") in _NON_DOMESTIC_GST_CATEGORIES:
+        return True
+    if doc.get("tax_category") == "Overseas":
+        return True
+    if (doc.get("place_of_supply") or "").startswith(_EXPORT_PLACE_OF_SUPPLY_CODE):
+        return True
+    return False
+
+
 def autofill_india_sales_taxes_template(doc, method=None, *args, **kwargs):
     """Auto-pick + auto-correct AETPL's GST In-state vs Out-state
     template on India sales docs. Resilient across all save paths.
@@ -509,6 +548,10 @@ def autofill_india_sales_taxes_template(doc, method=None, *args, **kwargs):
         explicit pick; india_compliance's own validation will catch
         misuse.
 
+    Layer 0 (bail on non-domestic supply): export / SEZ documents never
+        take a domestic template at all — see `_is_non_domestic_supply`
+        and the guard below.
+
     Hook signature is `(doc, method=None, *args, **kwargs)` to absorb
     Frappe's Document.hook composer extras — see
     [[feedback-frappe-doc-hook-composer-3arg-shape]].
@@ -516,6 +559,34 @@ def autofill_india_sales_taxes_template(doc, method=None, *args, **kwargs):
     if doc.doctype not in _INDIA_GST_DOCTYPES:
         return
     if doc.get("company") != _AETPL_INDIA:
+        return
+
+    # ── Layer 0: never auto-apply a DOMESTIC template to an export ──
+    #
+    # Sridhar 2026-08-19 — LTD-26-27-00798 (The Marketing Hub S.L.,
+    # Spain) was saved with a flat 18% IGST row on a zero-rated export.
+    #
+    # Root cause: this hook branched on NOTHING but the state-code pair.
+    # An Overseas customer has no `billing_address_gstin` (The Marketing
+    # Hub's tax_id is "VAT - ESB87738316", a Spanish VAT, not a GSTIN),
+    # so `_resolve_aetpl_state_pair` fell through to place_of_supply and
+    # returned customer_state "96" ("96-Other Countries"). Company state
+    # is "29" (Karnataka). 29 != 96 → the export was classified as an
+    # inter-state DOMESTIC supply and stamped Out-state GST @ 18% IGST,
+    # overriding the line's "Exempted - AETPL" item_tax_template.
+    #
+    # Worse, the self-healing behaviour made it unfixable by hand: delete
+    # the IGST row and the `if not doc.get("taxes")` refill below puts it
+    # straight back; clear taxes_and_charges entirely and Layer 1 re-picks
+    # Out-state. Users had no escape except Layer 3 (a non-AETPL template).
+    #
+    # Neither AETPL template is EVER right for an export or SEZ supply, so
+    # bail out completely rather than trying to pick a better one. Bailing
+    # (as opposed to forcing zero tax) is deliberate: an export WITH
+    # payment of IGST (is_export_with_gst = 1) legitimately carries IGST,
+    # and Layer 3 already respects whatever Export/SEZ template the user
+    # picks. india_compliance owns the zero-rating from here.
+    if _is_non_domestic_supply(doc):
         return
 
     company_state, customer_state = _resolve_aetpl_state_pair(doc)
