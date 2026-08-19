@@ -57,6 +57,19 @@ def after_migrate():
 		# restrictions. Site-wide, idempotent. (Proven on a prod-data restore.)
 		("number_card_ignore_report_up", lambda: make_property_setter(
 			"Number Card", "report_name", "ignore_user_permissions", 1, "Check")),
+		# ng@avientek.com 2026-08-19 (#0503): the Print Format dropdown was EMPTY
+		# for sales users, so they could not pick a print format for a quote (and
+		# the quote fell back to a format that didn't show the price they expected).
+		# SAME root cause as the blank-dashboard number cards above: with "Apply
+		# Strict User Permissions" ON, a user who has a Report User Permission has
+		# the Print Format list filtered by its `report` Link→Report field — and
+		# every DOCUMENT print format (quote formats etc.) has `report` EMPTY, so
+		# strict mode rejects them all and the dropdown returns 0 rows. The `report`
+		# field only matters for report-type print formats; ignoring user
+		# permissions on it lets document formats show for everyone. Proven on a
+		# prod-data restore: ng went 0 → 14 Quotation formats. Site-wide, idempotent.
+		("print_format_ignore_report_up", lambda: make_property_setter(
+			"Print Format", "report", "ignore_user_permissions", 1, "Check")),
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
