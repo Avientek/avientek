@@ -37,6 +37,7 @@ def after_migrate():
 		("create_asset_dam_fields", _create_asset_dam_fields),
 		("create_so_po_special_price_fields", _create_so_po_special_price_fields),
 		("prf_bank_fields_allow_on_submit", _prf_bank_fields_allow_on_submit),
+		("so_po_item_derived_fields_allow_on_submit", _so_po_item_derived_fields_allow_on_submit),
 		("deactivate_old_quotation_workflows", _deactivate_old_quotation_workflows),
 		("fix_quotation_item_calc_layout", _fix_quotation_item_calc_layout),
 		("fix_global_field_settings", _fix_global_field_settings),
@@ -76,6 +77,38 @@ def after_migrate():
 	]
 	for label, fn in steps:
 		_run_step(label, fn)
+
+
+def _so_po_item_derived_fields_allow_on_submit():
+	"""#0506 (Avientek Electronics Trading LLC, SO-FZCO-25-03429): requesting an
+	update on a submitted Sales Order failed with
+	"Cannot Update After Submit — Row #28: Not allowed to change Brand after
+	submission from None to Sennheiser."
+
+	Real cause (traced on a prod-data restore): the SO's `before_save` hook
+	`avientek.events.sales_order.update_eta_in_po` re-saves the LINKED, already
+	submitted Purchase Order (PO-LLC-25-01712) to push ETA down. On that
+	`po.save()`, ERPNext's item-details fetch re-populates read-only display
+	fields that were left EMPTY on older rows — `Purchase Order Item.brand`
+	None → "Sennheiser" — and the post-submit field guard (allow_on_submit=0)
+	blocks the whole save, so the SO update never goes through.
+
+	Verified the re-save touches ONLY these derived display fields — no rate,
+	amount, qty, tax or total changed and the grand total was identical — so
+	letting the derived value be written after submit is safe.
+
+	Fix the WHOLE set of read-only derived fields at once (same lesson as the
+	PRF bank fields — fixing one at a time just moves the error to the next
+	empty derived field on the next document / the sibling doctype), on BOTH
+	the Sales Order Item (the update flow re-saves the SO too) and the Purchase
+	Order Item (the doctype that actually threw here). All are read-only and
+	populated only from the item / item tax template. Idempotent."""
+	so_item_fields = ("brand", "part_number", "gst_treatment", "grant_commission")
+	po_item_fields = ("brand", "part_number", "gst_treatment", "is_fixed_asset")
+	for fieldname in so_item_fields:
+		make_property_setter("Sales Order Item", fieldname, "allow_on_submit", 1, "Check")
+	for fieldname in po_item_fields:
+		make_property_setter("Purchase Order Item", fieldname, "allow_on_submit", 1, "Check")
 
 
 def _prf_bank_fields_allow_on_submit():
