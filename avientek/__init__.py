@@ -616,6 +616,87 @@ def _patch_batch_valuation_zero_rate_safety_net():
 	BatchNoValuation.calculate_avg_rate = _patched_calculate_avg_rate
 
 
+def _patch_lcv_rounding_residue_on_zero_basis():
+	"""Sridhar/Sammish 2026-08-21 (LCV-FZCO-26-00218, Avientek FZCO) — a
+	Landed Cost Voucher failed to submit with ERPNext's
+	"Incorrect number of General Ledger Entries found. You might have
+	selected a wrong Account in the transaction."
+
+	Root cause (reproduced on a prod-data restore): the LCV distributes
+	its charge (freight 36,269) "based on Amount" across items spanning
+	TWO purchase receipts. One receipt's 13 items are all zero-amount
+	(free-of-charge lines), so by amount they correctly get 0 charge.
+	But ERPNext's `set_applicable_charges_on_item` dumps the whole
+	distribution ROUNDING RESIDUE onto the LAST item in the list
+	(`items[item_count - 1].applicable_charges += diff`), and here the
+	last item happens to be one of those zero-amount lines. That receipt
+	then carried a −0.02 residue with no real charge, so when
+	`update_landed_cost` re-booked its stock valuation the GL map for
+	that receipt collapsed (after merge) to a SINGLE account holding
+	0.02 — and `erpnext.accounts.general_ledger.make_gl_entries` rejects
+	any post-merge map with exactly one line.
+
+	Fix: wrap `set_applicable_charges_on_item`. After ERPNext distributes,
+	move any charge stranded on a ZERO-basis item (the pure rounding
+	residue) onto the item that already carries the largest real charge.
+	A receipt whose items all have a zero distribution basis then stays
+	at EXACTLY 0 — its revaluation produces an empty GL map (skipped),
+	not a single-sided one — while the item that legitimately bears the
+	cost absorbs the sub-cent residue. Total charge is conserved.
+
+	No-op for a normal LCV (no zero-basis item carries a residue) and for
+	"Distribute Manually". Version-robust: it corrects the OUTPUT of the
+	core method rather than reimplementing it.
+	"""
+	from erpnext.stock.doctype.landed_cost_voucher.landed_cost_voucher import (
+		LandedCostVoucher,
+	)
+
+	_original_set_applicable_charges = LandedCostVoucher.set_applicable_charges_on_item
+
+	def _patched_set_applicable_charges(self):
+		_original_set_applicable_charges(self)
+		_lcv_move_residue_off_zero_basis_items(self)
+
+	LandedCostVoucher.set_applicable_charges_on_item = _patched_set_applicable_charges
+
+
+def _lcv_move_residue_off_zero_basis_items(doc):
+	import frappe
+	from frappe.utils import flt
+
+	if not doc.get("taxes") or doc.get("distribute_charges_based_on") == "Distribute Manually":
+		return
+
+	based_on_field = frappe.scrub(doc.distribute_charges_based_on or "")
+	items = doc.get("items") or []
+	if not based_on_field or not items:
+		return
+
+	# Collect any charge stranded on a zero-basis line — this is only ever
+	# the sub-cent distribution rounding residue, since a proportional split
+	# gives a zero-basis item exactly 0.
+	misplaced = 0.0
+	for item in items:
+		if not flt(item.get(based_on_field)) and flt(item.applicable_charges):
+			misplaced += flt(item.applicable_charges)
+			item.applicable_charges = 0.0
+
+	if not misplaced:
+		return
+
+	# Re-home it on the item that already carries the largest real charge
+	# (guaranteed non-zero: ERPNext throws earlier if the whole basis is 0),
+	# so the residue lands in a receipt whose GL is already balanced.
+	target = max(items, key=lambda i: abs(flt(i.applicable_charges)))
+	if not flt(target.applicable_charges):
+		return
+	target.applicable_charges = flt(
+		flt(target.applicable_charges) + misplaced,
+		target.precision("applicable_charges"),
+	)
+
+
 _apply_patches()
 _patch_qb_get_query()
 try:
@@ -636,6 +717,10 @@ except Exception:
 	pass
 try:
 	_patch_batch_valuation_zero_rate_safety_net()
+except Exception:
+	pass
+try:
+	_patch_lcv_rounding_residue_on_zero_basis()
 except Exception:
 	pass
 
