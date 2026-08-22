@@ -636,3 +636,4 @@ avientek.patches.fix_incentive_jv_missing_fx_conversion
 avientek.patches.show_brand_column_in_sales_order_items
 avientek.patches.backfill_sbb_posting_datetime
 avientek.patches.backfill_sbb_posting_datetime_v2
+avientek.patches.backfill_so_submission_datetime
