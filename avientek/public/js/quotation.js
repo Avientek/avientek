@@ -1514,6 +1514,74 @@ frappe.ui.form.on('Quotation Item', {
 });
 
 
+// ── Optional Item rows (custom_service_items table) ─────────────
+//
+// #0511 (Orders.Mea / Avientek Electronics Trading LLC): an Optional
+// Item showed no Standard/Selling Price and its subtotal stayed 0.
+//
+// The `custom_service_items` table used to hold `Quotation Item` rows, so
+// the pricing handlers registered on `frappe.ui.form.on('Quotation Item')`
+// above (with their `parentfield === 'custom_service_items'` branches)
+// fired for it. After the Optional Item migration the table's child
+// doctype became its own `Optional Item`, and a child-table handler only
+// fires for rows of the doctype it is registered on — so NONE of those
+// handlers fire for optional rows any more, and `load_item_defaults`
+// (which fetches the price from the quotation's price list, e.g.
+// "Distributer Pricing1") never runs.
+//
+// Re-wire the same price fetch + calculation for the `Optional Item`
+// doctype, delegating to the exact shared functions the main grid uses.
+// The main-quote totals are deliberately NOT touched here — optional items
+// roll into their own `custom_total` via update_custom_service_totals().
+frappe.ui.form.on('Optional Item', {
+    item_code(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (!frm.doc.party_name) {
+            frappe.msgprint(__('Customer must be selected before choosing an item.'));
+            return;
+        }
+        if (!row.item_code) return;
+        row.__defaults_fetched = true;
+        load_item_defaults(frm, cdt, cdn);
+        calculate_all_preview(frm, cdt, cdn);
+        handle_qty_or_rate_change(frm, cdt, cdn);
+        update_custom_service_totals(frm);
+    },
+
+    custom_special_price(frm, cdt, cdn) {
+        calculate_all_preview(frm, cdt, cdn);
+        handle_qty_or_rate_change(frm, cdt, cdn);
+        update_custom_service_totals(frm);
+    },
+
+    custom_markup_(frm, cdt, cdn) {
+        calculate_all_preview(frm, cdt, cdn);
+        handle_qty_or_rate_change(frm, cdt, cdn);
+        update_custom_service_totals(frm);
+    },
+
+    custom_special_rate(frm, cdt, cdn) {
+        calculate_all_preview(frm, cdt, cdn);
+        handle_qty_or_rate_change(frm, cdt, cdn);
+        update_custom_service_totals(frm);
+    },
+
+    qty(frm, cdt, cdn) {
+        calculate_all_preview(frm, cdt, cdn);
+        handle_qty_or_rate_change(frm, cdt, cdn);
+        update_custom_service_totals(frm);
+    },
+
+    amount(frm, cdt, cdn) {
+        update_custom_service_totals(frm);
+    },
+
+    custom_service_items_remove(frm) {
+        update_custom_service_totals(frm);
+    },
+});
+
+
 // ══════════════════════════════════════════════════════════════
 // HELPER FUNCTIONS
 // ══════════════════════════════════════════════════════════════
