@@ -31,6 +31,8 @@ frappe.get_system_settings = _mock_get_system_settings
 # Import the functions under test
 from avientek.events.quotation import (
     _to_flt,
+    _safe_pct,
+    _snap_zero,
     calc_item_totals,
     rebuild_brand_summary,
     recalc_doc_totals,
@@ -595,13 +597,22 @@ class TestDistributeIncentive(unittest.TestCase):
 
         # Parent incentive 200 overrides item 100
         self.assertAlmostEqual(it.custom_incentive_value, 200, places=2)
-        # COGS = (1000 - 100 + 200) = 1200 (removed old 100, added new 200)
-        # Wait, cogs from calc_item_totals = 1000 + 100 = 1100, markup = 220
+        # cogs from calc_item_totals = 1000 + 100 (item incentive) = 1100
         # distribute: cogs_without_incentive = 1100 - 100 = 1000
-        # adjusted_cost = 1000 + 200 = 1200
-        # selling = 1200 + 220 = 1420
+        #             adjusted_cost          = 1000 + 200 = 1200
+        # markup is re-derived from its PERCENTAGE against the new cost:
+        #             markup  = 20% of 1200 = 240
+        #             selling = 1200 + 240  = 1440
+        #
+        # CHANGED 2026-08-21: this previously reused the stale absolute
+        # markup of 220 and expected 1440 - 20 = 1420. That let a
+        # redistributed incentive quietly dilute the markup the user asked
+        # for, and — at custom_markup_ = -100 — priced a "free of charge"
+        # line at hundreds of dirhams. See TestNearZeroSellingGuards.
         self.assertAlmostEqual(it.custom_cogs, 1200, places=2)
-        self.assertAlmostEqual(it.custom_selling_price, 1420, places=2)
+        self.assertAlmostEqual(it.custom_selling_price, 1440, places=2)
+        # The markup PERCENTAGE is the invariant across redistribution.
+        self.assertAlmostEqual(it.custom_markup_, 20, places=2)
 
     def test_incentive_updates_margin(self):
         """After incentive distribution, margin is recalculated."""
@@ -615,12 +626,18 @@ class TestDistributeIncentive(unittest.TestCase):
         doc = make_doc([it], custom_incentive_amount=100)
         distribute_incentive_server(doc)
 
-        # new cogs = 500+100=600, markup stays 50, selling = 650
-        # margin = 50/650 = 7.69%
+        # new cogs = 500 + 100 = 600; markup re-derived at 10% of 600 = 60
+        # selling = 660, margin = 60/660 = 9.09%
+        #
+        # CHANGED 2026-08-21: previously expected selling 650 / margin 7.69%,
+        # i.e. the markup stayed pinned at its old absolute of 50 and the
+        # effective margin silently ERODED just because an incentive was
+        # redistributed. Holding the percentage keeps the quoted markup
+        # intact — which also matters for margin-based approval routing.
         self.assertAlmostEqual(it.custom_cogs, 600, places=2)
-        self.assertAlmostEqual(it.custom_selling_price, 650, places=2)
-        self.assertAlmostEqual(it.custom_margin_value, 50, places=2)
-        self.assertAlmostEqual(it.custom_margin_, flt(50 / 650 * 100, 4), places=1)
+        self.assertAlmostEqual(it.custom_selling_price, 660, places=2)
+        self.assertAlmostEqual(it.custom_margin_value, 60, places=2)
+        self.assertAlmostEqual(it.custom_margin_, flt(60 / 660 * 100, 4), places=1)
 
     def test_negative_incentive_rejected(self):
         """Negative incentive amount should be rejected."""
@@ -1081,6 +1098,161 @@ class TestEdgeCases(unittest.TestCase):
         self.assertAlmostEqual(_to_flt(None), 0, places=2)
         self.assertAlmostEqual(_to_flt(0), 0, places=2)
         self.assertAlmostEqual(_to_flt("$1,234.56"), 1234.56, places=2)
+
+
+# ──────────────────────────────────────────────────────────────
+# 6) NEAR-ZERO SELLING PRICE GUARDS
+# ──────────────────────────────────────────────────────────────
+class TestNearZeroSellingGuards(unittest.TestCase):
+    """Regression: QN-LLC-26-01200 (support ticket 2026-08-21).
+
+    A line quoted at custom_markup_ = -100 ("give it away free") must land
+    on a selling price of EXACTLY zero and a margin of EXACTLY 0%, and must
+    STAY there through incentive redistribution.
+
+    Two defects, one visible symptom:
+
+    1. ROOT CAUSE — distribute_incentive_server rebuilt cost as
+       (cogs - old_incentive + new_incentive) but reused the ABSOLUTE
+       custom_markup_value that calc_item_totals had derived against the
+       PRE-distribution cogs. The two stopped cancelling, so a free line
+       silently acquired a price equal to the incentive moved into it.
+       On this quote the incentive was already distributed, so the drift
+       was only -0.0004 — but on a fresh save the same bug prices a
+       free-of-charge line at hundreds of dirhams.
+
+    2. AMPLIFIER — that residue is truthy, so every
+       `... if selling else 0` guard let it through and
+       margin% = -4285.3995 / -0.0004 * 100 = 1,071,349,875%, while the
+       Brand Summary grid rounded the same total_selling to a harmless
+       "0.00". The cause sat two decimals below what the UI displayed,
+       which is why the report looked inexplicable to the user.
+    """
+
+    # Real figures from the EPSON line (idx 10) on QN-LLC-26-01200.
+    def _epson_free_line(self):
+        return make_item(
+            qty=1,
+            custom_standard_price_=4113.20,
+            custom_special_price=3856.13,
+            custom_finance_=1.5,
+            custom_transport_=2,
+            custom_customs_=0,
+            custom_markup_=-100,
+            brand="EPSON",
+        )
+
+    # Real figures from the SMART line (idx 1), present so that the
+    # incentive distributes proportionally across two brands.
+    def _smart_priced_line(self):
+        return make_item(
+            qty=30,
+            custom_standard_price_=4462.09,
+            custom_special_price=4278.75,
+            custom_finance_=1.5,
+            custom_transport_=2,
+            custom_customs_=1,
+            custom_markup_=-0.4801,
+            brand="SMART",
+        )
+
+    def test_snap_zero_collapses_sub_fils_residue(self):
+        self.assertEqual(_snap_zero(-0.0004), 0.0)
+        self.assertEqual(_snap_zero(0.0004), 0.0)
+        self.assertEqual(_snap_zero(0.0), 0.0)
+        # A real fils must survive untouched.
+        self.assertEqual(_snap_zero(0.01), 0.01)
+        self.assertEqual(_snap_zero(-1811.76), -1811.76)
+
+    def test_safe_pct_rejects_near_zero_denominator(self):
+        # The exact numbers that produced 1,071,349,875% in production.
+        self.assertEqual(_safe_pct(-4285.3995, -0.0004), 0.0)
+        self.assertEqual(_safe_pct(100, 0), 0.0)
+        # Legitimate denominators still compute normally.
+        self.assertAlmostEqual(_safe_pct(25, 100), 25.0, places=4)
+        self.assertAlmostEqual(_safe_pct(-1612.3289, 291428.1083), -0.5533, places=4)
+
+    def test_free_line_lands_on_exact_zero(self):
+        it = self._epson_free_line()
+        calc_item_totals(it)
+        self.assertEqual(it.custom_selling_price, 0.0)
+        self.assertEqual(it.custom_margin_, 0.0)
+
+    def test_incentive_distribution_keeps_free_line_at_zero(self):
+        """THE regression: the residue was born here, not in calc_item_totals."""
+        epson = self._epson_free_line()
+        smart = self._smart_priced_line()
+        doc = make_doc(
+            [smart, epson],
+            custom_incentive_amount=18300,
+            custom_distribute_incentive_based_on="Amount",
+        )
+        for it in doc.items:
+            calc_item_totals(it)
+        distribute_incentive_server(doc)
+
+        self.assertEqual(
+            epson.custom_selling_price, 0.0,
+            "free-of-charge line must stay at exactly zero after incentive "
+            "redistribution, not -0.0004",
+        )
+        self.assertEqual(
+            epson.custom_margin_, 0.0,
+            "margin%% on a zero-priced line must be 0, not billions",
+        )
+
+    def test_zero_selling_brand_summary_is_sane(self):
+        """The brand row the user actually saw: cost real, selling 0, % sane."""
+        epson = self._epson_free_line()
+        smart = self._smart_priced_line()
+        doc = make_doc(
+            [smart, epson],
+            custom_incentive_amount=18300,
+            custom_distribute_incentive_based_on="Amount",
+        )
+        for it in doc.items:
+            calc_item_totals(it)
+        distribute_incentive_server(doc)
+        rebuild_brand_summary(doc)
+
+        rows = {r["brand"]: r for r in doc._summary_rows}
+        self.assertIn("EPSON", rows)
+        epson_row = rows["EPSON"]
+
+        self.assertEqual(epson_row["total_selling"], 0.0)
+        self.assertEqual(epson_row["margin_percent"], 0.0)
+        # The genuine business problem must remain VISIBLE: the brand still
+        # carries real cost against zero revenue, so margin stays negative.
+        self.assertLess(epson_row["margin"], 0)
+        self.assertAlmostEqual(
+            epson_row["margin"], -epson_row["total_cost"], places=2
+        )
+
+    def test_no_percentage_field_is_ever_absurd(self):
+        """Blanket sanity net across every percent the pipeline writes."""
+        epson = self._epson_free_line()
+        smart = self._smart_priced_line()
+        doc = make_doc(
+            [smart, epson],
+            custom_incentive_amount=18300,
+            custom_distribute_incentive_based_on="Amount",
+        )
+        for it in doc.items:
+            calc_item_totals(it)
+        distribute_incentive_server(doc)
+        rebuild_brand_summary(doc)
+
+        for it in doc.items:
+            for fn in ("custom_margin_", "custom_markup_", "custom_incentive_"):
+                self.assertLess(
+                    abs(_to_flt(getattr(it, fn))), 500,
+                    f"{fn} out of sane range on item {it.brand}",
+                )
+        for row in doc._summary_rows:
+            self.assertLess(
+                abs(_to_flt(row["margin_percent"])), 500,
+                f"margin_percent out of sane range on brand {row['brand']}",
+            )
 
 
 if __name__ == "__main__":

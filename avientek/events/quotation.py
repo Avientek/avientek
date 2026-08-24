@@ -5,6 +5,11 @@ from frappe.model.workflow import apply_workflow
 import json
 from decimal import Decimal, ROUND_HALF_UP
 
+# Decimal counterpart of _ZERO_TOL (see the "Near-zero denominators" note
+# further down). Same rule, same reason: half a fils is not money, and a
+# residue that small must never reach a percentage divisor.
+_DEC_ZERO_TOL = Decimal("0.005")
+
 
 @frappe.whitelist()
 def get_customer_outstanding(customer, company):
@@ -65,7 +70,9 @@ def apply_discount(doc, discount_amount):
         item_discount = discount * share
 
         new_selling = selling - item_discount
-        if new_selling < 0:
+        # Covers both a negative overshoot and a sub-fils positive residue;
+        # the latter is truthy and would otherwise blow up new_margin_pct.
+        if new_selling < _DEC_ZERO_TOL:
             new_selling = Decimal("0.0")
 
         new_rate = new_selling / qty if qty else Decimal("0.0")
@@ -79,7 +86,7 @@ def apply_discount(doc, discount_amount):
 
         new_margin_pct = (
             ((selling_rate - cost_rate) / selling_rate) * 100
-            if selling_rate else Decimal("0.0")
+            if abs(selling_rate) >= _DEC_ZERO_TOL else Decimal("0.0")
         )
 
         updated_items.append({
@@ -101,7 +108,7 @@ def apply_discount(doc, discount_amount):
 
     parent_discount_pct = (
         q((discount / total_selling) * 100)
-        if total_selling else 0.0
+        if abs(total_selling) >= _DEC_ZERO_TOL else 0.0
     )
 
     exchange_rate = Decimal(str(quotation.get("conversion_rate") or 1))
@@ -346,6 +353,46 @@ def _clamp_21_9(v) -> float:
     return n
 
 
+# ── Near-zero denominators ────────────────────────────────────────────
+# A selling total of exactly zero is legitimate and common: a line given
+# away free (custom_markup_ = -100%), or a brand whose every line is
+# zero-priced. But the pipeline REACHES that zero by adding and
+# subtracting independently-rounded intermediates (cogs + markup,
+# ts - discount, adjusted_cost + markup), so it routinely lands on a
+# residue like -0.0004 instead of a true 0.0.
+#
+# `if selling` / `if effective_ts` does NOT catch that — -0.0004 is
+# truthy — so margin% = value / -0.0004 * 100 blew up to 1,071,349,875%
+# on QN-LLC-26-01200 (support ticket 2026-08-21) while the Brand Summary
+# grid, rounding to 2 decimals, displayed that same total_selling as a
+# perfectly innocent "0.00". That mismatch is why the report looked
+# inexplicable: the cause sat two decimal places below what the UI shows.
+#
+# Anything below half a fils is not money. Treat it as zero.
+_ZERO_TOL = 0.005
+
+
+def _snap_zero(v) -> float:
+    """Collapse a sub-fils rounding residue to a true 0.0."""
+    n = flt(v)
+    return 0.0 if abs(n) < _ZERO_TOL else n
+
+
+def _safe_pct(numerator, denominator) -> float:
+    """percentage = numerator / denominator * 100, guarded against a
+    near-zero denominator.
+
+    Use this INSTEAD OF the `flt(n / d * 100, 4) if d else 0` idiom
+    anywhere in this module. The bare truthiness test only rejects an
+    EXACT zero, so sub-fils residues sail through and explode into the
+    billions — which is precisely the defect this replaced.
+    """
+    d = flt(denominator)
+    if abs(d) < _ZERO_TOL:
+        return 0.0
+    return flt(flt(numerator) / d * 100, 4)
+
+
 # Every decimal(21,9) margin-family field that is derived by dividing by a
 # selling price / cost that can be near-zero — and therefore can overflow
 # MySQL 1264 on save. The per-item calc guards only exact-zero denominators
@@ -423,12 +470,15 @@ def calc_item_totals(it):
     # Layer 6: markup on COGS (after customs)
     markup = flt(_to_flt(it.custom_markup_) * cogs / 100, 4)
 
-    # Final values
-    selling = flt(cogs + markup, 4)                    # selling = cogs + markup
+    # Final values.
+    # _snap_zero: with custom_markup_ = -100 the intent is "give this line
+    # away free", i.e. markup == -cogs and selling == 0. cogs and markup are
+    # rounded separately, so the sum can miss zero by a sub-fils residue.
+    selling = _snap_zero(flt(cogs + markup, 4))         # selling = cogs + markup
 
     # Margin: selling - cogs = markup (margin is the profit from markup)
     margin_val = flt(selling - cogs, 4)
-    margin_pct = flt(margin_val / selling * 100, 4) if selling else 0.0
+    margin_pct = _safe_pct(margin_val, selling)
 
     per_unit_selling = flt(selling / qty, 4)
 
@@ -522,8 +572,8 @@ def rebuild_brand_summary(doc):
         if addl_discount > 0 and total_selling_all > 0:
             brand_addl = flt(addl_discount * ts / total_selling_all, 4)
 
-        effective_ts = flt(ts - brand_addl, 4)
-        brand_margin_pct = flt((effective_ts - tc) / effective_ts * 100, 4) if effective_ts else 0
+        effective_ts = _snap_zero(flt(ts - brand_addl, 4))
+        brand_margin_pct = _safe_pct(effective_ts - tc, effective_ts)
 
         # Weighted average std margin for the brand
         std_margin_percent = (
@@ -593,8 +643,7 @@ def recalc_doc_totals(doc):
         doc.discount_amount = addl_discount
     elif flt(doc.discount_amount) > 0:
         addl_discount = flt(doc.discount_amount)
-        if ts:
-            doc.additional_discount_percentage = flt(addl_discount / ts * 100, 4)
+        doc.additional_discount_percentage = _safe_pct(addl_discount, ts)
 
     # ── Pro-rata distribution of Additional Discount to each item row ──
     # Allocate based on each item's share of total selling value.
@@ -607,16 +656,14 @@ def recalc_doc_totals(doc):
             it.custom_addl_discount_amount = item_addl
 
             # Recalculate item margin including additional discount
-            effective_item_selling = flt(item_selling - item_addl, 4)
+            effective_item_selling = _snap_zero(flt(item_selling - item_addl, 4))
             item_cost = _to_flt(it.custom_cogs)
             it.custom_margin_value = flt(effective_item_selling - item_cost, 4)
-            it.custom_margin_ = flt(
-                (it.custom_margin_value / effective_item_selling * 100) if effective_item_selling else 0, 4
-            )
+            it.custom_margin_ = _safe_pct(it.custom_margin_value, effective_item_selling)
         else:
             it.custom_addl_discount_amount = 0
 
-    effective_selling = flt(ts - addl_discount, 4)
+    effective_selling = _snap_zero(flt(ts - addl_discount, 4))
 
     # Total Margin amount comes from the Brand Summary if it has rows
     # (keeps it consistent with the per-brand values shown to the user),
@@ -636,7 +683,7 @@ def recalc_doc_totals(doc):
         margin = flt(bs_margin, 4)
     else:
         margin = flt(effective_selling - tc, 4)
-    margin_pct = flt(margin / effective_selling * 100, 4) if effective_selling else 0
+    margin_pct = _safe_pct(margin, effective_selling)
 
     doc.custom_total_shipping_new       = flt(totals["shipping"], 4)
     doc.custom_total_finance_new        = flt(totals["finance"], 4)
@@ -826,7 +873,6 @@ def distribute_incentive_server(doc):
         qty = max(cint(it.qty), 1)
         sp = _to_flt(it.custom_special_price)
         cogs = _to_flt(it.custom_cogs)
-        markup = _to_flt(it.custom_markup_value)
         old_incentive = _to_flt(it.custom_incentive_value)  # incentive already in cogs
 
         # Distribute incentive
@@ -839,18 +885,41 @@ def distribute_incentive_server(doc):
         cogs_without_incentive = flt(cogs - old_incentive, 4)
         adjusted_cost = flt(cogs_without_incentive + row_incentive, 4)
 
-        # Selling = adjusted cost + markup (markup stays the same)
-        selling = flt(adjusted_cost + markup, 4)
+        # Re-derive the markup from its PERCENTAGE against the ADJUSTED
+        # cost — do NOT carry over the absolute custom_markup_value.
+        #
+        # That absolute was computed by calc_item_totals against the
+        # PRE-distribution cogs. Moving the incentive component changes the
+        # cost but left the absolute untouched, so the two stopped
+        # cancelling: a line marked custom_markup_ = -100 ("give it away
+        # free") silently acquired a price equal to the incentive shifted
+        # into it. On QN-LLC-26-01200 the incentive was already distributed,
+        # so the drift was only -0.0004 — enough to make margin% explode to
+        # 1,071,349,875% — but on a fresh save the same defect prices a
+        # free-of-charge line at hundreds of dirhams.
+        #
+        # markup% is the pricing lever everywhere else in this module
+        # (calc_item_totals derives the absolute from it, and the JS
+        # back-solve writes both), so holding the PERCENTAGE invariant
+        # across redistribution is the self-consistent choice.
+        markup = flt(_to_flt(it.custom_markup_) * adjusted_cost / 100, 4)
+
+        # Selling = adjusted cost + markup
+        selling = _snap_zero(flt(adjusted_cost + markup, 4))
         per_unit_selling = flt(selling / qty, 4)
 
         # Margin
         margin_val = flt(selling - adjusted_cost, 4)
-        margin_pct = flt(margin_val / selling * 100, 4) if selling else 0
+        margin_pct = _safe_pct(margin_val, selling)
 
         it.update({
             "custom_incentive_value": row_incentive,
-            "custom_incentive_":     flt(row_incentive / (sp * qty) * 100, 4) if sp else 0,
+            "custom_incentive_":     _safe_pct(row_incentive, sp * qty),
             "custom_cogs":           adjusted_cost,
+            # Persist the re-derived absolute too, so custom_markup_value
+            # stays consistent with cogs/selling instead of silently
+            # describing a cost basis that no longer exists.
+            "custom_markup_value":   markup,
             "custom_selling_price":  selling,
             "custom_total_":         selling,
             "custom_special_rate":   per_unit_selling,
@@ -891,7 +960,7 @@ def distribute_discount_server(doc):
         item_discount = flt(total_discount * share, 4)
 
         # New selling after discount
-        new_selling = flt(selling - item_discount, 4)
+        new_selling = _snap_zero(flt(selling - item_discount, 4))
         if new_selling < 0:
             new_selling = 0
 
@@ -901,7 +970,7 @@ def distribute_discount_server(doc):
         margin_val = flt(new_selling - cogs, 4)
         if margin_val < 0:
             margin_val = 0
-        margin_pct = flt(margin_val / new_selling * 100, 4) if new_selling else 0
+        margin_pct = _safe_pct(margin_val, new_selling)
 
         it.update({
             "custom_discount_amount_value": flt(item_discount / qty, 4) if qty else 0,
@@ -949,8 +1018,8 @@ def _sync_discount_fields(doc):
         if flt(doc.custom_discount_) and total_selling > 0:
             doc.custom_discount_amount_value = flt(total_selling * flt(doc.custom_discount_) / 100, 4)
     else:
-        if flt(doc.custom_discount_amount_value) and total_selling > 0:
-            doc.custom_discount_ = flt(flt(doc.custom_discount_amount_value) / total_selling * 100, 4)
+        if flt(doc.custom_discount_amount_value):
+            doc.custom_discount_ = _safe_pct(doc.custom_discount_amount_value, total_selling)
 
 
 def _sync_incentive_fields(doc):
@@ -961,8 +1030,8 @@ def _sync_incentive_fields(doc):
         if flt(doc.custom_incentive_) and total_sp > 0:
             doc.custom_incentive_amount = flt(total_sp * flt(doc.custom_incentive_) / 100, 4)
     else:
-        if flt(doc.custom_incentive_amount) and total_sp > 0:
-            doc.custom_incentive_ = flt(flt(doc.custom_incentive_amount) / total_sp * 100, 4)
+        if flt(doc.custom_incentive_amount):
+            doc.custom_incentive_ = _safe_pct(doc.custom_incentive_amount, total_sp)
 
 
 def _guard_quotation_editable_for_update(doc):
@@ -1166,9 +1235,11 @@ def _apply_manual_selling_rate(it, user_rate, discount_total=0.0, pre_discount_t
     user_selling = flt(user_rate * qty, 4)
 
     markup_val = flt(pre_discount_selling - cogs, 4)
-    markup_pct = flt(markup_val / cogs * 100, 4)
+    # cogs was divided by unguarded — a zero-cost line (no Item Price set up)
+    # raised ZeroDivisionError and 500'd the Update Selling Price endpoint.
+    markup_pct = _safe_pct(markup_val, cogs)
     margin_val = flt(user_selling - cogs, 4)
-    margin_pct = flt(margin_val / user_selling * 100, 4) if user_selling else 0.0
+    margin_pct = _safe_pct(margin_val, user_selling)
 
     it.update({
         "custom_markup_":       markup_pct,           # inflated so formula is self-consistent
@@ -1732,7 +1803,7 @@ def calculate_additional_discount_percentage(doc, method=None):
         return
 
     # Convert amount → percentage
-    percentage = (doc.discount_amount / base_amount) * 100
+    percentage = _safe_pct(doc.discount_amount, base_amount)
 
     # Set percentage so core uses it
     doc.additional_discount_percentage = round(percentage, 2)
@@ -1928,7 +1999,10 @@ def get_overall_margin(salesperson, brand):
     margins = []
     for r in rows:
         cogs_per_unit = flt(r.custom_cogs) / flt(r.qty or 1)
-        margin = ((flt(r.rate) - cogs_per_unit) / flt(r.rate)) * 100
+        # rate was divided by unguarded: a free-of-charge historical line
+        # (rate = 0) raised ZeroDivisionError and took down the whole
+        # margin-approval evaluation for the quote.
+        margin = _safe_pct(flt(r.rate) - cogs_per_unit, r.rate)
         margins.append(margin)
 
     overall_margin = sum(margins) / len(margins)
@@ -2843,7 +2917,7 @@ def update_special_price(quotation_name, items):
 
         # Recalculate margin based on existing selling vs new cogs
         margin_val = flt(selling - cogs, 4)
-        margin_pct = flt(margin_val / selling * 100, 4) if selling else 0.0
+        margin_pct = _safe_pct(margin_val, selling)
 
         frappe.db.set_value("Quotation Item", row_name, {
             "custom_special_price": new_sp,
