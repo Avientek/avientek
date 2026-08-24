@@ -327,6 +327,9 @@ override_doctype_dashboards = {
 	# linked to a Purchase Invoice / Purchase Receipt.
 	"Purchase Invoice": "avientek.overrides.purchase_invoice_dashboard.get_data",
 	"Purchase Receipt": "avientek.overrides.purchase_receipt_dashboard.get_data",
+	# Project enhancement (Rahul 2026-08-22, point 9): surface the linked
+	# Quotation(s) in the Project form Connections panel.
+	"Project": "avientek.overrides.project_dashboard.get_data",
 }
 
 # Svg Icons
@@ -499,6 +502,13 @@ doc_events = {
         "after_insert": "avientek.events.customer.after_insert",
         "validate": "avientek.events.customer.validate_alias",
         "before_save": "avientek.events.customer.sync_credit_limit_totals",
+    },
+    # Project enhancement (Rahul 2026-08-22): stamp Created By on insert;
+    # enforce Level-2 approval for status/Expected-Closing-Date changes on an
+    # Approved project (see avientek.events.project).
+    "Project": {
+        "before_insert": "avientek.events.project.set_created_by",
+        "validate": "avientek.events.project.enforce_l2_approval",
     },
     "Bank Account": {
         "validate": "avientek.events.bank_account.auto_link_internal_company_account",

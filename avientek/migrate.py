@@ -38,6 +38,8 @@ def after_migrate():
 		("create_so_po_special_price_fields", _create_so_po_special_price_fields),
 		("prf_bank_fields_allow_on_submit", _prf_bank_fields_allow_on_submit),
 		("so_po_item_derived_fields_allow_on_submit", _so_po_item_derived_fields_allow_on_submit),
+		("ensure_project_l2_role", _ensure_project_l2_role),
+		("create_project_enhancement_fields", _create_project_enhancement_fields),
 		("deactivate_old_quotation_workflows", _deactivate_old_quotation_workflows),
 		("fix_quotation_item_calc_layout", _fix_quotation_item_calc_layout),
 		("fix_global_field_settings", _fix_global_field_settings),
@@ -77,6 +79,91 @@ def after_migrate():
 	]
 	for label, fn in steps:
 		_run_step(label, fn)
+
+
+def _ensure_project_l2_role():
+	"""Project enhancement (Rahul 2026-08-22): the approver role that gates
+	status/date changes on an Approved Project (see
+	avientek.events.project.enforce_l2_approval). Idempotent."""
+	if not frappe.db.exists("Role", "Project L2 Approver"):
+		frappe.get_doc({
+			"doctype": "Role",
+			"role_name": "Project L2 Approver",
+			"desk_access": 1,
+		}).insert(ignore_permissions=True)
+
+
+def _create_project_enhancement_fields():
+	"""Rahul 2026-08-22 — Project module enhancement. Adds a sales-pipeline
+	layer to Project in a new 'Project Details' section right after Department,
+	laid out in two columns (column break).
+
+	The 8-value pipeline status is a NEW field (custom_project_status); the
+	standard `status` (Open/Completed/Cancelled) is deliberately left untouched
+	so ERPNext's own project logic is unaffected. Idempotent."""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+	prob_options = "\n0%\n10%\n50%\n75%\n100%\n"
+	status_options = "\n".join([
+		"Discussion", "Open", "In Progress", "Negotiation",
+		"Finalisation", "Approved", "Closed", "Lost",
+	])
+
+	fields = [
+		{"fieldname": "custom_project_details_sb", "fieldtype": "Section Break",
+		 "label": "Project Details", "insert_after": "department"},
+		# ── Column 1 ──
+		{"fieldname": "custom_project_status", "fieldtype": "Select",
+		 "label": "Project Status", "options": status_options,
+		 "insert_after": "custom_project_details_sb"},
+		{"fieldname": "custom_sales_person", "fieldtype": "Link",
+		 "label": "Sales Person", "options": "Sales Person",
+		 "insert_after": "custom_project_status", "ignore_user_permissions": 1},
+		{"fieldname": "custom_territory", "fieldtype": "Link",
+		 "label": "Territory", "options": "Territory",
+		 "insert_after": "custom_sales_person", "ignore_user_permissions": 1},
+		{"fieldname": "custom_budget_amount", "fieldtype": "Currency",
+		 "label": "Budget Amount", "insert_after": "custom_territory"},
+		{"fieldname": "custom_expected_closing_date", "fieldtype": "Date",
+		 "label": "Expected Closing Date", "insert_after": "custom_budget_amount"},
+		# ── Column 2 ──
+		{"fieldname": "custom_project_details_cb", "fieldtype": "Column Break",
+		 "insert_after": "custom_expected_closing_date"},
+		{"fieldname": "custom_created_by", "fieldtype": "Link", "label": "Created By",
+		 "options": "User", "read_only": 1,
+		 "insert_after": "custom_project_details_cb", "ignore_user_permissions": 1},
+		{"fieldname": "custom_project_by", "fieldtype": "Link", "label": "Project by",
+		 "options": "Sales Person", "insert_after": "custom_created_by",
+		 "ignore_user_permissions": 1},
+		{"fieldname": "custom_probabilities", "fieldtype": "Select",
+		 "label": "Probabilities", "options": prob_options,
+		 "insert_after": "custom_project_by"},
+		{"fieldname": "custom_budget_value", "fieldtype": "Currency",
+		 "label": "Budget Value", "insert_after": "custom_probabilities"},
+	]
+
+	for f in fields:
+		f["dt"] = "Project"
+		cf_name = f"Project-{f['fieldname']}"
+		if not frappe.db.exists("Custom Field", cf_name):
+			create_custom_field("Project", f)
+		else:
+			upd = {k: f[k] for k in
+			       ("fieldtype", "label", "options", "insert_after", "read_only",
+			        "ignore_user_permissions")
+			       if k in f}
+			if upd:
+				frappe.db.set_value("Custom Field", cf_name, upd)
+
+	# Backfill 'Created By' on existing projects from the built-in `owner`
+	# (the real creator) — the before_insert stamp only fires for NEW projects,
+	# so without this every pre-existing project shows a blank Created By.
+	# Idempotent: only fills rows that are still empty.
+	frappe.db.sql(
+		"""UPDATE `tabProject`
+		   SET custom_created_by = owner
+		   WHERE IFNULL(custom_created_by, '') = '' AND IFNULL(owner, '') != ''"""
+	)
 
 
 def _so_po_item_derived_fields_allow_on_submit():
