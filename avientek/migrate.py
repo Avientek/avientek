@@ -155,6 +155,16 @@ def _create_project_enhancement_fields():
 			if upd:
 				frappe.db.set_value("Custom Field", cf_name, upd)
 
+	# Backfill 'Created By' on existing projects from the built-in `owner`
+	# (the real creator) — the before_insert stamp only fires for NEW projects,
+	# so without this every pre-existing project shows a blank Created By.
+	# Idempotent: only fills rows that are still empty.
+	frappe.db.sql(
+		"""UPDATE `tabProject`
+		   SET custom_created_by = owner
+		   WHERE IFNULL(custom_created_by, '') = '' AND IFNULL(owner, '') != ''"""
+	)
+
 
 def _so_po_item_derived_fields_allow_on_submit():
 	"""#0506 (Avientek Electronics Trading LLC, SO-FZCO-25-03429): requesting an
