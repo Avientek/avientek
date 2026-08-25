@@ -3612,18 +3612,18 @@ def get_voucher_print_data(docname):
         # Brand Summary block — only when manual costing is NOT
         # attached AND a Quotation is in the chain.
         if not row.costing_sheet_attachment:
-            _po_for_quote_chain = ""
+            # An invoice can consolidate MULTIPLE POs, and a PO several
+            # SOs / Quotes — resolve EVERY linked Quotation (#0514,
+            # AVFZC-02642), not just the first PO's (Rahul 2026-07-18,
+            # AVFZC-02420). Legacy singular keys keep the first Quote so
+            # older print formats keep working unchanged.
+            _quote_pos = []
             if row.reference_doctype == "Purchase Order" and row.document_reference:
-                _po_for_quote_chain = row.document_reference
-            elif row_data.get("linked_po"):
-                _po_for_quote_chain = row_data["linked_po"]
-            if _po_for_quote_chain:
-                # A PO can consolidate several SOs / Quotes — render a
-                # Brand Summary for EACH, not just the first (Rahul
-                # 2026-07-18, AVFZC-02420). Legacy singular keys are
-                # still populated from the first Quote so older print
-                # formats keep working unchanged.
-                _qns = _get_quotations_for_po(_po_for_quote_chain)
+                _quote_pos = [row.document_reference]
+            elif row.reference_doctype in ("Purchase Invoice", "Debit Note") and row.reference_name:
+                _quote_pos = get_linked_pos_for_invoice(row.reference_name)
+            if _quote_pos:
+                _qns = _aggregate_quotations_for_pos(_quote_pos)
                 if _qns:
                     row_data["linked_quotation"] = _qns[0]
                 _summaries = []
@@ -4617,18 +4617,18 @@ def get_payment_voucher_context(docname):
         #   (a) tgt_dt='Purchase Order' (canonical_doctype is PO).
         #   (b) row_data['linked_po'] (resolved above for PI / DN rows).
         if not row.costing_sheet_attachment:
-            _po_for_quote_chain = ""
+            # An invoice can consolidate MULTIPLE POs, and a PO several
+            # SOs / Quotes — resolve EVERY linked Quotation (#0514,
+            # AVFZC-02642), not just the first PO's (Rahul 2026-07-18,
+            # AVFZC-02420). Legacy singular keys keep the first Quote so
+            # older print formats keep working unchanged.
+            _quote_pos = []
             if tgt_dt == "Purchase Order" and tgt_name:
-                _po_for_quote_chain = tgt_name
-            elif row_data.get("linked_po"):
-                _po_for_quote_chain = row_data["linked_po"]
-            if _po_for_quote_chain:
-                # A PO can consolidate several SOs / Quotes — render a
-                # Brand Summary for EACH, not just the first (Rahul
-                # 2026-07-18, AVFZC-02420). Legacy singular keys are
-                # still populated from the first Quote so older print
-                # formats keep working unchanged.
-                _qns = _get_quotations_for_po(_po_for_quote_chain)
+                _quote_pos = [tgt_name]
+            elif tgt_dt in ("Purchase Invoice", "Debit Note") and tgt_name:
+                _quote_pos = get_linked_pos_for_invoice(tgt_name)
+            if _quote_pos:
+                _qns = _aggregate_quotations_for_pos(_quote_pos)
                 if _qns:
                     row_data["linked_quotation"] = _qns[0]
                 _summaries = []
@@ -5324,14 +5324,19 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
     # Rahul 2026-07-18 (AVFZC-02449): a PO can trace back to SEVERAL
     # Quotations — return them ALL, keeping the singular key (first
     # one) for backward compatibility with cached client bundles.
+    # An invoice can consolidate MULTIPLE POs — resolve every linked
+    # Quotation across all of them (#0514, AVFZC-02642), not just the
+    # first PO's.
     linked_quotations = []
-    _po_for_quote_chain = ""
+    _quote_pos = []
     if actual_doctype == "Purchase Order":
-        _po_for_quote_chain = reference_name
+        _quote_pos = [reference_name]
+    elif actual_doctype in ("Purchase Invoice", "Debit Note"):
+        _quote_pos = get_linked_pos_for_invoice(reference_name)
     elif po_name:
-        _po_for_quote_chain = po_name
-    if _po_for_quote_chain:
-        linked_quotations = _get_quotations_for_po(_po_for_quote_chain)
+        _quote_pos = [po_name]
+    if _quote_pos:
+        linked_quotations = _aggregate_quotations_for_pos(_quote_pos)
 
     return {
         "attachment_images": att_images,
@@ -5603,6 +5608,53 @@ def get_linked_po_for_invoice(invoice_name):
     )
 
     return purchase_order
+
+
+def get_linked_pos_for_invoice(invoice_name):
+    """ALL distinct Purchase Orders on an invoice's items, in idx order.
+
+    A single supplier invoice routinely consolidates SEVERAL Purchase
+    Orders (one line per PO). The singular get_linked_po_for_invoice()
+    above returns only the first, which silently dropped every other PO's
+    Quotation chain from the PRF Brand Summary — including intercompany
+    quotes (Jithin / #0514, PRF AVFZC-02642: invoice PINV-FZCO-26-01414 →
+    3 POs → 3 quotations, only the first fetched).
+
+    Safe on empty/None input; returns [] on error.
+    """
+    if not invoice_name:
+        return []
+    try:
+        rows = frappe.db.get_all(
+            "Purchase Invoice Item",
+            filters={"parent": invoice_name},
+            pluck="purchase_order",
+            order_by="idx asc",
+        )
+    except Exception:
+        return []
+    pos = []
+    for po in rows:
+        if po and po not in pos:
+            pos.append(po)
+    return pos
+
+
+def _aggregate_quotations_for_pos(pos):
+    """Ordered, de-duplicated list of every Quotation behind the given
+    Purchase Orders. Pass ALL of an invoice's POs so the Brand Summary
+    covers each linked quote, not just the first."""
+    quotations = []
+    for po in pos or []:
+        if not po:
+            continue
+        try:
+            for qn in _get_quotations_for_po(po):
+                if qn not in quotations:
+                    quotations.append(qn)
+        except Exception:
+            continue
+    return quotations
 
 
 @frappe.whitelist()
