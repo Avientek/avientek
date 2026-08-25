@@ -60,15 +60,22 @@ def run():
     order = [f.fieldname for f in m.fields]
     expected = [
         "custom_project_details_sb", "custom_project_status", "custom_sales_person",
-        "custom_territory", "custom_budget_amount", "custom_expected_closing_date",
+        "custom_parent_sales_person", "custom_territory", "custom_budget_amount",
+        "custom_expected_closing_date",
         "custom_project_details_cb", "custom_created_by", "custom_project_by",
-        "custom_probabilities", "custom_budget_value",
+        "custom_budget_value",
     ]
     dep = order.index("department")
     _check("fields present & ordered under Department (2 cols)",
            order[dep + 1: dep + 1 + len(expected)] == expected)
+    _check("Probabilities removed; Parent Sales Person present (auto)",
+           not m.get_field("custom_probabilities")
+           and bool(m.get_field("custom_parent_sales_person")))
+    _check("Assigned to Sales Person label + Discussion removed from status",
+           m.get_field("custom_sales_person").label == "Assigned to Sales Person"
+           and "Discussion" not in (m.get_field("custom_project_status").options or ""))
     _check("Project Status is a NEW field (standard status untouched)",
-           (m.get_field("custom_project_status").options or "").split("\n")[0] == "Discussion"
+           (m.get_field("custom_project_status").options or "").split("\n")[0] == "Open"
            and m.get_field("status").options == "Open\nCompleted\nCancelled")
     _check("budget fields are Currency",
            m.get_field("custom_budget_amount").fieldtype == "Currency"
