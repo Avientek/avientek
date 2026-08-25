@@ -418,6 +418,8 @@ jinja = {
 # "Event": "frappe.desk.doctype.event.event.has_permission",
 # }
 permission_query_conditions = {
+    # Project visibility by sales person / creator (Rahul 2026-08-25, item 6)
+    "Project": "avientek.events.project.project_permission_query",
     "Quotation": "avientek.api.quotation_access.quotation_permission_query",
     "Sales Order": "avientek.api.quotation_access.sales_order_permission_query",
     "Sales Invoice": "avientek.api.quotation_access.sales_invoice_permission_query",
@@ -451,6 +453,7 @@ permission_query_conditions = {
 }
 
 has_permission = {
+    "Project": "avientek.events.project.has_project_permission",
     "Quotation": "avientek.api.quotation_access.has_permission_check",
     "Sales Order": "avientek.api.quotation_access.has_permission_check",
     "Sales Invoice": "avientek.api.quotation_access.has_permission_check",
@@ -508,7 +511,10 @@ doc_events = {
     # Approved project (see avientek.events.project).
     "Project": {
         "before_insert": "avientek.events.project.set_created_by",
-        "validate": "avientek.events.project.enforce_l2_approval",
+        "validate": [
+            "avientek.events.project.set_parent_sales_person",
+            "avientek.events.project.enforce_l2_approval",
+        ],
     },
     "Bank Account": {
         "validate": "avientek.events.bank_account.auto_link_internal_company_account",

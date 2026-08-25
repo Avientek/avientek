@@ -103,9 +103,12 @@ def _create_project_enhancement_fields():
 	so ERPNext's own project logic is unaffected. Idempotent."""
 	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 
-	prob_options = "\n0%\n10%\n50%\n75%\n100%\n"
+	# Rahul follow-up 2026-08-25: "Discussion" removed from the status list
+	# (item 7); "Sales Person" relabelled "Assigned to Sales Person" (item 3);
+	# "Parent Sales Person" added, auto-filled from the assigned SP's tree
+	# parent (item 1); "Probabilities" removed (item 2, deleted below).
 	status_options = "\n".join([
-		"Discussion", "Open", "In Progress", "Negotiation",
+		"Open", "In Progress", "Negotiation",
 		"Finalisation", "Approved", "Closed", "Lost",
 	])
 
@@ -117,11 +120,14 @@ def _create_project_enhancement_fields():
 		 "label": "Project Status", "options": status_options,
 		 "insert_after": "custom_project_details_sb"},
 		{"fieldname": "custom_sales_person", "fieldtype": "Link",
-		 "label": "Sales Person", "options": "Sales Person",
+		 "label": "Assigned to Sales Person", "options": "Sales Person",
 		 "insert_after": "custom_project_status", "ignore_user_permissions": 1},
+		{"fieldname": "custom_parent_sales_person", "fieldtype": "Link",
+		 "label": "Parent Sales Person", "options": "Sales Person", "read_only": 1,
+		 "insert_after": "custom_sales_person", "ignore_user_permissions": 1},
 		{"fieldname": "custom_territory", "fieldtype": "Link",
 		 "label": "Territory", "options": "Territory",
-		 "insert_after": "custom_sales_person", "ignore_user_permissions": 1},
+		 "insert_after": "custom_parent_sales_person", "ignore_user_permissions": 1},
 		{"fieldname": "custom_budget_amount", "fieldtype": "Currency",
 		 "label": "Budget Amount", "insert_after": "custom_territory"},
 		{"fieldname": "custom_expected_closing_date", "fieldtype": "Date",
@@ -135,11 +141,8 @@ def _create_project_enhancement_fields():
 		{"fieldname": "custom_project_by", "fieldtype": "Link", "label": "Project by",
 		 "options": "Sales Person", "insert_after": "custom_created_by",
 		 "ignore_user_permissions": 1},
-		{"fieldname": "custom_probabilities", "fieldtype": "Select",
-		 "label": "Probabilities", "options": prob_options,
-		 "insert_after": "custom_project_by"},
 		{"fieldname": "custom_budget_value", "fieldtype": "Currency",
-		 "label": "Budget Value", "insert_after": "custom_probabilities"},
+		 "label": "Budget Value", "insert_after": "custom_project_by"},
 	]
 
 	for f in fields:
@@ -155,6 +158,17 @@ def _create_project_enhancement_fields():
 			if upd:
 				frappe.db.set_value("Custom Field", cf_name, upd)
 
+	# Item 2 (Rahul 2026-08-25): remove the Probabilities field added on
+	# 2026-08-22. Idempotent — only deletes if it still exists.
+	if frappe.db.exists("Custom Field", "Project-custom_probabilities"):
+		frappe.delete_doc("Custom Field", "Project-custom_probabilities",
+		                  ignore_permissions=True, force=True)
+
+	# Item 4 (Rahul 2026-08-25): move the standard Company field to the top of
+	# the form (just under Project Name). Property Setter on the standard field
+	# — layout only, no logic change.
+	make_property_setter("Project", "company", "insert_after", "project_name", "Data")
+
 	# Backfill 'Created By' on existing projects from the built-in `owner`
 	# (the real creator) — the before_insert stamp only fires for NEW projects,
 	# so without this every pre-existing project shows a blank Created By.
@@ -163,6 +177,15 @@ def _create_project_enhancement_fields():
 		"""UPDATE `tabProject`
 		   SET custom_created_by = owner
 		   WHERE IFNULL(custom_created_by, '') = '' AND IFNULL(owner, '') != ''"""
+	)
+
+	# Item 1 (Rahul 2026-08-25): backfill Parent Sales Person on existing
+	# projects from the Assigned Sales Person's tree parent. Idempotent.
+	frappe.db.sql(
+		"""UPDATE `tabProject` p
+		   JOIN `tabSales Person` sp ON sp.name = p.custom_sales_person
+		   SET p.custom_parent_sales_person = sp.parent_sales_person
+		   WHERE IFNULL(p.custom_sales_person, '') != ''"""
 	)
 
 

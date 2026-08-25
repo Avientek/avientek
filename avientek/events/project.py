@@ -17,12 +17,89 @@ from frappe import _
 PROJECT_L2_ROLE = "Project L2 Approver"
 _APPROVED = "Approved"
 
+# Roles that see EVERY project regardless of the sales-person scope
+# (Rahul follow-up 2026-08-25, item 6).
+_PROJECT_VISIBILITY_BYPASS_ROLES = {"System Manager", "Projects Manager"}
+# Only read-like access is scoped; creation / editing one's own project is
+# unaffected (a user can't open a project that isn't in their list anyway).
+_PROJECT_SCOPED_PTYPES = {"read", "select", "email", "print", "export", "report"}
+
 
 def set_created_by(doc, method=None):
     """Stamp the creating user on the read-only 'Created By' field (point 3).
     Runs on before_insert so it is set once and never overwritten."""
     if not doc.get("custom_created_by"):
         doc.custom_created_by = frappe.session.user
+
+
+def set_parent_sales_person(doc, method=None):
+    """Follow-up item 1: auto-fill the read-only 'Parent Sales Person' from the
+    Assigned Sales Person's parent in the Sales Person tree, so it always
+    reflects the current hierarchy (and feeds the visibility rule, item 6).
+    Cleared when no Assigned Sales Person is set."""
+    assigned = doc.get("custom_sales_person")
+    doc.custom_parent_sales_person = (
+        frappe.db.get_value("Sales Person", assigned, "parent_sales_person")
+        if assigned else None
+    )
+
+
+# ── Item 6: project visibility by sales person / creator ──────────────
+def _project_sales_persons(user):
+    """Sales Persons this user is scoped to, via their Sales Person User
+    Permissions (Sales Person has no user_id on this site). Empty list means
+    the user has NO sales-person restriction → full visibility."""
+    from avientek.api.user_permission_utils import get_user_permission_values
+    return get_user_permission_values(user, "Sales Person")
+
+
+def _project_visibility_bypass(user):
+    if user == "Administrator":
+        return True
+    return bool(_PROJECT_VISIBILITY_BYPASS_ROLES & set(frappe.get_roles(user)))
+
+
+def project_permission_query(user=None):
+    """List-view scope (item 6): a restricted sales user sees a Project only
+    when its Assigned Sales Person / Parent Sales Person / Project by is one of
+    their permitted Sales Persons, OR they created it. Bypassed for Admin /
+    System Manager / Projects Manager / users with no Sales Person restriction.
+    """
+    user = user or frappe.session.user
+    if _project_visibility_bypass(user):
+        return ""
+    sps = _project_sales_persons(user)
+    if not sps:
+        return ""  # no Sales Person restriction → full visibility
+    sp_list = ", ".join(frappe.db.escape(s) for s in sps)
+    esc_user = frappe.db.escape(user)
+    return (
+        "(`tabProject`.`custom_sales_person` in ({sp})"
+        " or `tabProject`.`custom_parent_sales_person` in ({sp})"
+        " or `tabProject`.`custom_project_by` in ({sp})"
+        " or `tabProject`.`custom_created_by` = {u})"
+    ).format(sp=sp_list, u=esc_user)
+
+
+def has_project_permission(doc, ptype=None, user=None):
+    """Single-doc gate mirroring project_permission_query, for direct URL /
+    link access. Only read-like ptypes are scoped; creation and other actions
+    are left to the standard role permissions."""
+    user = user or frappe.session.user
+    if ptype and ptype not in _PROJECT_SCOPED_PTYPES:
+        return True
+    if _project_visibility_bypass(user):
+        return True
+    sps = set(_project_sales_persons(user))
+    if not sps:
+        return True
+    if doc.get("custom_created_by") == user:
+        return True
+    for fn in ("custom_sales_person", "custom_parent_sales_person", "custom_project_by"):
+        val = doc.get(fn)
+        if val and val in sps:
+            return True
+    return False
 
 
 def enforce_l2_approval(doc, method=None):
