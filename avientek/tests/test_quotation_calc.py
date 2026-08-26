@@ -10,7 +10,8 @@ Covers:
   - Edge cases (zero qty, zero price, all-zero charges, negative guard)
 """
 import unittest
-from unittest.mock import MagicMock
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
 import frappe
 from frappe.utils import flt, cint
 
@@ -27,6 +28,20 @@ def _mock_get_system_settings(key=None):
 
 
 frappe.get_system_settings = _mock_get_system_settings
+
+# set_margin_flags(), reached at the end of run_calculation_pipeline(), calls
+# frappe.msgprint() — which touches frappe.local.flags and therefore raises
+# outside a request context. These tests assert on computed values, not on the
+# messages shown to the user, so mute it rather than stand up a full site.
+frappe.msgprint = lambda *args, **kwargs: None
+
+# frappe._() pulls in the translation cache, and when that fails it logs
+# through frappe.logger() — which needs a writable bench logs/ directory and
+# therefore blows up outside a bench. Nothing here asserts on translated
+# strings, so make it the identity function. This must be set BEFORE the
+# import below: quotation.py does `from frappe import _`, binding whatever
+# frappe._ is at import time.
+frappe._ = lambda msg, *args, **kwargs: msg
 
 # Import the functions under test
 from avientek.events.quotation import (
@@ -106,7 +121,17 @@ def make_doc(items, **parent_kwargs):
     doc = MagicMock()
     doc.items = items
 
+    # run_calculation_pipeline() opens with `if doc.docstatus != 0: return`.
+    # On a bare MagicMock, docstatus is an auto-created attribute, so that
+    # comparison is always True and the pipeline returned immediately —
+    # every TestFullPipeline case was asserting against untouched zeros and
+    # passing/failing for reasons unrelated to the code under test.
+    # is_new() needs the same treatment: it must return a real bool so the
+    # pipeline takes its "existing document" branch and loads prior state.
+    doc.is_new.return_value = False
+
     defaults = {
+        "docstatus": 0,
         "custom_incentive_": 0,
         "custom_incentive_amount": 0,
         "custom_distribute_incentive_based_on": "Amount",
@@ -1253,6 +1278,207 @@ class TestNearZeroSellingGuards(unittest.TestCase):
                 abs(_to_flt(row["margin_percent"])), 500,
                 f"margin_percent out of sane range on brand {row['brand']}",
             )
+
+
+# ──────────────────────────────────────────────────────────────
+# 7) PARENT INCENTIVE <-> ITEM INCENTIVE CONSISTENCY
+# ──────────────────────────────────────────────────────────────
+class _FakeDB:
+    """Minimal stand-in for frappe.db.
+
+    Outside a site, frappe.db is an unbound werkzeug LocalProxy that raises
+    RuntimeError on any attribute access, so the pipeline's prior-state read
+    always falls into its except branch. These tests need it to return a
+    controlled value instead.
+    """
+
+    def __init__(self, values):
+        self._values = values
+
+    def get_value(self, doctype, name, fieldname, *args, **kwargs):
+        return self._values.get(fieldname)
+
+
+@contextmanager
+def fake_db(**values):
+    """Temporarily install a fake frappe.db, then restore the real proxy."""
+    sentinel = object()
+    original = frappe.__dict__.get("db", sentinel)
+    frappe.db = _FakeDB(values)
+    try:
+        yield
+    finally:
+        if original is sentinel:
+            frappe.__dict__.pop("db", None)
+        else:
+            frappe.__dict__["db"] = original
+
+
+class TestIncentiveParentItemConsistency(unittest.TestCase):
+    """Regression cover for the parent/item incentive drift and for the
+    clear-to-zero path that used to be unreachable."""
+
+    def test_clearing_parent_amount_zeroes_item_incentive(self):
+        """Clearing the parent incentive must remove it from every row.
+
+        The pipeline used to guard distribution behind
+        `custom_incentive_amount > 0`, so a cleared incentive was never
+        redistributed as zero. And because the distributor writes
+        custom_incentive_ back onto each row, the next save simply
+        re-derived the same incentive from that stored percentage — the
+        incentive could never actually be removed.
+        """
+        it = make_item(
+            qty=2, custom_standard_price_=500, custom_special_price=500,
+            custom_markup_=20,
+            # residue of an earlier save that DID carry a parent incentive
+            custom_incentive_=10, custom_incentive_value=100,
+        )
+        doc = make_doc([it], custom_incentive_amount=0, custom_incentive_=0)
+
+        with fake_db(custom_incentive_amount=100):
+            run_calculation_pipeline(doc)
+
+        self.assertEqual(flt(it.custom_incentive_value), 0)
+        self.assertEqual(flt(it.custom_incentive_), 0)
+        self.assertEqual(flt(doc.custom_total_incentive_new), 0)
+
+    def test_quote_without_parent_incentive_keeps_item_percentages(self):
+        """A quote that never had a parent incentive keeps its per-item
+        percentages — the clear path must not fire for it."""
+        it = make_item(
+            qty=2, custom_standard_price_=500, custom_special_price=500,
+            custom_incentive_=10, custom_markup_=20,
+        )
+        doc = make_doc([it], custom_incentive_amount=0, custom_incentive_=0)
+
+        with fake_db(custom_incentive_amount=0):
+            run_calculation_pipeline(doc)
+
+        # 10% of 500 x 2 stays put
+        self.assertAlmostEqual(flt(it.custom_incentive_value), 100, places=2)
+        self.assertAlmostEqual(flt(doc.custom_total_incentive_new), 100, places=2)
+
+    def test_parent_amount_rebases_to_current_item_set(self):
+        """A percentage-type incentive must rebase when the items change.
+
+        Production QN-LTD-26-01476-1 shows the old behaviour: its single row
+        carried 11.1102% of 534,000 = 59,328.47 while custom_incentive_amount
+        still read 47,529.60 — the figure belonging to an earlier item set,
+        8.9007% of the very same base.
+        """
+        it = make_item(
+            qty=6, custom_standard_price_=89000, custom_special_price=89000,
+            custom_markup_=20,
+        )
+        doc = make_doc(
+            [it],
+            custom_incentive_type="Percentage",
+            custom_incentive_=11.1102,
+            custom_incentive_amount=47529.60,   # stale: belongs to the old item set
+            custom_distribute_incentive_based_on="Amount",
+        )
+
+        with fake_db(custom_incentive_amount=47529.60):
+            run_calculation_pipeline(doc)
+
+        expected = flt(89000 * 6 * 11.1102 / 100, 4)   # 59,328.47
+        self.assertAlmostEqual(flt(doc.custom_incentive_amount), expected, places=2)
+        self.assertAlmostEqual(flt(doc.custom_total_incentive_new), expected, places=2)
+        # the whole point of the fix: parent figure and rows finally agree
+        self.assertAlmostEqual(
+            flt(doc.custom_incentive_amount),
+            flt(doc.custom_total_incentive_new),
+            places=2,
+        )
+
+
+class TestChargesOnUnpricedRow(unittest.TestCase):
+    """calc_item_totals returns early on a row with no pricing. It must still
+    zero the price-derived charges, or recalc_doc_totals keeps summing stale
+    figures into the parent totals for a row that now contributes nothing."""
+
+    def test_price_derived_charges_cleared_when_row_has_no_pricing(self):
+        it = make_item(
+            qty=2, custom_standard_price_=0, custom_special_price=0,
+            custom_incentive_=10, custom_incentive_value=250,
+            reward_per=1.5, reward=180,
+            shipping_per=5, shipping=90,
+        )
+
+        calc_item_totals(it)
+
+        self.assertEqual(flt(it.custom_incentive_value), 0)
+        self.assertEqual(flt(it.reward), 0)
+        self.assertEqual(flt(it.shipping), 0)
+
+    def test_percentages_are_preserved_so_values_return_with_a_price(self):
+        """Only the computed values are cleared — the percentages the user
+        typed survive, so the charges come back once a price is entered."""
+        it = make_item(
+            qty=2, custom_standard_price_=0, custom_special_price=0,
+            custom_incentive_=10, custom_incentive_value=250,
+            reward_per=1.5, reward=180,
+            shipping_per=5, shipping=90,
+        )
+
+        calc_item_totals(it)
+
+        self.assertEqual(flt(it.custom_incentive_), 10)
+        self.assertEqual(flt(it.reward_per), 1.5)
+        self.assertEqual(flt(it.shipping_per), 5)
+
+        # give the row a price again — the charges recompute from those pcts
+        it.custom_standard_price_ = 500
+        it.custom_special_price = 500
+        calc_item_totals(it)
+
+        self.assertAlmostEqual(flt(it.custom_incentive_value), 100, places=2)   # 10% of 500x2
+        self.assertAlmostEqual(flt(it.reward), 15, places=2)                    # 1.5% of 500x2
+        self.assertAlmostEqual(flt(it.shipping), 50, places=2)                  # 5% of 500x2
+
+    def test_manual_rate_fields_are_left_alone(self):
+        """The early return exists to protect a manually entered rate/amount;
+        clearing the charges must not disturb them."""
+        it = make_item(
+            qty=2, custom_standard_price_=0, custom_special_price=0,
+            reward_per=1.5, reward=180,
+            rate=125, amount=250, custom_selling_price=250, custom_cogs=200,
+            custom_markup_value=50,
+        )
+
+        calc_item_totals(it)
+
+        self.assertEqual(flt(it.rate), 125)
+        self.assertEqual(flt(it.amount), 250)
+        self.assertEqual(flt(it.custom_selling_price), 250)
+        self.assertEqual(flt(it.custom_cogs), 200)
+        self.assertEqual(flt(it.custom_markup_value), 50)
+
+    def test_stale_charges_do_not_reach_parent_totals(self):
+        """End-to-end: a stale row must not inflate the parent totals."""
+        priced = make_item(
+            qty=2, custom_standard_price_=500, custom_special_price=500,
+            reward_per=1.5, shipping_per=5, custom_markup_=20,
+        )
+        stale = make_item(
+            qty=2, custom_standard_price_=0, custom_special_price=0,
+            custom_incentive_value=250, reward=180, shipping=90,
+        )
+        doc = make_doc([priced, stale])
+
+        # A row with no price sends backfill_item_price_defaults() into
+        # get_item_defaults(), which needs frappe.local.flags and therefore a
+        # request context. Not what this test is about — stub it out.
+        with fake_db(custom_incentive_amount=0), patch(
+            "avientek.events.quotation.backfill_item_price_defaults", lambda doc: None
+        ):
+            run_calculation_pipeline(doc)
+
+        # only the priced row contributes: 1.5% and 5% of 500 x 2
+        self.assertAlmostEqual(flt(doc.custom_total_reward_new), 15, places=2)
+        self.assertAlmostEqual(flt(doc.custom_total_shipping_new), 50, places=2)
+        self.assertAlmostEqual(flt(doc.custom_total_incentive_new), 0, places=2)
 
 
 if __name__ == "__main__":
