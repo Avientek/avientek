@@ -446,6 +446,26 @@ def calc_item_totals(it):
     # Skip calculation if no custom pricing is configured (no Item Price setup).
     # Preserve manually entered rate/amount so they don't get zeroed out on save.
     if not std_price and not sp:
+        # ... but DO clear the price-derived charges. Each is a percentage OF
+        # a price (incentive and reward off special_price, shipping off
+        # standard_price), so with no price they are definitionally zero.
+        # Returning early used to leave whatever was stored by an earlier save
+        # made while the row still had a price, and recalc_doc_totals sums
+        # those stale figures straight into custom_total_incentive_new /
+        # custom_total_reward_new / custom_total_shipping_new — crediting the
+        # quote for a row that now contributes nothing.
+        #
+        # Only the computed VALUES are cleared; the percentages the user typed
+        # are left alone, so each figure comes back on its own once a price is
+        # entered again.
+        #
+        # custom_markup_value / custom_cogs / custom_selling_price are
+        # deliberately NOT cleared here: unlike the charges above they are not
+        # definitionally zero when a manual rate has been entered, and
+        # protecting exactly that case is why this early return exists.
+        it.custom_incentive_value = 0
+        it.reward = 0
+        it.shipping = 0
         return
 
     # Layer 1: percentage-based charges (total values)
@@ -864,9 +884,12 @@ def distribute_incentive_server(doc):
     if not items:
         return
 
-    # Sum of all item (sp * qty) for proportional distribution
+    # Sum of all item (sp * qty) for proportional distribution. Only the
+    # proportional split needs it as a divisor, so a zero base blocks a real
+    # distribution but must NOT block a clear-to-zero — otherwise a quote whose
+    # prices were removed keeps its old per-row incentive forever.
     total_sp = sum(flt(_to_flt(it.custom_special_price) * max(cint(it.qty), 1)) for it in items)
-    if not total_sp:
+    if not total_sp and total_incentive:
         return
 
     for it in items:
@@ -876,7 +899,11 @@ def distribute_incentive_server(doc):
         old_incentive = _to_flt(it.custom_incentive_value)  # incentive already in cogs
 
         # Distribute incentive
-        if mode == "Distributed Equally":
+        if not total_incentive:
+            # Clearing. Short-circuit before the proportional branch, which
+            # would divide by a total_sp that is allowed to be zero here.
+            row_incentive = 0.0
+        elif mode == "Distributed Equally":
             row_incentive = flt(total_incentive / len(items), 4)
         else:  # "Amount" — proportional to sp * qty
             row_incentive = flt((sp * qty / total_sp) * total_incentive, 4)
@@ -1383,6 +1410,19 @@ def run_calculation_pipeline(doc, method=None):
         except Exception:
             pass
 
+    # Parent-level incentive as it currently stands in the DB. Needed further
+    # down to tell "the user just cleared the incentive" (rows must be zeroed)
+    # apart from "this quote never had a parent incentive" (item-level
+    # percentages own the value and must be left untouched).
+    prev_incentive_amount = 0.0
+    if not doc.is_new():
+        try:
+            prev_incentive_amount = flt(
+                frappe.db.get_value("Quotation", doc.name, "custom_incentive_amount") or 0
+            )
+        except Exception:
+            prev_incentive_amount = 0.0
+
     # Capture form rate BEFORE calc_item_totals overwrites it. Used for
     # both existing-item and new-item drift detection below.
     form_rates = {it.name: flt(it.custom_special_rate) for it in doc.items}
@@ -1435,12 +1475,36 @@ def run_calculation_pipeline(doc, method=None):
     discount_amount = _to_flt(doc.custom_discount_amount_value)
     pre_discount_total = sum(_to_flt(it.custom_selling_price) for it in doc.items)
 
-    # Distribute parent-level incentive only when parent has a positive amount.
-    # calc_item_totals already computes item-level incentive from each item's
-    # custom_incentive_ percentage; the distributor overrides that with the
-    # parent-controlled amount.
+    # Rebase the parent's Incentive % / Amount against the CURRENT item set
+    # before distributing. _finalize_submitted_quotation_save() already does
+    # this for submitted quotes; the draft pipeline was the only path that
+    # skipped it, so the two fields drifted apart permanently: change the items
+    # (Update Items, add/remove a row, edit a special price) and the rows
+    # re-derive from the percentage while custom_incentive_amount keeps the
+    # figure it held for the OLD item set. Seen on QN-LTD-26-01476-1, whose
+    # single row carried 11.1102% (59,328.47) while the parent amount still
+    # read 47,529.60 — 8.9007% of the very same base, 24.8% apart.
+    _sync_incentive_fields(doc)
+
+    # Distribute parent-level incentive. calc_item_totals already computes
+    # item-level incentive from each item's custom_incentive_ percentage; the
+    # distributor overrides that with the parent-controlled amount.
+    #
+    # A zero amount is distributed only when the quote PREVIOUSLY had a parent
+    # incentive — i.e. the user just cleared it. distribute_incentive_server()
+    # is written to handle 0 by zeroing every row (it rejects negatives only),
+    # but guarding on `> 0` alone left that path unreachable. And because the
+    # distributor writes custom_incentive_ back onto each row, the next save
+    # simply re-derived the same incentive from that stored per-item
+    # percentage — so clearing the parent amount never actually removed the
+    # incentive. Quotes that never had a parent incentive are left alone, which
+    # keeps per-item percentages working as a way to set incentive row by row.
     incentive_amount = _to_flt(doc.custom_incentive_amount)
     if incentive_amount > 0:
+        distribute_incentive_server(doc)
+    elif prev_incentive_amount > 0:
+        doc.custom_incentive_ = 0
+        doc.custom_incentive_amount = 0
         distribute_incentive_server(doc)
 
     # Distribute parent-level discount only when something actually changed.
@@ -2959,6 +3023,29 @@ def update_special_price(quotation_name, items):
         "custom_total_selling_new":        flt(doc.get("custom_total_selling_new") or 0, 4),
         "custom_total_buying_price":       flt(doc.get("custom_total_buying_price") or 0, 4),
     }
+
+    # Keep the parent Incentive fields in step with what the rows now carry.
+    #
+    # The loop above re-derives every row's incentive from its own percentage
+    # against the NEW special price, so custom_total_incentive_new moves — but
+    # custom_incentive_amount / custom_incentive_ were left holding the figures
+    # that belonged to the OLD prices. Parent and rows then disagreed for good,
+    # which is the same drift the draft pipeline had before _sync_incentive_
+    # fields() was wired into it. The sibling "Update Items" flow avoids this by
+    # going through _finalize_submitted_quotation_save(); this older
+    # "Update Special Price" flow writes rows straight to the DB and never did.
+    #
+    # Rows are treated as the source of truth here rather than redistributing to
+    # hold custom_incentive_amount fixed: redistribution would move each row's
+    # COGS, and this function's contract is that Selling Price / Rate / Amount —
+    # and therefore every customer-facing figure — stay exactly as they were.
+    total_sp_now = sum(
+        flt(_to_flt(r.custom_special_price) * max(cint(r.qty), 1)) for r in doc.items
+    )
+    synced_incentive = flt(doc.get("custom_total_incentive_new") or 0, 4)
+    parent_updates["custom_incentive_amount"] = synced_incentive
+    parent_updates["custom_incentive_"] = _safe_pct(synced_incentive, total_sp_now)
+
     frappe.db.set_value("Quotation", quotation_name, parent_updates, update_modified=True)
 
     # Rebuild the Brand Summary child rows in DB: rebuild_brand_summary
