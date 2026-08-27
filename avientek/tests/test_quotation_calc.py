@@ -54,6 +54,8 @@ from avientek.events.quotation import (
     distribute_incentive_server,
     distribute_discount_server,
     run_calculation_pipeline,
+    absorb_core_margin_fields,
+    _apply_manual_selling_rate,
 )
 
 
@@ -90,6 +92,20 @@ def make_item(**kwargs):
         "amount": 0,
         "custom_discount_amount_value": 0,
         "custom_discount_amount_qty": 0,
+        # ERPNext's own per-item margin / discount model. Left at zero on a
+        # clean row; absorb_core_margin_fields folds any value here into
+        # custom_markup_ and clears it again. Declared explicitly because a
+        # bare MagicMock answers every attribute with a child mock, which
+        # _to_flt quietly reads as 0.0 — hiding whether the code under test
+        # actually looked at the field.
+        "margin_type": "",
+        "margin_rate_or_amount": 0,
+        "rate_with_margin": 0,
+        "base_rate_with_margin": 0,
+        "discount_percentage": 0,
+        "discount_amount": 0,
+        "price_list_rate": 0,
+        "base_price_list_rate": 0,
         # ERPNext standard fields synced by recalc_doc_totals
         "net_rate": 0,
         "net_amount": 0,
@@ -1479,6 +1495,248 @@ class TestChargesOnUnpricedRow(unittest.TestCase):
         self.assertAlmostEqual(flt(doc.custom_total_reward_new), 15, places=2)
         self.assertAlmostEqual(flt(doc.custom_total_shipping_new), 50, places=2)
         self.assertAlmostEqual(flt(doc.custom_total_incentive_new), 0, places=2)
+
+
+class TestCoreMarginAbsorption(unittest.TestCase):
+    """Regression cover for QN-LLC-26-01303 — "Total selling price is showing
+    2 different values".
+
+    ERPNext's per-item margin control (margin_type / margin_rate_or_amount /
+    rate_with_margin) and its per-item discount fields are a second pricing
+    model running alongside this app's custom_special_price -> custom_cogs ->
+    custom_markup_ -> custom_selling_price chain. Core re-derives item.rate
+    from them in calculate_item_values(), which on the submitted-quote path
+    (where calculate_taxes_and_totals runs LAST) overwrites the rate this
+    pipeline computed — leaving net_total and Brand Summary reporting two
+    different selling totals, and compounding the uplift on every save.
+    """
+
+    # Item I030325 (iCam VB80) of QN-LLC-26-01303, as stored.
+    VB80 = dict(
+        qty=1,
+        custom_standard_price_=2787.43,
+        custom_special_price=2787.43,
+        custom_shipping_mode="Sea",
+        shipping_per=5,
+        custom_finance_=1.5,
+        custom_transport_=2,
+        custom_customs_=1,
+        custom_markup_=25.0001,
+        brand="Infobit",
+    )
+
+    def test_amount_margin_is_folded_once(self):
+        """A margin typed as an Amount lands on the rate exactly once."""
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+        base = flt(it.rate)                       # 3,818.26 = cost + 25% markup
+        self.assertAlmostEqual(base, 3818.26, places=2)
+
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 1030.82
+        absorb_core_margin_fields(make_doc([it]))
+
+        self.assertAlmostEqual(it.rate, 4849.08, places=2)
+        self.assertAlmostEqual(it.custom_selling_price, 4849.08, places=2)
+        self.assertAlmostEqual(it.amount, 4849.08, places=2)
+
+    def test_doubled_margin_is_unwound(self):
+        """The exact corrupted state on QN-LLC-26-01303 collapses to one uplift.
+
+        Core's branch (B) had stored discount_amount = rate_with_margin - rate
+        against THIS pipeline's rate, making it negative; branch (A) then
+        subtracted that negative and added the 1,030.82 margin a second time
+        (3,818.26 -> 4,849.08 -> 5,879.90). Absorption must measure the uplift
+        against the freshly computed rate, not against the poisoned
+        price_list_rate / rate_with_margin left behind.
+        """
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+
+        # Replay the stored corruption.
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 1030.82
+        it.rate_with_margin = 4849.08
+        it.discount_amount = -1030.82
+        it.price_list_rate = 3818.26
+        it.rate = 5879.90                          # what core last wrote
+
+        absorb_core_margin_fields(make_doc([it]))
+
+        self.assertAlmostEqual(it.rate, 4849.08, places=2)
+        self.assertAlmostEqual(it.custom_selling_price, 4849.08, places=2)
+        self.assertAlmostEqual(flt(it.discount_amount), 0, places=6)
+
+    def test_core_fields_are_cleared(self):
+        """After absorption core's calculate_margin() returns 0, so
+        calculate_taxes_and_totals() leaves item.rate alone."""
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 1030.82
+        it.rate_with_margin = 4849.08
+        it.base_rate_with_margin = 4849.08
+        it.discount_amount = -1030.82
+        it.discount_percentage = 0
+
+        absorb_core_margin_fields(make_doc([it]))
+
+        self.assertEqual(it.margin_type, "")
+        self.assertEqual(flt(it.margin_rate_or_amount), 0)
+        self.assertEqual(flt(it.rate_with_margin), 0)
+        self.assertEqual(flt(it.base_rate_with_margin), 0)
+        self.assertEqual(flt(it.discount_amount), 0)
+        self.assertEqual(flt(it.discount_percentage), 0)
+
+    def test_absorption_is_idempotent(self):
+        """Re-running must not add the uplift again — this is the compounding
+        that pushed the two totals further apart on every save."""
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 1030.82
+
+        doc = make_doc([it])
+        absorb_core_margin_fields(doc)
+        first = flt(it.rate)
+        for _ in range(4):
+            absorb_core_margin_fields(doc)
+
+        self.assertAlmostEqual(it.rate, first, places=4)
+        self.assertAlmostEqual(it.rate, 4849.08, places=2)
+
+    def test_percentage_margin_is_folded(self):
+        """Percentage margins fold against the freshly computed rate."""
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+        it.margin_type = "Percentage"
+        it.margin_rate_or_amount = 10
+
+        absorb_core_margin_fields(make_doc([it]))
+
+        self.assertAlmostEqual(it.rate, flt(3818.26 * 1.1, 2), places=1)
+
+    def test_folded_margin_survives_the_next_save(self):
+        """The uplift is back-solved into custom_markup_, so the next
+        calc_item_totals() reproduces it without the core fields."""
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 1030.82
+        absorb_core_margin_fields(make_doc([it]))
+
+        calc_item_totals(it)                       # next save
+        self.assertAlmostEqual(it.rate, 4849.08, places=1)
+
+    def test_price_list_rate_tracks_final_rate(self):
+        """quotation.js keeps price_list_rate == rate on every client recalc;
+        the server paths must too. A stale price_list_rate makes core derive
+        `discount_amount = price_list_rate - rate` and re-plant the negative
+        discount the absorption just removed."""
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 1030.82
+        it.price_list_rate = 3818.26
+
+        absorb_core_margin_fields(make_doc([it], conversion_rate=3.6725))
+
+        self.assertAlmostEqual(flt(it.price_list_rate), flt(it.rate), places=4)
+        self.assertAlmostEqual(
+            flt(it.base_price_list_rate), flt(it.rate * 3.6725, 4), places=2
+        )
+
+    def test_manual_override_is_not_folded(self):
+        """A rate the user typed on this save already IS the intended price —
+        a stale margin must be cleared off it, not added to it."""
+        it = make_item(**self.VB80)
+        calc_item_totals(it)
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 1030.82
+        _apply_manual_selling_rate(it, 4200.0)
+
+        absorb_core_margin_fields(
+            make_doc([it]), skip_fold={getattr(it, "name", None)}
+        )
+
+        self.assertAlmostEqual(flt(it.rate), 4200.0, places=2)
+        self.assertEqual(flt(it.margin_rate_or_amount), 0)
+
+    def test_row_without_margin_is_untouched(self):
+        """The three clean rows on QN-LLC-26-01303 must keep their rate."""
+        it = make_item(
+            qty=2, custom_standard_price_=473.75, custom_special_price=473.75,
+            shipping_per=5, custom_finance_=1.5, custom_transport_=2,
+            custom_customs_=1, custom_markup_=25.0003, brand="Infobit",
+        )
+        calc_item_totals(it)
+        before = flt(it.rate)
+
+        absorb_core_margin_fields(make_doc([it]))
+
+        self.assertAlmostEqual(flt(it.rate), before, places=4)
+        self.assertAlmostEqual(flt(it.custom_selling_price), before * 2, places=2)
+
+    def test_zero_cost_row_defers_the_fold_but_still_clears(self):
+        """A row with no Item Price cannot be back-solved (custom_cogs is 0, and
+        _apply_manual_selling_rate returns early). Clear the fields anyway so
+        core cannot double the uplift while the fold waits for a cost."""
+        it = make_item(qty=1, custom_standard_price_=0, custom_special_price=0)
+        it.margin_type = "Amount"
+        it.margin_rate_or_amount = 500
+
+        absorb_core_margin_fields(make_doc([it]))
+
+        self.assertEqual(flt(it.margin_rate_or_amount), 0)
+        self.assertEqual(it.margin_type, "")
+
+    def test_qn_llc_26_01303_totals_agree(self):
+        """End-to-end: the two figures the client is looking at must match.
+
+        As stored, Brand Summary total_selling was 8,677.85 while net_total
+        was 10,739.49 — apart by exactly 2 x 1,030.82, the VB80 margin
+        counted twice.
+        """
+        vb80 = make_item(**self.VB80)
+        mic = make_item(
+            qty=2, custom_standard_price_=473.75, custom_special_price=473.75,
+            shipping_per=5, custom_finance_=1.5, custom_transport_=2,
+            custom_customs_=1, custom_markup_=25.0003, brand="Infobit",
+        )
+        x400 = make_item(
+            qty=1, custom_standard_price_=1832.58, custom_special_price=1832.58,
+            shipping_per=5, custom_finance_=1.5, custom_transport_=2,
+            custom_customs_=1, custom_markup_=25, brand="Infobit",
+        )
+        cx4 = make_item(
+            qty=1, custom_standard_price_=767.55, custom_special_price=767.55,
+            shipping_per=5, custom_finance_=1.5, custom_transport_=2,
+            custom_customs_=1, custom_markup_=25, brand="Infobit",
+        )
+        items = [vb80, mic, x400, cx4]
+        doc = make_doc(items)
+
+        for it in items:
+            calc_item_totals(it)
+
+        # The VB80 carries the uplift, entered through core's margin control.
+        vb80.margin_type = "Amount"
+        vb80.margin_rate_or_amount = 1030.82
+
+        absorb_core_margin_fields(doc)
+        rebuild_brand_summary(doc)
+        recalc_doc_totals(doc)
+
+        brand_selling = sum(flt(r["total_selling"]) for r in doc._summary_rows)
+        item_amounts = sum(flt(it.amount) for it in items)
+
+        self.assertAlmostEqual(brand_selling, item_amounts, places=2)
+        self.assertAlmostEqual(flt(doc.net_total), brand_selling, places=2)
+        self.assertAlmostEqual(
+            flt(doc.custom_total_selling_new), brand_selling, places=2
+        )
+        # 4,849.08 + 1,297.90 + 2,510.29 + 1,051.40
+        self.assertAlmostEqual(item_amounts, 9708.67, places=1)
 
 
 if __name__ == "__main__":
