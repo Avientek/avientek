@@ -81,6 +81,15 @@ def run():
            m.get_field("custom_budget_amount").fieldtype == "Currency"
            and m.get_field("custom_budget_value").fieldtype == "Currency")
 
+    # Item 4: standard Company field moved to the top (right after Project
+    # Name), OUT of "Costing and Billing". Must assert the ACTUAL rendered
+    # order — a standard field is only reordered via a DocType field_order PS;
+    # an insert_after PS is silently ignored (that no-op was the original bug).
+    ci = order.index("company") if "company" in order else -1
+    pni = order.index("project_name") if "project_name" in order else -1
+    _check("Company moved to top (right after Project Name)",
+           ci != -1 and pni != -1 and ci == pni + 1)
+
     # 2) role + dashboard + strict-UP guard
     _check("role 'Project L2 Approver' exists", frappe.db.exists("Role", "Project L2 Approver"))
     from avientek.overrides.project_dashboard import get_data

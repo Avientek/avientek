@@ -165,9 +165,12 @@ def _create_project_enhancement_fields():
 		                  ignore_permissions=True, force=True)
 
 	# Item 4 (Rahul 2026-08-25): move the standard Company field to the top of
-	# the form (just under Project Name). Property Setter on the standard field
-	# — layout only, no logic change.
-	make_property_setter("Project", "company", "insert_after", "project_name", "Data")
+	# the form (just under Project Name). A standard field can ONLY be reordered
+	# via a DocType `field_order` Property Setter — Meta.sort_fields honours a
+	# field's own `insert_after` for CUSTOM fields only and ignores it for
+	# standard fields, so the earlier insert_after PS was a silent no-op
+	# (company stayed in "Costing and Billing"). Layout only, no logic change.
+	_move_project_company_to_top()
 
 	# Backfill 'Created By' on existing projects from the built-in `owner`
 	# (the real creator) — the before_insert stamp only fires for NEW projects,
@@ -187,6 +190,45 @@ def _create_project_enhancement_fields():
 		   SET p.custom_parent_sales_person = sp.parent_sales_person
 		   WHERE IFNULL(p.custom_sales_person, '') != ''"""
 	)
+
+
+def _move_project_company_to_top():
+	"""Reorder the standard Project `company` field to just under Project Name.
+
+	Standard fields are reordered ONLY through a DocType-level `field_order`
+	Property Setter (this is exactly what Customize Form writes). An
+	`insert_after` Property Setter on a standard field is ignored by
+	Meta.sort_fields, which is why the first attempt never moved it.
+
+	Idempotent: the order is rebuilt from the CURRENT meta each run (so it
+	always matches the deployed ERPNext version's field set) with `company`
+	moved to right after `project_name`; running it again produces the same
+	order. Also clears the stale, ineffective insert_after PS from the first
+	attempt."""
+	import json
+
+	if frappe.db.exists("Property Setter", "Project-company-insert_after"):
+		frappe.delete_doc("Property Setter", "Project-company-insert_after",
+		                  ignore_permissions=True, force=True)
+
+	frappe.clear_cache(doctype="Project")
+	meta = frappe.get_meta("Project")
+	order = [df.fieldname for df in meta.fields]
+	if "company" not in order or "project_name" not in order:
+		return
+	order.remove("company")
+	order.insert(order.index("project_name") + 1, "company")
+
+	frappe.make_property_setter(
+		{
+			"doctype": "Project",
+			"doctype_or_field": "DocType",
+			"property": "field_order",
+			"value": json.dumps(order),
+		},
+		is_system_generated=False,
+	)
+	frappe.clear_cache(doctype="Project")
 
 
 def _so_po_item_derived_fields_allow_on_submit():
