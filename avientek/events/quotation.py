@@ -1157,6 +1157,19 @@ def _finalize_submitted_quotation_save(doc, notify_discount_incentive_reapply=Fa
             indicator="blue",
         )
 
+    # calculate_taxes_and_totals() at the tail of this function is the one
+    # place where core's per-item margin/discount fields get the last word on
+    # item.rate — on the Draft path our before_save pipeline runs after core
+    # and overwrites it, here it does not. Neutralize them first, or core's
+    # rate and custom_selling_price go out of sync and the uplift compounds a
+    # little more on every save. QN-LLC-26-01303 is the reported case; see
+    # absorb_core_margin_fields' header for the full mechanism.
+    absorb_core_margin_fields(
+        doc,
+        discount_total=_to_flt(doc.custom_discount_amount_value),
+        pre_discount_total=sum(_to_flt(it.custom_selling_price) for it in doc.items),
+    )
+
     # Our own custom Brand Summary + parent total fields — separate from
     # ERPNext's native net_total/taxes/grand_total, which
     # calculate_taxes_and_totals() below derives straight from the
@@ -1279,6 +1292,129 @@ def _apply_manual_selling_rate(it, user_rate, discount_total=0.0, pre_discount_t
         "custom_margin_":       margin_pct,
         "custom_margin_value":  margin_val,
     })
+
+
+# ──────────────────────────────────────────────────────────────
+# 4c)  CORE MARGIN / DISCOUNT ABSORPTION
+# ──────────────────────────────────────────────────────────────
+# ERPNext's own per-item uplift fields (margin_type, margin_rate_or_amount,
+# rate_with_margin) and its per-item discount fields (discount_percentage,
+# discount_amount) are a SECOND, parallel pricing model alongside the one this
+# app owns (custom_special_price → custom_cogs → custom_markup_ →
+# custom_selling_price). Nothing here ever writes them, but the Items grid's
+# standard margin control does, and once they hold a value core's
+# calculate_item_values() re-derives item.rate from them:
+#
+#     item.rate = rate_with_margin * (1 - discount_percentage/100)
+#     if discount_amount and not discount_percentage:
+#         item.rate = rate_with_margin - discount_amount        # (A)
+#     else:
+#         item.discount_amount = rate_with_margin - item.rate   # (B)
+#
+# Two failures follow from that, and QN-LLC-26-01303 hit both.
+#
+# 1. WHOSE RATE WINS DEPENDS ON THE SAVE PATH. On a Draft save core runs in
+#    validate and run_calculation_pipeline runs later in before_save, so our
+#    rate wins and every total agrees. On a submitted quote the "Approved for
+#    Update" endpoints go through _finalize_submitted_quotation_save(), which
+#    ends with doc.calculate_taxes_and_totals() — core runs LAST, its rate
+#    wins, and custom_selling_price is left holding ours. net_total then
+#    disagrees with Brand Summary / custom_total_selling_new, and the margin
+#    set_margin_flags() gates approval on is not the margin being quoted.
+#
+# 2. THE UPLIFT COMPOUNDS. Branch (B) measures discount_amount against OUR
+#    rate rather than core's, so any time our rate sits above rate_with_margin
+#    the stored discount_amount goes NEGATIVE. On the next save branch (A)
+#    fires and subtracts that negative — adding the same uplift a second time.
+#    QN-LLC-26-01303 item I030325: price_list_rate 3,818.26 + margin 1,030.82
+#    = rate_with_margin 4,849.08; discount_amount −1,030.82; rate =
+#    4,849.08 − (−1,030.82) = 5,879.90. Each further save adds another
+#    1,030.82, and only Brand Summary keeps reporting the honest number.
+#
+# The fix is to keep exactly ONE pricing model on the document. Whatever
+# uplift the user typed into core's control is folded into custom_markup_ —
+# the same back-solve used when a user types a rate directly, so the number
+# survives every later save — and core's fields are then zeroed, which makes
+# calculate_margin() return 0 so core leaves item.rate alone.
+_CORE_MARGIN_FIELDS = {
+    "margin_type":           "",
+    "margin_rate_or_amount": 0,
+    "rate_with_margin":      0,
+    "base_rate_with_margin": 0,
+    "discount_percentage":   0,
+    "discount_amount":       0,
+}
+
+
+def _core_margin_uplift(it, base_rate):
+    """Per-unit uplift the user asked for through core's margin control.
+
+    Mirrors erpnext.controllers.taxes_and_totals.calculate_margin, with one
+    deliberate difference: the percentage case is measured against the rate
+    THIS pipeline just computed, not against the stored price_list_rate.
+    price_list_rate can still be carrying an already-doubled figure from an
+    earlier save (failure 2 above), and re-reading it would bake that in
+    permanently instead of unwinding it.
+    """
+    margin_rate = _to_flt(it.get("margin_rate_or_amount"))
+    if not margin_rate:
+        return 0.0
+    if it.get("margin_type") == "Percentage":
+        return flt(base_rate * margin_rate / 100, 4)
+    if it.get("margin_type") == "Amount":
+        return flt(margin_rate, 4)
+    return 0.0
+
+
+def absorb_core_margin_fields(doc, skip_fold=None, discount_total=0.0, pre_discount_total=0.0):
+    """Fold core's per-item margin into our markup model, then clear it.
+
+    Must run AFTER everything that can still move item.rate (calc_item_totals,
+    the incentive/discount distributors, manual rate overrides) and BEFORE
+    rebuild_brand_summary / recalc_doc_totals, so the Brand Summary and the
+    parent totals are both built from the same, final rate.
+
+    skip_fold: item row names whose rate the user set explicitly on this save.
+    Their rate already IS the intended price, so the margin fields are cleared
+    without folding — otherwise a stale margin would be added on top of a
+    figure the user just typed.
+    """
+    skip_fold = skip_fold or set()
+    conversion_rate = flt(doc.conversion_rate) or 1
+
+    for it in doc.items:
+        base_rate = _to_flt(it.custom_special_rate) or _to_flt(it.rate)
+        uplift = _core_margin_uplift(it, base_rate)
+        row_name = getattr(it, "name", None)
+
+        # A zero-cost row (no Item Price set up) can't be back-solved —
+        # _apply_manual_selling_rate returns early on cogs <= 0 and the
+        # uplift would be silently dropped. Leave the fold for a save where
+        # the row has a cost; the fields are still cleared below so core
+        # cannot double it in the meantime.
+        if uplift and row_name not in skip_fold and _to_flt(it.custom_cogs) > 0:
+            _apply_manual_selling_rate(
+                it, flt(base_rate + uplift, 4),
+                discount_total=discount_total,
+                pre_discount_total=pre_discount_total,
+            )
+
+        it.update(dict(_CORE_MARGIN_FIELDS))
+
+        # Keep the list rate in lockstep with the final rate — quotation.js
+        # already does exactly this on every client-side recalc (see
+        # handle_qty_or_rate_change), but no server-side path did, which is
+        # why a submitted-quote save left the two apart. It also matters for
+        # the clear above: with no margin set, core falls back to
+        # `discount_amount = price_list_rate - rate`, so a stale
+        # price_list_rate would just re-plant a negative discount on the way
+        # out and reopen failure 2.
+        final_rate = _to_flt(it.rate)
+        if final_rate:
+            it.update({
+                "price_list_rate":      final_rate,
+                "base_price_list_rate": flt(final_rate * conversion_rate, 4),
+            })
 
 
 def backfill_item_core_fields(doc):
@@ -1528,6 +1664,18 @@ def run_calculation_pipeline(doc, method=None):
                 discount_total=discount_amount,
                 pre_discount_total=pre_discount_total,
             )
+
+    # Fold anything the user typed into ERPNext's own per-item margin control
+    # into custom_markup_, then clear core's margin/discount fields so
+    # calculate_taxes_and_totals() can't re-derive item.rate behind us. Rows
+    # overridden above are cleared but not folded — their rate is already the
+    # price the user asked for. See absorb_core_margin_fields' header.
+    absorb_core_margin_fields(
+        doc,
+        skip_fold=set(manual_overrides.keys()),
+        discount_total=discount_amount,
+        pre_discount_total=pre_discount_total,
+    )
 
     rebuild_brand_summary(doc)
     recalc_doc_totals(doc)
