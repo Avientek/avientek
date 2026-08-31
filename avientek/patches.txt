@@ -637,3 +637,8 @@ avientek.patches.show_brand_column_in_sales_order_items
 avientek.patches.backfill_sbb_posting_datetime
 avientek.patches.backfill_sbb_posting_datetime_v2
 avientek.patches.backfill_so_submission_datetime
+# #0510: a data error tagged EVERY warehouse warehouse_type='Freezed Items',
+# so the Quotation stock-availability panel (which hides Freezed Items) showed
+# nothing. Customer rule: keep only RMA/Demo/Service/Repair/Reserved/In-Transit
+# frozen; clear the rest to sellable (warehouse_type NULL). Idempotent.
+avientek.patches.reclassify_freezed_warehouses
