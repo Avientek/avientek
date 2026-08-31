@@ -211,6 +211,35 @@ def check_exchange_rate(doc,method):
 		    	if (exc_rate != doc.conversion_rate) or (exc_rate != doc.plc_conversion_rate):
 		    		frappe.throw("Exchange rate is wrong!")
 
+def _convert_txn_amount(value, from_currency, from_rate, to_currency, to_rate):
+	"""Convert a transaction-currency amount from one document's currency into
+	another document's currency, via the company (base) currency.
+
+	Sridhar 2026-08-31: an ERPNext document stores only `conversion_rate` —
+	its OWN transaction currency -> company currency. There is no direct
+	SO-currency -> PO-currency rate anywhere, so the amount has to go through
+	base:
+
+		base   = value * from_rate      # SO currency -> AED
+		result = base  / to_rate        # AED -> PO currency
+
+	Same-currency rows are returned untouched rather than round-tripped, so a
+	PO raised on a different date than its Sales Order (and therefore holding
+	a slightly different rate for the same currency) can never drift an amount
+	that needed no conversion in the first place.
+	"""
+	value = flt(value)
+	if not value:
+		return value
+	if from_currency and to_currency and from_currency == to_currency:
+		return value
+	from_rate = flt(from_rate) or 1.0
+	to_rate = flt(to_rate) or 1.0
+	if to_rate <= 0:
+		return value
+	return flt(value * from_rate / to_rate, 4)
+
+
 def sync_special_price_from_sales_order(doc, method=None):
 	"""Refresh read-only Special Price / Special Price Note on each PO Item
 	that's linked to a Sales Order Item (via sales_order_item).
@@ -224,6 +253,14 @@ def sync_special_price_from_sales_order(doc, method=None):
 	direct entry — so this hook re-fetches from whichever SO Item is
 	currently linked, on every save. Rows with no sales_order_item are left
 	untouched (not every PO is tied to a Sales Order).
+
+	Sridhar 2026-08-31: Special Price is denominated in the currency of the
+	document it lives on, so a straight copy relabelled an SO-currency figure
+	with the PO's symbol (SO 555.55 AED shown as "USD 555.55"). Convert into
+	THIS PO's currency using the two documents' own conversion rates — see
+	_convert_txn_amount(). This runs after autofill_foreign_conversion_rate in
+	the before_validate list (see hooks.py), so doc.conversion_rate is already
+	the corrected rate by the time we divide by it.
 	"""
 	if not doc.items:
 		return
@@ -232,19 +269,89 @@ def sync_special_price_from_sales_order(doc, method=None):
 	if not so_items:
 		return
 
-	so_map = {
-		so.name: so for so in frappe.db.get_all(
-			"Sales Order Item",
-			filters={"name": ["in", so_items]},
-			fields=["name", "custom_special_price", "custom_special_price_note"],
-		)
-	}
+	so_rows = frappe.db.get_all(
+		"Sales Order Item",
+		filters={"name": ["in", so_items]},
+		fields=["name", "parent", "custom_special_price", "custom_special_price_note"],
+	)
+	so_map = {so.name: so for so in so_rows}
+
+	# Currency + rate of each source Sales Order. A PO can pull rows from
+	# several SOs, so resolve them per parent rather than assuming one.
+	so_parents = {so.parent for so in so_rows if so.parent}
+	so_doc_map = {}
+	if so_parents:
+		so_doc_map = {
+			so.name: so for so in frappe.db.get_all(
+				"Sales Order",
+				filters={"name": ["in", list(so_parents)]},
+				fields=["name", "currency", "conversion_rate"],
+			)
+		}
+
 	for item in doc.items:
 		so_item = so_map.get(getattr(item, "sales_order_item", None))
 		if not so_item:
 			continue
-		item.custom_special_price = so_item.custom_special_price
+		so_doc = so_doc_map.get(so_item.parent) or frappe._dict()
+		item.custom_special_price = _convert_txn_amount(
+			so_item.custom_special_price,
+			so_doc.currency, so_doc.conversion_rate,
+			doc.currency, doc.conversion_rate,
+		)
 		item.custom_special_price_note = so_item.custom_special_price_note
+
+
+@frappe.whitelist()
+def get_special_prices_for_currency(sales_order_items, currency=None, conversion_rate=None):
+	"""Return {sales_order_item: Special Price expressed in `currency`}.
+
+	Sridhar 2026-08-31: the PO form only repainted the Special Price column on
+	save — pick a supplier and the currency symbol and conversion rate flipped
+	instantly while the figure underneath stayed in the Sales Order's currency
+	until the save round-tripped. purchase_order.js calls this the moment the
+	rate settles so the column tracks the header.
+
+	Display-only: sync_special_price_from_sales_order() recomputes the same
+	values server-side on every save, so a stale, failed or skipped client call
+	can never persist a wrong number — it only delays the repaint.
+
+	Deliberately unguarded by a Sales Order permission check, matching
+	line_update_eta() above: the whole point of these columns is to show buyers
+	what was quoted WITHOUT giving them access to the Quotation or Sales Order.
+	"""
+	if isinstance(sales_order_items, str):
+		sales_order_items = json.loads(sales_order_items)
+	sales_order_items = [n for n in (sales_order_items or []) if n]
+	if not sales_order_items:
+		return {}
+
+	so_rows = frappe.db.get_all(
+		"Sales Order Item",
+		filters={"name": ["in", sales_order_items]},
+		fields=["name", "parent", "custom_special_price"],
+	)
+
+	so_parents = {so.parent for so in so_rows if so.parent}
+	so_doc_map = {}
+	if so_parents:
+		so_doc_map = {
+			so.name: so for so in frappe.db.get_all(
+				"Sales Order",
+				filters={"name": ["in", list(so_parents)]},
+				fields=["name", "currency", "conversion_rate"],
+			)
+		}
+
+	out = {}
+	for so in so_rows:
+		so_doc = so_doc_map.get(so.parent) or frappe._dict()
+		out[so.name] = _convert_txn_amount(
+			so.custom_special_price,
+			so_doc.currency, so_doc.conversion_rate,
+			currency, conversion_rate,
+		)
+	return out
 
 
 # def po_validate(doc, method):
@@ -320,8 +427,28 @@ def update_eta(item):
 		# Orders.Mea 2026-08-17: this PO row is now (re)linked to this SO
 		# row via the "Swap Sales Order" dialog — refresh the read-only
 		# Special Price / Special Price Note columns from the SO Item.
+		# Sridhar 2026-08-31: convert into this PO's currency, same as
+		# sync_special_price_from_sales_order above. This path writes
+		# straight to the DB (no doc in hand), so both parents are read
+		# here. `item` arrives either as a child doc (po_validate) or as a
+		# _dict parsed from the JS dialog payload (line_update_eta) — both
+		# answer .get("parent"), with a DB read as the fallback.
+		po_parent = item.get("parent") or frappe.db.get_value(
+			"Purchase Order Item", item.name, "parent"
+		)
+		so_doc = frappe.db.get_value(
+			"Sales Order", item.sales_order, ["currency", "conversion_rate"], as_dict=True
+		) or frappe._dict()
+		po_doc = frappe.db.get_value(
+			"Purchase Order", po_parent, ["currency", "conversion_rate"], as_dict=True
+		) if po_parent else None
+		po_doc = po_doc or frappe._dict()
 		frappe.db.set_value("Purchase Order Item", item.name, {
-			"custom_special_price": so_child_doc.custom_special_price,
+			"custom_special_price": _convert_txn_amount(
+				so_child_doc.custom_special_price,
+				so_doc.currency, so_doc.conversion_rate,
+				po_doc.currency, po_doc.conversion_rate,
+			),
 			"custom_special_price_note": so_child_doc.custom_special_price_note,
 		}, update_modified=False)
 
