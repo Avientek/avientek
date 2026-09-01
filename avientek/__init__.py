@@ -583,6 +583,15 @@ def _batch_valuation_negative_result_guard(self):
 	import frappe
 	from frappe.utils import flt
 
+	# Live-submit only. This guard reads Bin as the PRE-transaction warehouse
+	# balance, which is only true on a live document submit. During a Repost
+	# Item Valuation, Bin holds the final (post-repost) state, not the running
+	# balance at each historical SLE, so the resulting-value/qty check would be
+	# meaningless (and could mis-clamp). Repost re-runs the batch valuation
+	# from the ledger itself; it doesn't need — and must not get — this net.
+	if getattr(frappe.flags, "through_repost_item_valuation", False):
+		return
+
 	if flt(self.sle.get("actual_qty")) >= 0:
 		return  # inward receipts value from their own bundle
 	if not hasattr(self, "batch_avg_rate") or not hasattr(self, "batch_nos"):
@@ -610,9 +619,10 @@ def _batch_valuation_negative_result_guard(self):
 		"Bin", {"item_code": self.item_code, "warehouse": self.warehouse},
 		["stock_value", "actual_qty", "valuation_rate"], as_dict=True,
 	)
-	# Need a real ground-truth rate to fall back to; if the warehouse itself
-	# holds no value there is nothing sane to clamp to — leave it alone.
-	if not bin_row or not flt(bin_row.valuation_rate):
+	# Need a real, POSITIVE ground-truth rate to fall back to. If the warehouse
+	# rate is 0 or already negative (itself corrupt) there is nothing sane to
+	# clamp to — leave it alone rather than propagate a bad rate.
+	if not bin_row or flt(bin_row.valuation_rate) <= 0:
 		return
 
 	_TOL = 0.5
