@@ -121,6 +121,20 @@ frappe.ui.form.on('Purchase Order',{
 		}
 	},
 
+	// Sridhar 2026-08-31: picking a supplier swaps the PO currency and
+	// conversion rate instantly, so repaint Special Price to match instead
+	// of leaving an SO-currency figure under the new symbol until save.
+	// currency fires first (rate still stale), conversion_rate fires once
+	// the async rate lookup settles — hooking both means the column is
+	// right whichever of the two actually moves.
+	currency: function(frm) {
+		refresh_special_price(frm);
+	},
+
+	conversion_rate: function(frm) {
+		refresh_special_price(frm);
+	},
+
 	setup: function(frm) {
 		if (frm.doc.company) {
 			frappe.call({
@@ -250,6 +264,41 @@ var send_notification = function(frm, ref_doctype,ref_name,item) {
 		}
 	})
 }
+
+// Sridhar 2026-08-31: repaint the read-only Special Price column in the PO's
+// current currency. Display-only — sync_special_price_from_sales_order()
+// recomputes the same figures server-side on every save, so a call that is
+// skipped or fails just delays the repaint, it can never persist a wrong
+// number. No freeze: this fires while the user is still filling the header.
+var refresh_special_price = function(frm) {
+	if (frm.doc.docstatus !== 0) return;
+	if (!frm.doc.currency || !frm.doc.conversion_rate || !frm.doc.items) return;
+
+	var so_items = frm.doc.items
+		.filter(function(d) { return d.sales_order_item; })
+		.map(function(d) { return d.sales_order_item; });
+	if (!so_items.length) return;
+
+	frappe.call({
+		method: 'avientek.events.purchase_order.get_special_prices_for_currency',
+		args: {
+			sales_order_items: so_items,
+			currency: frm.doc.currency,
+			conversion_rate: frm.doc.conversion_rate
+		},
+		callback: function(r) {
+			if (r.exc || !r.message) return;
+			frm.doc.items.forEach(function(d) {
+				if (!d.sales_order_item) return;
+				var val = r.message[d.sales_order_item];
+				if (val === undefined) return;
+				// Skip no-op writes so a same-currency PO is never marked dirty.
+				if (flt(val) === flt(d.custom_special_price)) return;
+				frappe.model.set_value(d.doctype, d.name, 'custom_special_price', val);
+			});
+		}
+	});
+};
 
 var set_display_currency = function(frm) {
 	let frm_value_list = [{'avientek_field': 'avientek_total', 'core_field':frm.doc.total},
