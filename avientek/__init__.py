@@ -554,6 +554,102 @@ def _batch_valuation_zero_rate_guard(self):
 		)
 
 
+def _batch_valuation_negative_result_guard(self):
+	"""Safety net for the INFLATED batch rate / negative-balance-value case —
+	companion to _batch_valuation_zero_rate_guard (which only catches a rate
+	that came back 0).
+
+	Sammish 2026-09-01 (I029021 / DN-LLC-26-01117, ticket from Jithin):
+	batch BN10959/BN14877 in Stores-AETL drifted so their outward
+	`batch_avg_rate` came back ~4,465-19,396 while the item's real cost is
+	~2,800 (get_batch_no_ledgers is warehouse-scoped and mathematically
+	`value/qty` — the value/qty concentrated over a run of deliveries and
+	returns valued at mismatched rates). The final DN then removed MORE value
+	than the warehouse held, so the balance stock value went NEGATIVE
+	(-229,321 on 2 units) and the Stock Ledger showed avg rate -114,660.
+
+	An outward can never legitimately drive a warehouse's stock value below 0
+	while units remain — that is the unambiguous corruption this guards. When
+	it would, clamp every outward batch in this bundle to Bin.valuation_rate
+	(the warehouse moving-average / last good rate — the same fallback every
+	other valuation method and the zero-rate guard already use) and correct
+	`self.stock_value_change` to match. Precise by construction: legitimate
+	deliveries never leave units with negative value, so this never fires on a
+	healthy transaction — no arbitrary rate threshold, no false positives on
+	genuinely expensive batches. Never silent (logs every trigger).
+
+	Idempotent w.r.t. the zero-rate guard (runs after it); inward untouched.
+	"""
+	import frappe
+	from frappe.utils import flt
+
+	if flt(self.sle.get("actual_qty")) >= 0:
+		return  # inward receipts value from their own bundle
+	if not hasattr(self, "batch_avg_rate") or not hasattr(self, "batch_nos"):
+		return
+
+	# Respect intentionally zero-cost rows (same check as the zero-rate guard).
+	voucher_type = self.sle.get("voucher_type")
+	voucher_detail_no = self.sle.get("voucher_detail_no")
+	ref_item_dt = {
+		"Stock Entry": "Stock Entry Detail",
+		"Purchase Invoice": "Purchase Invoice Item",
+		"Sales Invoice": "Sales Invoice Item",
+		"Delivery Note": "Delivery Note Item",
+		"Purchase Receipt": "Purchase Receipt Item",
+	}.get(voucher_type)
+	allow_zero = (
+		frappe.db.get_value(ref_item_dt, voucher_detail_no, "allow_zero_valuation_rate")
+		if ref_item_dt and voucher_detail_no
+		else False
+	)
+	if allow_zero:
+		return
+
+	bin_row = frappe.db.get_value(
+		"Bin", {"item_code": self.item_code, "warehouse": self.warehouse},
+		["stock_value", "actual_qty", "valuation_rate"], as_dict=True,
+	)
+	# Need a real ground-truth rate to fall back to; if the warehouse itself
+	# holds no value there is nothing sane to clamp to — leave it alone.
+	if not bin_row or not flt(bin_row.valuation_rate):
+		return
+
+	_TOL = 0.5
+	# Bin reflects the pre-transaction warehouse balance on a live submit.
+	resulting_qty = flt(bin_row.actual_qty) + flt(self.sle.get("actual_qty"))
+	resulting_value = flt(bin_row.stock_value) + flt(self.stock_value_change)
+
+	# Fire ONLY on the impossible state: units remain but value went negative.
+	if resulting_qty <= _TOL or resulting_value >= -_TOL:
+		return
+
+	ma = flt(bin_row.valuation_rate)
+	old_change = flt(self.stock_value_change)
+	new_change = 0.0
+	clamped = []
+	for batch_no, ledger in self.batch_nos.items():
+		q = flt(getattr(ledger, "qty", 0))
+		if q < 0:  # only this bundle's outward batches
+			self.batch_avg_rate[batch_no] = ma
+			new_change += ma * q
+			clamped.append(batch_no)
+		else:
+			new_change += flt(self.batch_avg_rate.get(batch_no)) * q
+	self.stock_value_change = new_change
+
+	frappe.log_error(
+		title="Batch valuation negative-result safety net triggered",
+		message=(
+			f"item={self.item_code} warehouse={self.warehouse} "
+			f"voucher={voucher_type} {self.sle.get('voucher_no')}: outward would leave "
+			f"stock value {resulting_value:.2f} on {resulting_qty:.2f} units (impossible). "
+			f"Clamped outward batches {clamped} to Bin.valuation_rate {ma}; "
+			f"stock_value_change {old_change:.2f} -> {new_change:.2f}."
+		),
+	)
+
+
 def _patch_batch_valuation_zero_rate_safety_net():
 	"""Sridhar 2026-07-23 (MAT-STE-00774 / Item I030969, same symptom family
 	as I024926 / DN-AT-26-00397 — see
@@ -612,6 +708,7 @@ def _patch_batch_valuation_zero_rate_safety_net():
 	def _patched_calculate_avg_rate(self):
 		_original_calculate_avg_rate(self)
 		_batch_valuation_zero_rate_guard(self)
+		_batch_valuation_negative_result_guard(self)
 
 	BatchNoValuation.calculate_avg_rate = _patched_calculate_avg_rate
 
