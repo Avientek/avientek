@@ -152,7 +152,7 @@ fixtures = [
      				"Quotation-custom_history","Quotation-custom_existing_payment_term","Quotation-custom_column_break_jd9pb","Quotation-custom_new_payment_term_",
          			"Quotation-custom_level_1_approve_ok","Quotation-custom_section_break_0inv7",
 					"Quotation-custom_quotation_brand_summary","Quotation-custom_section_break_5hv6r","Quotation-custom_total_shipping_new","Quotation-custom_total_finance_new",
-     				"Quotation-custom_total_transport_new","Quotation-custom_total_reward_new","Quotation-custom_total_incentive_new",
+     				"Quotation-custom_total_transport_new","Quotation-custom_total_reward_new","Quotation-custom_total_incentive_new","Quotation-custom_total_incentive_percent_new",
 					"Quotation-custom_column_break_ojhw1","Quotation-custom_total_customs_new","Quotation-custom_total_margin_percent_new","Quotation-custom_total_margin_new",
      				"Quotation-custom_total_cost_new","Quotation-custom_total_selling_new",
 					"Quotation-custom_partial_delivery_accepted","Quotation-custom_shipment_and_margin","Quotation-custom_column_break_uhyss",

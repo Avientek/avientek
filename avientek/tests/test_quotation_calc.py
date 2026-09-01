@@ -142,6 +142,7 @@ def make_doc(items, **parent_kwargs):
         "custom_total_transport_new": 0,
         "custom_total_reward_new": 0,
         "custom_total_incentive_new": 0,
+        "custom_total_incentive_percent_new": 0,
         "custom_total_customs_new": 0,
         "custom_total_margin_new": 0,
         "custom_total_margin_percent_new": 0,
@@ -1391,6 +1392,84 @@ class TestIncentiveParentItemConsistency(unittest.TestCase):
             flt(doc.custom_total_incentive_new),
             places=2,
         )
+
+    def test_total_incentive_percent_is_weighted_not_summed(self):
+        """Total Incentive Percent is the incentive total over Total Buying
+        Price (sum of Special Price x Qty) — the same base each row's own
+        percentage is defined against.
+
+        Two rows at 10% and 4% on very different bases. Summing the row
+        percentages gives 14%; averaging them naively gives 7%. Neither is
+        the answer — the incentive actually taken is 900 + 40 = 940 out of a
+        buying price of 9,000 + 1,000 = 10,000, i.e. 9.4%. This is the same
+        class of error that produced ~147%% from 7 brands at ~21%% on
+        QN-LLC-26-00316.
+        """
+        a = make_item(
+            qty=3, custom_standard_price_=3000, custom_special_price=3000,
+            custom_incentive_=10, custom_markup_=20,
+        )
+        b = make_item(
+            qty=1, custom_standard_price_=1000, custom_special_price=1000,
+            custom_incentive_=4, custom_markup_=20,
+        )
+        doc = make_doc([a, b], custom_incentive_amount=0, custom_incentive_=0)
+
+        with fake_db(custom_incentive_amount=0):
+            run_calculation_pipeline(doc)
+
+        self.assertAlmostEqual(flt(a.custom_incentive_value), 900, places=2)
+        self.assertAlmostEqual(flt(b.custom_incentive_value), 40, places=2)
+        self.assertAlmostEqual(flt(doc.custom_total_incentive_new), 940, places=2)
+        self.assertAlmostEqual(flt(doc.custom_total_buying_price), 10000, places=2)
+
+        self.assertAlmostEqual(
+            flt(doc.custom_total_incentive_percent_new), 9.4, places=4
+        )
+        # explicitly NOT the sum (14) or the unweighted mean (7)
+        self.assertNotAlmostEqual(
+            flt(doc.custom_total_incentive_percent_new), 14, places=2
+        )
+
+    def test_total_incentive_percent_matches_uniform_row_percentage(self):
+        """When every row carries the same percentage, the total must read
+        exactly that percentage regardless of differing qty and price."""
+        rows = [
+            make_item(qty=2, custom_standard_price_=500, custom_special_price=500,
+                      custom_incentive_=5, custom_markup_=20),
+            make_item(qty=7, custom_standard_price_=1234, custom_special_price=1234,
+                      custom_incentive_=5, custom_markup_=20),
+        ]
+        doc = make_doc(rows, custom_incentive_amount=0, custom_incentive_=0)
+
+        with fake_db(custom_incentive_amount=0):
+            run_calculation_pipeline(doc)
+
+        self.assertAlmostEqual(
+            flt(doc.custom_total_incentive_percent_new), 5, places=4
+        )
+
+    def test_total_incentive_percent_zero_when_no_buying_price(self):
+        """No priced rows means no base. _safe_pct must return 0 rather than
+        divide by a near-zero denominator.
+
+        Driven through calc_item_totals + recalc_doc_totals directly, the way
+        TestChargesOnUnpricedRow does: run_calculation_pipeline would reach
+        backfill_item_price_defaults, whose get_item_defaults needs a real
+        request/test context that these mocked unit tests do not stand up.
+        """
+        it = make_item(
+            qty=1, custom_standard_price_=0, custom_special_price=0,
+            custom_incentive_=10, custom_incentive_value=250, custom_markup_=20,
+        )
+        calc_item_totals(it)
+
+        doc = make_doc([it], custom_incentive_amount=0, custom_incentive_=0)
+        recalc_doc_totals(doc)
+
+        self.assertEqual(flt(doc.custom_total_buying_price), 0)
+        self.assertEqual(flt(doc.custom_total_incentive_new), 0)
+        self.assertEqual(flt(doc.custom_total_incentive_percent_new), 0)
 
 
 class TestChargesOnUnpricedRow(unittest.TestCase):
