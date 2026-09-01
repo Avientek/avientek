@@ -710,6 +710,15 @@ def recalc_doc_totals(doc):
     doc.custom_total_transport_new      = flt(totals["transport"], 4)
     doc.custom_total_reward_new         = flt(totals["reward"], 4)
     doc.custom_total_incentive_new      = flt(totals["incentive"], 4)
+    # Weighted average of the rows' own Incentive (%), NOT their sum: each
+    # row's percentage is defined against its own Special Price x Qty (see
+    # calc_item_totals), so the only base that reconciles back to the rows is
+    # that same total — totals["buying_price"]. Summing the row percentages is
+    # the mistake that produced ~147% from 7 brands at ~21% on QN-LLC-26-00316;
+    # see the Total Margin comment above.
+    doc.custom_total_incentive_percent_new = _safe_pct(
+        totals["incentive"], totals["buying_price"]
+    )
     doc.custom_total_customs_new        = flt(totals["customs"], 4)
     doc.custom_total_margin_new         = margin
     doc.custom_total_margin_percent_new = margin_pct
@@ -3043,8 +3052,15 @@ def update_special_price(quotation_name, items):
         flt(_to_flt(r.custom_special_price) * max(cint(r.qty), 1)) for r in doc.items
     )
     synced_incentive = flt(doc.get("custom_total_incentive_new") or 0, 4)
+    incentive_pct = _safe_pct(synced_incentive, total_sp_now)
     parent_updates["custom_incentive_amount"] = synced_incentive
-    parent_updates["custom_incentive_"] = _safe_pct(synced_incentive, total_sp_now)
+    parent_updates["custom_incentive_"] = incentive_pct
+    # Same number, same base as recalc_doc_totals' custom_total_incentive_
+    # percent_new — total_sp_now is that function's totals["buying_price"],
+    # computed identically. This flow writes rows straight to the DB and never
+    # runs recalc_doc_totals, so the derived total has to be restated here or
+    # it keeps the figure that belonged to the OLD special prices.
+    parent_updates["custom_total_incentive_percent_new"] = incentive_pct
 
     frappe.db.set_value("Quotation", quotation_name, parent_updates, update_modified=True)
 

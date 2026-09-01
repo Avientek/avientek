@@ -1151,6 +1151,7 @@ frappe.ui.form.on('Quotation', {
             "custom_total_transport_new",
             "custom_total_reward_new",
             "custom_total_incentive_new",
+            "custom_total_incentive_percent_new",
             "custom_total_customs_new",
             "custom_total_margin_percent_new",
             "custom_total_margin_new",
@@ -1703,6 +1704,11 @@ function update_doc_totals_preview(frm) {
     frm.doc.custom_total_transport_new      = flt(totals.transport, 4);
     frm.doc.custom_total_reward_new         = flt(totals.reward, 4);
     frm.doc.custom_total_incentive_new      = flt(totals.incentive, 4);
+    // Weighted average over Special Price x Qty, mirroring recalc_doc_totals
+    // server-side. Never the sum of the rows' percentages — different bases.
+    frm.doc.custom_total_incentive_percent_new = totals.buying
+        ? flt(totals.incentive / totals.buying * 100, 4)
+        : 0;
     frm.doc.custom_total_customs_new        = flt(totals.customs, 4);
     frm.doc.custom_total_margin_new         = flt(margin, 4);
     frm.doc.custom_total_margin_percent_new = flt(margin_pct, 4);
@@ -1813,7 +1819,8 @@ function update_doc_totals_preview(frm) {
     ["custom_total_margin_new", "custom_total_margin_percent_new",
      "custom_total_selling_new", "custom_total_cost_new", "custom_total_buying_price",
      "custom_total_shipping_new", "custom_total_finance_new", "custom_total_transport_new",
-     "custom_total_reward_new", "custom_total_incentive_new", "custom_total_customs_new"
+     "custom_total_reward_new", "custom_total_incentive_new",
+     "custom_total_incentive_percent_new", "custom_total_customs_new"
     ].forEach(fn => frm.refresh_field(fn));
 }
 
