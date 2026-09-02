@@ -580,8 +580,9 @@ doc_events = {
             "avientek.events.utils.backfill_item_brand",
             # Orders.Mea 2026-08-17: keep Special Price / Special Price
             # Note in sync with whichever Sales Order Item a PO row is
-            # linked to. Same before_validate / before_update_after_submit
-            # split as backfill_item_brand above, for the same reason.
+            # linked to. Draft only — unlike backfill_item_brand above this
+            # is NOT also hooked at before_update_after_submit; see the
+            # note there (Sridhar 2026-09-02, POLTD26-27-00205).
             "avientek.events.purchase_order.sync_special_price_from_sales_order",
             # Rahul 2026-05-22 (POLTD26-27-00015): suppress
             # india_compliance's "Items not covered under GST cannot be
@@ -601,7 +602,15 @@ doc_events = {
             # is the only hook that actually fires in time. See
             # backfill_item_brand's docstring for the full trace.
             "avientek.events.utils.backfill_item_brand",
-            "avientek.events.purchase_order.sync_special_price_from_sales_order",
+            # Sridhar 2026-09-02 (POLTD26-27-00205):
+            # sync_special_price_from_sales_order deliberately does NOT run
+            # here any more. Special Price / Special Price Note are a
+            # read-only informational mirror of the quoted price and are not
+            # allow_on_submit, so writing them on a docstatus 1->1 save made
+            # validate_update_after_submit abort the whole save and locked
+            # the PO out of every edit and workflow transition. Post-submit
+            # the value stays frozen at what was submitted; see the
+            # function's docstring.
         ],
         "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": [
