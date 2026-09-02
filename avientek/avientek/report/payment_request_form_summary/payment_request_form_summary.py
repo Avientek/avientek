@@ -202,7 +202,13 @@ def _data(filters):
                     LIMIT 1
                 )
                 ELSE (
-                    SELECT ba.beneficiary_name
+                    /* Jithin 2026-09-02: intercompany "Pay" PRFs (party INT-S004
+                       = another Avientek company) use supplier_bank_account, but
+                       those bank accounts have the custom beneficiary_name blank
+                       while account_name holds the holder (e.g. "AVIENTEK FZCO").
+                       Fall back to account_name — same as the IT branch above —
+                       so the Beneficiary Name column isn't empty. */
+                    SELECT COALESCE(NULLIF(ba.beneficiary_name, ''), ba.account_name)
                     FROM `tabBank Account` ba
                     WHERE ba.name = prf.supplier_bank_account
                     LIMIT 1
