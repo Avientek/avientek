@@ -69,6 +69,13 @@ frappe.query_reports["Payment Request Form Summary"] = {
             fieldtype: "Link",
             options: "Department",
         },
+        {
+            // Jithin 2026-09-02: filter by a specific PRF ID (autocompletes).
+            fieldname: "prf",
+            label: __("ID"),
+            fieldtype: "Link",
+            options: "Payment Request Form",
+        },
         // Jithin 2026-05-23: the Show Base Currency Amount checkbox
         // was removed — the PRF-Amount Company Currency column is now
         // always visible per his Excel template.

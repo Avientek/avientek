@@ -320,5 +320,8 @@ def _build_conditions(filters):
     if filters.get("department"):
         clauses.append("AND prf.department = %(department)s")
         params["department"] = filters.department
+    if filters.get("prf"):
+        clauses.append("AND prf.name = %(prf)s")
+        params["prf"] = filters.prf
 
     return " ".join(clauses), params
