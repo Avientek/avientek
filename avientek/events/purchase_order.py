@@ -261,7 +261,34 @@ def sync_special_price_from_sales_order(doc, method=None):
 	_convert_txn_amount(). This runs after autofill_foreign_conversion_rate in
 	the before_validate list (see hooks.py), so doc.conversion_rate is already
 	the corrected rate by the time we divide by it.
+
+	Draft only. Sridhar 2026-09-02 (POLTD26-27-00205): this also ran at
+	before_update_after_submit, where writing a field that isn't
+	allow_on_submit makes Frappe's validate_update_after_submit abort the
+	ENTIRE save -- not just this column. Rahul's PO held 143904.0 (the
+	company-currency figure, = 1483.5464 x its conversion_rate of 97) while
+	its Sales Order Item held 1483.5464, so the rewrite was never a no-op
+	and every save died with "Row #1: Not allowed to change Special Price
+	after submission", leaving the PO unable to be edited, ticked for
+	revision, or moved through the workflow at all.
+
+	These two columns are a read-only informational mirror -- they exist so
+	a buyer can see what price was quoted, nothing reads them back. So the
+	fix is to stop writing them after submit, NOT to make them
+	allow_on_submit: the value is meant to stay frozen at whatever the PO
+	was submitted with. That does mean a row skewed by the pre-conversion
+	bug this branch fixes does NOT self-heal on its next save once the PO is
+	submitted -- correcting an already-submitted row now takes a deliberate
+	frappe.db.set_value. Draft rows still self-heal normally.
+
+	The one post-submit path that legitimately re-points a row at a
+	different SO Item (the "Swap Sales Order" dialog) refreshes the mirror
+	through update_eta's frappe.db.set_value, which bypasses the submit
+	check by design and is left working.
 	"""
+	if doc.docstatus != 0:
+		return
+
 	if not doc.items:
 		return
 
