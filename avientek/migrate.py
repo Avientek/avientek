@@ -123,7 +123,10 @@ def _create_project_enhancement_fields():
 		 "label": "Assigned to Sales Person", "options": "Sales Person",
 		 "insert_after": "custom_project_status", "ignore_user_permissions": 1},
 		{"fieldname": "custom_parent_sales_person", "fieldtype": "Link",
-		 "label": "Parent Sales Person", "options": "Sales Person", "read_only": 1,
+		 # #0522: Parent Sales Person is now user-selectable, independent of the
+		 # Assigned Sales Person (read_only 1 -> 0). set_parent_sales_person only
+		 # fills it as a convenience when the user leaves it blank.
+		 "label": "Parent Sales Person", "options": "Sales Person", "read_only": 0,
 		 "insert_after": "custom_sales_person", "ignore_user_permissions": 1},
 		{"fieldname": "custom_territory", "fieldtype": "Link",
 		 "label": "Territory", "options": "Territory",
