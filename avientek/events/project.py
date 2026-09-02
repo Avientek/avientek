@@ -33,15 +33,20 @@ def set_created_by(doc, method=None):
 
 
 def set_parent_sales_person(doc, method=None):
-    """Follow-up item 1: auto-fill the read-only 'Parent Sales Person' from the
-    Assigned Sales Person's parent in the Sales Person tree, so it always
-    reflects the current hierarchy (and feeds the visibility rule, item 6).
-    Cleared when no Assigned Sales Person is set."""
+    """'Parent Sales Person' is a user-selectable field (ticket #0522) —
+    independent of the Assigned Sales Person, and pickable even when no
+    Assigned Sales Person is set. This hook only fills it as a CONVENIENCE:
+    when the user leaves it blank AND an Assigned Sales Person is set, derive
+    it from that SP's parent in the Sales Person tree. A value the user chose
+    is never overwritten or cleared (that was the old read-only behaviour).
+    Both feed the visibility rule (project_permission_query)."""
+    if doc.get("custom_parent_sales_person"):
+        return  # user (or a prior fill) set it — leave it alone
     assigned = doc.get("custom_sales_person")
-    doc.custom_parent_sales_person = (
-        frappe.db.get_value("Sales Person", assigned, "parent_sales_person")
-        if assigned else None
-    )
+    if assigned:
+        doc.custom_parent_sales_person = frappe.db.get_value(
+            "Sales Person", assigned, "parent_sales_person"
+        )
 
 
 # ── Item 6: project visibility by sales person / creator ──────────────

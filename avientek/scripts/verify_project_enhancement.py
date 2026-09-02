@@ -68,9 +68,31 @@ def run():
     dep = order.index("department")
     _check("fields present & ordered under Department (2 cols)",
            order[dep + 1: dep + 1 + len(expected)] == expected)
-    _check("Probabilities removed; Parent Sales Person present (auto)",
+    _check("Probabilities removed; Parent Sales Person present",
            not m.get_field("custom_probabilities")
            and bool(m.get_field("custom_parent_sales_person")))
+    # #0522: Parent Sales Person is now user-selectable (editable) and
+    # independent of the Assigned Sales Person; set_parent_sales_person only
+    # fills it when the user leaves it blank, never overwriting a manual value.
+    _check("Parent Sales Person is editable (selectable)",
+           not m.get_field("custom_parent_sales_person").read_only)
+    from avientek.events.project import set_parent_sales_person
+    _sp = frappe.db.get_value("Sales Person", {"parent_sales_person": ["is", "set"]},
+                              ["name", "parent_sales_person"], as_dict=True)
+    if _sp:
+        _d1 = frappe._dict({"custom_sales_person": _sp.name, "custom_parent_sales_person": None})
+        set_parent_sales_person(_d1)
+        _check("Parent SP auto-fills from Assigned SP when left blank",
+               _d1.custom_parent_sales_person == _sp.parent_sales_person)
+        _d2 = frappe._dict({"custom_sales_person": None, "custom_parent_sales_person": _sp.name})
+        set_parent_sales_person(_d2)
+        _check("Parent SP kept when set manually (independent, no Assigned SP)",
+               _d2.custom_parent_sales_person == _sp.name)
+        _d3 = frappe._dict({"custom_sales_person": _sp.name,
+                            "custom_parent_sales_person": _sp.name})
+        set_parent_sales_person(_d3)
+        _check("Manual Parent SP not overwritten even when Assigned SP set",
+               _d3.custom_parent_sales_person == _sp.name)
     _check("Assigned to Sales Person label + Discussion removed from status",
            m.get_field("custom_sales_person").label == "Assigned to Sales Person"
            and "Discussion" not in (m.get_field("custom_project_status").options or ""))
