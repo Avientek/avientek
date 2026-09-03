@@ -1895,7 +1895,12 @@ function rebuild_brand_summary_preview(frm, addl_discount) {
         row.reward           = flt(d.reward, 4);
         row.reward_percent   = flt(d.reward_pct / n, 4);
         row.incentive        = flt(d.incentive, 4);
-        row.incentive_percent = flt(d.incentive_pct / n, 4);
+        // Weighted brand incentive %, NOT the average of the rows' own
+        // Incentive (%): the incentive is distributed by AMOUNT, so per-row
+        // %s (each vs its own Special Price x Qty) differ wildly and their
+        // average is meaningless. Same base as the header / doc-total
+        // (buying). (#0527, QN-FZCO-26-00577-3: 38.62% avg vs 9.47% true.)
+        row.incentive_percent = flt(d.buying ? (d.incentive / d.buying) * 100 : 0, 4);
         row.customs          = flt(d.customs, 4);
         row.customs_         = flt(d.customs_pct / n, 4);
         row.total_cost       = flt(tc, 4);

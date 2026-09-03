@@ -1280,6 +1280,46 @@ class TestNearZeroSellingGuards(unittest.TestCase):
                 f"margin_percent out of sane range on brand {row['brand']}",
             )
 
+    def test_brand_summary_incentive_percent_is_weighted_not_averaged(self):
+        """#0527: the brand row's Incentive (%) must be total incentive over
+        the brand's buying price (Special Price x Qty) -- the same base the
+        header (custom_incentive_) and the doc-total
+        (custom_total_incentive_percent_new) already use -- NOT the average of
+        the rows' own Incentive (%)s.
+
+        Two EPSON lines, incentive Distributed Equally so each row takes the
+        same AMOUNT (470) on very different bases (9,000 vs 1,000). The rows'
+        own %s then diverge to 5.22%% and 47%%, whose average (26.11%%) is
+        meaningless. The incentive actually taken is 940 out of a 10,000
+        buying price = 9.4%%. (QN-FZCO-26-00577-3 showed 38.62%% averaged vs
+        9.47%% true.)
+        """
+        a = make_item(qty=3, custom_standard_price_=3000, custom_special_price=3000,
+                      custom_markup_=20, brand="EPSON")
+        b = make_item(qty=1, custom_standard_price_=1000, custom_special_price=1000,
+                      custom_markup_=20, brand="EPSON")
+        doc = make_doc([a, b], custom_incentive_amount=940,
+                       custom_distribute_incentive_based_on="Distributed Equally")
+        for it in doc.items:
+            calc_item_totals(it)
+        distribute_incentive_server(doc)
+        rebuild_brand_summary(doc)
+
+        rows = {r["brand"]: r for r in doc._summary_rows}
+        self.assertIn("EPSON", rows)
+        epson = rows["EPSON"]
+
+        # each row took an equal AMOUNT, so their own %s diverge...
+        self.assertAlmostEqual(_to_flt(a.custom_incentive_value), 470, places=2)
+        self.assertAlmostEqual(_to_flt(b.custom_incentive_value), 470, places=2)
+        # ...but the brand row reads the weighted true percentage.
+        self.assertAlmostEqual(_to_flt(epson["incentive"]), 940, places=2)
+        self.assertAlmostEqual(_to_flt(epson["buying_price"]), 10000, places=2)
+        self.assertAlmostEqual(_to_flt(epson["incentive_percent"]), 9.4, places=2)
+        # explicitly NOT the unweighted mean (26.11) or the sum (52.22)
+        self.assertNotAlmostEqual(_to_flt(epson["incentive_percent"]), 26.11, places=1)
+        self.assertNotAlmostEqual(_to_flt(epson["incentive_percent"]), 52.22, places=1)
+
 
 # ──────────────────────────────────────────────────────────────
 # 7) PARENT INCENTIVE <-> ITEM INCENTIVE CONSISTENCY

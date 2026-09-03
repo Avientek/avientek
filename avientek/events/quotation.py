@@ -613,7 +613,15 @@ def rebuild_brand_summary(doc):
             "reward":             flt(d["reward"], 4),
             "reward_percent":     flt(d["reward_percent"] / n, 4),
             "incentive":          flt(d["incentive"], 4),
-            "incentive_percent":  flt(d["incentive_percent"] / n, 4),
+            # Weighted brand incentive %, NOT the average of the rows' own
+            # Incentive (%): each row's % is defined against its own Special
+            # Price x Qty, and the incentive amount is distributed by AMOUNT,
+            # so the rows' %s differ wildly (e.g. 2.8 .. 72.9 on the same
+            # brand) and their average is meaningless. Reconcile to the same
+            # base the header (custom_incentive_) and the doc-total
+            # (custom_total_incentive_percent_new) already use -- buying_price
+            # (#0527, QN-FZCO-26-00577-3: average showed 38.62% vs true 9.47%).
+            "incentive_percent":  _safe_pct(d["incentive"], d["buying_price"]),
             "customs":            flt(d["customs"], 4),
             "customs_":           flt(d["customs_percent"] / n, 4),
             "total_cost":         flt(tc, 4),
