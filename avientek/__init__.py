@@ -334,6 +334,101 @@ def _patch_batch_wise_balance_history_legacy_query():
 	bwbh.get_stock_ledger_entries_for_batch_no = _patched_for_batch_no
 
 
+def _patch_batch_wise_balance_history_company_guard():
+	"""Let the Batch-Wise Balance History report run for ALL warehouses of a
+	Company (#0526, orders.mea / TSK-2026-00692).
+
+	The stock report execute() (erpnext.stock.report.batch_wise_balance_history)
+	forces one of Item / Warehouse / Warehouse Type once the Stock Ledger
+	exceeds SLE_COUNT_LIMIT, so Accounts could not pull batch ageing for every
+	warehouse of a company at once: Warehouse Type only ever returns ONE type,
+	and after the #0510 reclassification the sellable T1/T2/T3 warehouses are
+	warehouse_type = NULL (see reclassify_freezed_warehouses). Company is itself
+	a bounded, indexed filter — get_item_warehouse_batch_map already constrains
+	sle.company == filters.company — so Company alone is a safe selection.
+
+	The same fix was shipped to the avientek_reports 'Batch-Wise Free Stock
+	Ageing Report'. This one covers the STANDARD report, which the customer's
+	Custom Report 'Batch-Wise Ageing Report' (reference_report = Batch-Wise
+	Balance History) and any other Custom Report on it actually execute.
+
+	Implemented as a faithful copy of execute() with `company` added to the
+	guard's exempt set; all heavy lifting still runs through the module helpers
+	(get_columns / get_item_details / get_item_warehouse_batch_map), so it also
+	inherits _patch_batch_wise_balance_history_legacy_query's SBB exclusion.
+
+	Idempotent — replaces the function once at app load.
+	"""
+	from erpnext.stock.report.batch_wise_balance_history import (
+		batch_wise_balance_history as bwbh,
+	)
+	import frappe
+	from frappe import _
+	from frappe.utils import cint, flt
+
+	def _patched_execute(filters=None):
+		if not filters:
+			filters = {}
+
+		sle_count = frappe.db.estimate_count("Stock Ledger Entry")
+
+		if (
+			sle_count > bwbh.SLE_COUNT_LIMIT
+			# #0526: Company scopes every query below, so Company alone is a
+			# bounded, valid selection — it lets Accounts run the report for
+			# ALL warehouses of a company.
+			and not filters.get("company")
+			and not filters.get("item_code")
+			and not filters.get("warehouse")
+			and not filters.get("warehouse_type")
+		):
+			frappe.throw(
+				_(
+					"Please select either the Company, Item, Warehouse or Warehouse Type filter to generate the report."
+				)
+			)
+
+		if filters.from_date > filters.to_date:
+			frappe.throw(_("From Date must be before To Date"))
+
+		float_precision = cint(frappe.db.get_default("float_precision")) or 3
+
+		columns = bwbh.get_columns(filters)
+		item_map = bwbh.get_item_details(filters)
+		iwb_map = bwbh.get_item_warehouse_batch_map(filters, float_precision)
+
+		data = []
+		for item in sorted(iwb_map):
+			if not filters.get("item") or filters.get("item") == item:
+				for wh in sorted(iwb_map[item]):
+					for batch in sorted(iwb_map[item][wh]):
+						qty_dict = iwb_map[item][wh][batch]
+						if qty_dict.opening_qty or qty_dict.in_qty or qty_dict.out_qty or qty_dict.bal_qty:
+							data.append(
+								[
+									item,
+									item_map[item]["item_name"],
+									item_map[item]["description"],
+									wh,
+									batch,
+									flt(qty_dict.opening_qty, float_precision),
+									flt(qty_dict.in_qty, float_precision),
+									flt(qty_dict.out_qty, float_precision),
+									flt(qty_dict.bal_qty, float_precision),
+									flt(
+										(qty_dict.bal_value / qty_dict.bal_qty) if qty_dict.bal_qty else 0,
+										float_precision,
+									),
+									flt(qty_dict.bal_value, float_precision),
+									item_map[item]["stock_uom"],
+								]
+							)
+
+		return columns, data
+
+	bwbh.execute = _patched_execute
+
+
 def _patch_batch_valuation_get_sle_for_batches():
 	"""Exclude SBB-linked SLEs from the legacy ledger-sum used by SBB
 	submit-time validate_negative_batch.
@@ -812,6 +907,10 @@ except Exception:
 	pass
 try:
 	_patch_batch_wise_balance_history_legacy_query()
+except Exception:
+	pass
+try:
+	_patch_batch_wise_balance_history_company_guard()
 except Exception:
 	pass
 try:
