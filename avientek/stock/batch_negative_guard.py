@@ -28,9 +28,108 @@ Skipped doctypes:
 
 import frappe
 from frappe import _
+from frappe.utils import get_datetime
 
 
 # ---------------------------------------------------------------- public hook
+
+
+def warn_backdated_batch_insertion(doc, method=None):
+	"""SOFT warning (non-blocking) when a batch-consuming document is posted
+	BEFORE an existing later movement of the same batch+warehouse — i.e. it is
+	being inserted into the PAST of that batch's ledger.
+
+	Why: `check_batches_remain_positive` validates each document at its own
+	submit, but a BACKDATED insertion (classically a backdated amendment, e.g.
+	DN-FZCO-26-01397-1 posted 08-31 though created 09-02) reorders the batch's
+	consumption and triggers a repost that can push an ALREADY-submitted, later
+	delivery negative (DN-FZCO-26-01364 → −1). No submit-time guard can catch
+	that retroactive effect, so we WARN the user (never block — legitimate
+	accounting backdating exists, ticket #0523). The daily detector remains the
+	safety net (TSK-2026-00698).
+
+	Hooked via doc_events[<doctype>]["before_submit"].
+	"""
+	warnings = _backdated_batch_warnings(doc)
+	if not warnings:
+		return
+	lines = [
+		_("Batch <b>{0}</b> in <b>{1}</b> already has a later movement on "
+		  "<b>{2}</b> ({3}).").format(w["batch_no"], w["warehouse"],
+		                              frappe.format(w["later_dt"], {"fieldtype": "Datetime"}),
+		                              w["later_voucher"])
+		for w in warnings
+	]
+	frappe.msgprint(
+		_("This document is dated <b>{0}</b>, which is BEFORE existing stock "
+		  "movements of the batch(es) below. Submitting will re-post the ledger "
+		  "and may push other transactions into negative batch stock:<br><br>{1}"
+		  "<br><br>If the date is intentional (accounting backdating), you can "
+		  "proceed; otherwise set the posting date to the actual movement date.")
+		.format(frappe.format(_doc_posting_dt(doc), {"fieldtype": "Datetime"}),
+		        "<br>".join(lines)),
+		title=_("Backdated stock movement"),
+		indicator="orange",
+	)
+
+
+def _doc_posting_dt(doc):
+	return get_datetime(f"{doc.posting_date} {doc.get('posting_time') or '00:00:00'}")
+
+
+def _backdated_batch_warnings(doc):
+	"""Return [{batch_no, warehouse, later_dt, later_voucher}] for each
+	batch+warehouse this doc consumes that ALREADY has a later-dated,
+	non-cancelled movement (excluding this doc). Testable, no side effects."""
+	if not getattr(doc, "items", None):
+		return []
+	if getattr(doc.flags, "ignore_avientek_negative_batch_guard", False):
+		return []
+	if doc.doctype in ("Sales Invoice", "Purchase Invoice") and not bool(getattr(doc, "update_stock", 0)):
+		return []
+
+	deltas = _collect_outward_batch_deltas(doc)
+	if not deltas:
+		return []
+
+	posting_dt = _doc_posting_dt(doc)
+	out = []
+	seen = set()
+	for item, warehouse, batch_no, _delta in deltas:
+		key = (warehouse, batch_no)
+		if key in seen:
+			continue
+		seen.add(key)
+		later = _latest_later_batch_movement(warehouse, batch_no, posting_dt, exclude_voucher=doc.name)
+		if later:
+			out.append({
+				"batch_no": batch_no, "warehouse": warehouse,
+				"later_dt": later[0], "later_voucher": later[1],
+			})
+	return out
+
+
+def _latest_later_batch_movement(warehouse, batch_no, posting_dt, exclude_voucher=None):
+	"""Most recent non-cancelled movement of this batch+warehouse dated AFTER
+	posting_dt (via SBB entries or legacy batch_no), excluding a voucher."""
+	res = frappe.db.sql(
+		"""
+		SELECT sle.posting_datetime, sle.voucher_no
+		FROM `tabStock Ledger Entry` sle
+		LEFT JOIN `tabSerial and Batch Entry` sbe
+		       ON sbe.parent = sle.serial_and_batch_bundle
+		WHERE sle.warehouse = %(warehouse)s
+		  AND sle.is_cancelled = 0
+		  AND sle.posting_datetime > %(posting_dt)s
+		  AND sle.voucher_no != %(exclude)s
+		  AND (sbe.batch_no = %(batch_no)s OR sle.batch_no = %(batch_no)s)
+		ORDER BY sle.posting_datetime DESC
+		LIMIT 1
+		""",
+		{"warehouse": warehouse, "posting_dt": posting_dt,
+		 "exclude": exclude_voucher or "", "batch_no": batch_no},
+	)
+	return (res[0][0], res[0][1]) if res else None
 
 
 def check_batches_remain_positive(doc, method=None):
