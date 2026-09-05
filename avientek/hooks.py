@@ -1025,6 +1025,10 @@ scheduler_events = {
     "daily": [
         "avientek.events.demo_movement.send_return_reminders",
         "avientek.events.warranty.expire_warranties",
+        # Detector: log a summary when any batch has a NEGATIVE per-warehouse
+        # balance, so Stock/Accounts clear it before it blocks a delivery of the
+        # same batch from another warehouse (#0529, TSK-2026-00698). Read-only.
+        "avientek.events.negative_batch_balance.scan_and_log_negative_batch_balances",
     ],
 }
 
