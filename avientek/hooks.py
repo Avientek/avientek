@@ -840,6 +840,9 @@ doc_events = {
             # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
             # submit-time guard against per-batch negatives. See
             # avientek/stock/batch_negative_guard.py.
+            # SOFT warning first: backdated insertion into a batch's past can
+            # repost other transactions into negative stock (TSK-2026-00700).
+            "avientek.stock.batch_negative_guard.warn_backdated_batch_insertion",
             "avientek.stock.batch_negative_guard.check_batches_remain_positive",
         ],
     },
@@ -907,6 +910,9 @@ doc_events = {
             # submit-time guard against per-batch negatives. Only fires on
             # stock-affecting SIs (update_stock=1 / POS); inert otherwise
             # because the row's warehouse will be empty.
+            # SOFT warning first: backdated insertion into a batch's past can
+            # repost other transactions into negative stock (TSK-2026-00700).
+            "avientek.stock.batch_negative_guard.warn_backdated_batch_insertion",
             "avientek.stock.batch_negative_guard.check_batches_remain_positive",
         ],
         "on_submit": "avientek.events.sales_invoice_reward_incentive.book_reward_incentive_jv",
@@ -944,6 +950,9 @@ doc_events = {
             # Sridhar 2026-06-01 (Phase 1, negative-stock cleanup): independent
             # submit-time guard against per-batch negatives. See
             # avientek/stock/batch_negative_guard.py.
+            # SOFT warning first: backdated insertion into a batch's past can
+            # repost other transactions into negative stock (TSK-2026-00700).
+            "avientek.stock.batch_negative_guard.warn_backdated_batch_insertion",
             "avientek.stock.batch_negative_guard.check_batches_remain_positive",
         ],
         "on_submit": "avientek.events.warranty.on_delivery_note_submit",
@@ -956,6 +965,9 @@ doc_events = {
             # with a source warehouse (Material Issue / Material Transfer /
             # Send to Subcontractor / Repack consume side). Pure Material
             # Receipts have no source warehouse → skipped.
+            # SOFT warning first: backdated insertion into a batch's past can
+            # repost other transactions into negative stock (TSK-2026-00700).
+            "avientek.stock.batch_negative_guard.warn_backdated_batch_insertion",
             "avientek.stock.batch_negative_guard.check_batches_remain_positive",
         ],
     },
