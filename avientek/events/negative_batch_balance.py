@@ -100,3 +100,105 @@ def scan_and_log_negative_batch_balances():
         ),
     )
     return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Negative stock VALUE detector (TSK-2026-00702, Option 1).
+# Companion to the negative-QUANTITY detector above. Batch-wise valuation on
+# mixed-rate batches can book negative COGS on individual deliveries (value
+# concentrates in leftover units). Over an item's life this is net-zero
+# (a presentation artifact, not a loss), but Accounts wants visibility. This
+# is READ-ONLY monitoring only — it never changes any valuation.
+# ──────────────────────────────────────────────────────────────────────────
+
+# ignore sub-currency-unit dust; only surface material negatives
+VALUE_TOLERANCE = 1.0
+
+
+def find_negative_stock_values(days=45, threshold=VALUE_TOLERANCE):
+    """Read-only. Return two lists:
+      live_bins  – Bins currently holding negative stock VALUE (or a negative
+                   valuation_rate on positive qty) beyond `threshold` — the
+                   actionable, live exposures.
+      recent_sles – Stock Ledger Entries in the last `days` whose running
+                   balance value went negative (the delivery-level artifact the
+                   Stock Ledger report shows), each tagged with the item's
+                   CURRENT bin qty so cosmetic/sold-out (qty 0) can be told
+                   apart from live cases.
+    """
+    from frappe.utils import add_days, today
+
+    live_bins = frappe.db.sql(
+        """
+        SELECT item_code, warehouse, actual_qty, stock_value, valuation_rate
+        FROM `tabBin`
+        WHERE stock_value < %(neg)s
+           OR (actual_qty > 0.001 AND valuation_rate < 0 AND stock_value < %(neg)s)
+        ORDER BY stock_value ASC
+        """,
+        {"neg": -flt(threshold)}, as_dict=True,
+    )
+
+    recent_sles = frappe.db.sql(
+        """
+        SELECT sle.item_code, sle.warehouse, sle.voucher_type, sle.voucher_no,
+               sle.posting_date, sle.valuation_rate, sle.stock_value,
+               COALESCE(b.actual_qty, 0) AS current_bin_qty
+        FROM `tabStock Ledger Entry` sle
+        LEFT JOIN `tabBin` b ON b.item_code = sle.item_code AND b.warehouse = sle.warehouse
+        WHERE sle.is_cancelled = 0
+          AND sle.posting_date >= %(since)s
+          AND sle.stock_value < %(neg)s
+        ORDER BY sle.stock_value ASC
+        """,
+        {"since": add_days(today(), -int(days)), "neg": -flt(threshold)}, as_dict=True,
+    )
+    return {"live_bins": live_bins, "recent_sles": recent_sles}
+
+
+@frappe.whitelist()
+def get_negative_stock_values(days=45):
+    """Whitelisted, READ-ONLY getter for on-demand review."""
+    frappe.only_for(("System Manager", "Stock Manager", "Stock User", "Accounts Manager"))
+    res = find_negative_stock_values(days=int(days))
+    return {
+        "live_bin_count": len(res["live_bins"]),
+        "recent_sle_count": len(res["recent_sles"]),
+        **res,
+    }
+
+
+def scan_and_log_negative_stock_values():
+    """Scheduled DETECTOR (daily). Read-only. One Error Log summary when a
+    material negative stock VALUE is present (live Bin) or was booked recently
+    (delivery-level). Idempotent (no-op when clean). Never writes valuation."""
+    res = find_negative_stock_values()
+    live, recent = res["live_bins"], res["recent_sles"]
+    if not live and not recent:
+        return 0
+
+    parts = []
+    if live:
+        parts.append("LIVE negative-value stock (actionable):")
+        parts += [
+            f"  {r.item_code} @ {r.warehouse}: value={flt(r.stock_value, 2)} "
+            f"qty={flt(r.actual_qty, 3)} rate={flt(r.valuation_rate, 2)}"
+            for r in live[:100]
+        ]
+    if recent:
+        parts.append("\nRecent deliveries that booked negative balance value "
+                     "(last 45d; current_bin_qty 0 = sold-out/cosmetic, net-zero):")
+        parts += [
+            f"  {r.posting_date} {r.item_code} @ {r.warehouse} "
+            f"{r.voucher_type} {r.voucher_no}: bal_value={flt(r.stock_value, 2)} "
+            f"rate={flt(r.valuation_rate, 2)} current_bin_qty={flt(r.current_bin_qty, 3)}"
+            for r in recent[:100]
+        ]
+
+    frappe.log_error(
+        title="Negative Stock Value Detected",
+        message=("Batch-valuation drift booked negative stock value. Net impact "
+                 "over an item's life is usually zero (cosmetic), but review live "
+                 "(qty>0) cases.\n\n" + "\n".join(parts)),
+    )
+    return len(live) + len(recent)
