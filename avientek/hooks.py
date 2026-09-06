@@ -1041,6 +1041,10 @@ scheduler_events = {
         # balance, so Stock/Accounts clear it before it blocks a delivery of the
         # same batch from another warehouse (#0529, TSK-2026-00698). Read-only.
         "avientek.events.negative_batch_balance.scan_and_log_negative_batch_balances",
+        # Companion VALUE detector: logs when batch-valuation drift books negative
+        # stock value (usually net-zero/cosmetic, but Accounts wants visibility).
+        # Read-only (TSK-2026-00702). See scan_and_log_negative_stock_values.
+        "avientek.events.negative_batch_balance.scan_and_log_negative_stock_values",
     ],
 }
 
