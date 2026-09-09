@@ -642,3 +642,8 @@ avientek.patches.backfill_so_submission_datetime
 # nothing. Customer rule: keep only RMA/Demo/Service/Repair/Reserved/In-Transit
 # frozen; clear the rest to sellable (warehouse_type NULL). Idempotent.
 avientek.patches.reclassify_freezed_warehouses
+# SUP-2026-00045 / INV-LLC-26-01134: two DB Server Scripts implementing Saudi
+# ZATCA (BR-CO-14/15/17) VAT rules ran on EVERY Sales Invoice, corrupting VAT on
+# non-KSA discount-on-Grand-Total invoices (understated tax + GL imbalance on
+# submit). Scope both scripts to Saudi Arabia companies only. Idempotent.
+avientek.patches.scope_zatca_server_scripts_to_ksa
