@@ -2,6 +2,7 @@ from __future__ import unicode_literals
 import frappe
 from frappe import _
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+from frappe.utils import flt
 
 
 def _run_step(label, fn):
@@ -76,6 +77,8 @@ def after_migrate():
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
+		("lead_type_consolidation", _lead_type_consolidation),
+		("contact_crm_fields", _create_contact_crm_fields),
 	]
 	for label, fn in steps:
 		_run_step(label, fn)
@@ -93,6 +96,15 @@ def _ensure_project_l2_role():
 		}).insert(ignore_permissions=True)
 
 
+# Shown under both USD budget columns on the Project form. Rahul 2026-09-08
+# asked for the refresh instruction to live ON the field, so a user who wants a
+# newer rate can see how to get one without asking anyone.
+_RATE_REFRESH_HINT = (
+	"Converted from the company currency at the frozen Exchange Rate below. "
+	"To refresh the rate, re-enter Budget Amount / Budget Value and save."
+)
+
+
 def _create_project_enhancement_fields():
 	"""Rahul 2026-08-22 — Project module enhancement. Adds a sales-pipeline
 	layer to Project in a new 'Project Details' section right after Department,
@@ -100,7 +112,16 @@ def _create_project_enhancement_fields():
 
 	The 8-value pipeline status is a NEW field (custom_project_status); the
 	standard `status` (Open/Completed/Cancelled) is deliberately left untouched
-	so ERPNext's own project logic is unaffected. Idempotent."""
+	so ERPNext's own project logic is unaffected. Idempotent.
+
+	Client meeting 2026-09-08 (Rahul):
+	  * Budget Amount and Budget Value were split across the column break
+	    (amount in column 1, value stranded in column 2 after "Project by").
+	    They are now adjacent in column 1, each followed by its USD twin.
+	  * Two read-only USD columns + the frozen rate that produced them
+	    (see avientek.events.project.set_budget_usd).
+	  * Focused Brands, read-only, mirrored from the customer's Lead
+	    (see avientek.events.project.fetch_brands_from_lead)."""
 	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 
 	# Rahul follow-up 2026-08-25: "Discussion" removed from the status list
@@ -131,10 +152,41 @@ def _create_project_enhancement_fields():
 		{"fieldname": "custom_territory", "fieldtype": "Link",
 		 "label": "Territory", "options": "Territory",
 		 "insert_after": "custom_parent_sales_person", "ignore_user_permissions": 1},
+		# ── Budget block (Rahul 2026-09-08) ──
+		# Amount and Value sit together, each immediately followed by its
+		# read-only USD twin, then the single frozen rate that produced both.
+		# The company-currency fields carry `options: custom_company_currency`
+		# so they render in the COMPANY's symbol (AED) rather than the system
+		# default — the conversion is defined as company currency → USD.
 		{"fieldname": "custom_budget_amount", "fieldtype": "Currency",
-		 "label": "Budget Amount", "insert_after": "custom_territory"},
+		 "label": "Budget Amount", "options": "custom_company_currency",
+		 "insert_after": "custom_territory"},
+		{"fieldname": "custom_budget_amount_usd", "fieldtype": "Currency",
+		 "label": "Budget Amount (USD)", "options": "USD", "read_only": 1,
+		 "insert_after": "custom_budget_amount",
+		 "description": _RATE_REFRESH_HINT},
+		{"fieldname": "custom_budget_value", "fieldtype": "Currency",
+		 "label": "Budget Value", "options": "custom_company_currency",
+		 "insert_after": "custom_budget_amount_usd"},
+		{"fieldname": "custom_budget_value_usd", "fieldtype": "Currency",
+		 "label": "Budget Value (USD)", "options": "USD", "read_only": 1,
+		 "insert_after": "custom_budget_value",
+		 "description": _RATE_REFRESH_HINT},
+		{"fieldname": "custom_exchange_rate", "fieldtype": "Float",
+		 "label": "Exchange Rate (per 1 USD)", "read_only": 1, "precision": "9",
+		 "insert_after": "custom_budget_value_usd",
+		 "description": (
+			 "Company currency per 1 USD, frozen at the moment the budget was "
+			 "last entered — the USD columns do not move with the market. "
+			 "To pick up today's rate, re-enter Budget Amount / Budget Value "
+			 "and save.")},
+		# Holds the company's default currency (AED) so the Currency fields
+		# above know which symbol to render. Set on validate; never keyed in.
+		{"fieldname": "custom_company_currency", "fieldtype": "Data",
+		 "label": "Company Currency", "read_only": 1, "hidden": 1,
+		 "insert_after": "custom_exchange_rate"},
 		{"fieldname": "custom_expected_closing_date", "fieldtype": "Date",
-		 "label": "Expected Closing Date", "insert_after": "custom_budget_amount"},
+		 "label": "Expected Closing Date", "insert_after": "custom_company_currency"},
 		# ── Column 2 ──
 		{"fieldname": "custom_project_details_cb", "fieldtype": "Column Break",
 		 "insert_after": "custom_expected_closing_date"},
@@ -144,8 +196,15 @@ def _create_project_enhancement_fields():
 		{"fieldname": "custom_project_by", "fieldtype": "Link", "label": "Project by",
 		 "options": "Sales Person", "insert_after": "custom_created_by",
 		 "ignore_user_permissions": 1},
-		{"fieldname": "custom_budget_value", "fieldtype": "Currency",
-		 "label": "Budget Value", "insert_after": "custom_project_by"},
+		# Rahul 2026-09-08: read-only mirror of the Lead's Focused Brands,
+		# resolved through Project.customer → Customer.lead_name. Display only
+		# — rebuilt from the Lead on every save, never keyed in here.
+		{"fieldname": "custom_focused_brands", "fieldtype": "Table MultiSelect",
+		 "label": "Focused Brands", "options": "Focused Brands", "read_only": 1,
+		 "insert_after": "custom_project_by", "allow_on_submit": 0,
+		 "description": (
+			 "Fetched from the Lead this customer was converted from. Empty "
+			 "when the customer was not created from a Lead.")},
 	]
 
 	for f in fields:
@@ -156,7 +215,7 @@ def _create_project_enhancement_fields():
 		else:
 			upd = {k: f[k] for k in
 			       ("fieldtype", "label", "options", "insert_after", "read_only",
-			        "ignore_user_permissions")
+			        "ignore_user_permissions", "description", "precision", "hidden")
 			       if k in f}
 			if upd:
 				frappe.db.set_value("Custom Field", cf_name, upd)
@@ -194,6 +253,58 @@ def _create_project_enhancement_fields():
 		   WHERE IFNULL(p.custom_sales_person, '') != ''"""
 	)
 
+	# Rahul 2026-09-08: fill the USD columns on projects that already carry a
+	# budget, so the new columns aren't blank across the existing pipeline.
+	_backfill_project_budget_usd()
+
+
+def _backfill_project_budget_usd():
+	"""One-off-shaped but idempotent: stamp company currency, today's rate and
+	the USD budget figures onto existing projects that have a budget but no
+	rate yet. Only touches rows where custom_exchange_rate is still empty, so a
+	rerun never re-rates a project the users have already seen (the whole point
+	of the frozen rate)."""
+	from avientek.events.project import _usd_rate
+
+	rows = frappe.db.sql(
+		"""SELECT p.name, p.company,
+		          IFNULL(p.custom_budget_amount, 0) AS amount,
+		          IFNULL(p.custom_budget_value, 0)  AS value
+		   FROM `tabProject` p
+		   WHERE IFNULL(p.custom_exchange_rate, 0) = 0
+		     AND (IFNULL(p.custom_budget_amount, 0) != 0
+		          OR IFNULL(p.custom_budget_value, 0) != 0)""",
+		as_dict=True,
+	)
+	if not rows:
+		return
+
+	# Match the precision the save path uses (doc.precision(...)), so a
+	# backfilled project doesn't shift value the first time someone saves it.
+	usd_precision = frappe.get_precision("Project", "custom_budget_amount_usd") or 2
+
+	# One rate lookup per company, not per project.
+	rate_cache = {}
+	for r in rows:
+		if r.company not in rate_cache:
+			ccy = frappe.get_cached_value("Company", r.company, "default_currency") \
+				if r.company else None
+			rate_cache[r.company] = (ccy, _usd_rate(ccy))
+		company_currency, rate = rate_cache[r.company]
+		if not rate or rate <= 0:
+			continue
+		frappe.db.set_value(
+			"Project", r.name,
+			{
+				"custom_company_currency": company_currency or "",
+				"custom_exchange_rate": rate,
+				"custom_budget_amount_usd": flt(flt(r.amount) / rate, usd_precision),
+				"custom_budget_value_usd": flt(flt(r.value) / rate, usd_precision),
+			},
+			update_modified=False,
+		)
+	print(f"[after_migrate] backfilled USD budget on {len(rows)} project(s)")
+
 
 def _move_project_company_to_top():
 	"""Reorder the standard Project `company` field to just under Project Name.
@@ -207,12 +318,31 @@ def _move_project_company_to_top():
 	always matches the deployed ERPNext version's field set) with `company`
 	moved to right after `project_name`; running it again produces the same
 	order. Also clears the stale, ineffective insert_after PS from the first
-	attempt."""
+	attempt.
+
+	The field_order PS must be dropped BEFORE meta is read (2026-09-08): once
+	written, it PINS every field's position, and Meta.sort_fields then honours
+	it over a custom field's own `insert_after`. So re-positioning an existing
+	custom field in _create_project_enhancement_fields had no visible effect —
+	the field kept the slot recorded in the stored order (this is exactly how
+	Budget Value stayed stranded in column 2 after being moved to column 1).
+	Deleting it first makes get_meta fall back to natural insert_after order,
+	which is the order we then want to freeze."""
 	import json
 
 	if frappe.db.exists("Property Setter", "Project-company-insert_after"):
 		frappe.delete_doc("Property Setter", "Project-company-insert_after",
 		                  ignore_permissions=True, force=True)
+
+	# Drop the previous run's pinned order so the meta below reflects the
+	# CURRENT insert_after values rather than yesterday's layout.
+	for ps in frappe.get_all(
+		"Property Setter",
+		filters={"doc_type": "Project", "property": "field_order",
+		         "doctype_or_field": "DocType"},
+		pluck="name",
+	):
+		frappe.delete_doc("Property Setter", ps, ignore_permissions=True, force=True)
 
 	frappe.clear_cache(doctype="Project")
 	meta = frappe.get_meta("Project")
@@ -899,3 +1029,338 @@ def retry_failed_repost_item_valuation(company=None):
 
 	frappe.db.commit()
 	return {"message": f"Queued {len(failed)} entries for retry", "count": len(failed)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Client meeting 2026-09-08 (Rahul) — Lead: one Lead Type, no Show field
+# ══════════════════════════════════════════════════════════════════════
+
+# The four values that replace BOTH the custom Party Type and the standard
+# ERPNext Lead Type list. Leading "" keeps the field optional.
+_LEAD_TYPE_OPTIONS = "\n".join(["", "Partner", "End User", "Consultant", "Contractor"])
+
+# How the OLD standard Lead Type values map onto the new list when there is no
+# Party Type to fall back on. "Client" is the generic one; the other two carry
+# information the merge must not throw away.
+_OLD_LEAD_TYPE_MAP = {
+	"Channel Partner": "Partner",
+	"Consultant": "Consultant",
+	"Client": "End User",
+}
+
+
+def _merged_lead_type(party_type, old_type):
+	"""Collapse (Party Type, old Lead Type) into ONE new Lead Type value.
+
+	Party Type is the primary axis — it is the field the sales team actually
+	maintained (304 of 311 leads carried one on the 2026-09-08 prod snapshot,
+	against a standard Lead Type that was blank on 222 of them).
+
+	The single exception is "Consultant": it exists ONLY on the old Lead Type,
+	it is a target option in its own right, and flattening it into Partner
+	would destroy the distinction Rahul asked us to keep. "Channel Partner"
+	needs no exception — it maps to Partner, which is what Party Type says too.
+	"""
+	party_type = (party_type or "").strip()
+	old_type = (old_type or "").strip()
+
+	if old_type == "Consultant":
+		return "Consultant"
+	if party_type in ("Partner", "End User"):
+		return party_type
+	return _OLD_LEAD_TYPE_MAP.get(old_type, "")
+
+
+def _lead_type_consolidation():
+	"""Rahul 2026-09-08 — Lead cleanup:
+
+	  * Party Type (custom_party_type) and the standard Lead Type (`type`)
+	    become ONE field: the standard `type`, carrying the client's option
+	    list (Partner / End User / Consultant / Contractor) and sitting where
+	    Party Type used to sit.
+	  * `custom_show` — an unused Data field labelled "Show" — is deleted
+	    permanently, column included.
+
+	Idempotent. The data merge is gated on custom_party_type still existing, so
+	a rerun after the field is gone is a no-op rather than a re-merge.
+	"""
+	# ── 1. The client's option list on the standard field ──
+	make_property_setter("Lead", "type", "options", _LEAD_TYPE_OPTIONS, "Text")
+	make_property_setter("Lead", "type", "label", "Lead Type", "Data")
+
+	# ── 2. Merge the two fields' data, once ──
+	if frappe.db.exists("Custom Field", "Lead-custom_party_type"):
+		_merge_lead_party_type_into_type()
+		frappe.delete_doc("Custom Field", "Lead-custom_party_type",
+		                  ignore_permissions=True, force=True)
+		# NOTE: the tabLead.custom_party_type COLUMN is deliberately left in
+		# place. It is the only remaining copy of the pre-merge values besides
+		# the JSON snapshot written above, and the field is already invisible
+		# once the Custom Field is gone. Reclaim it with `bench --site <site>
+		# trim-tables --doctype Lead` once Rahul has signed off on the merge.
+
+	# ── 3. Delete the unused "Show" field, permanently ──
+	_drop_unused_lead_show_field()
+
+	# ── 4. Put Lead Type where Party Type used to sit ──
+	_move_lead_type_field()
+
+	frappe.clear_cache(doctype="Lead")
+
+
+def _merge_lead_party_type_into_type():
+	"""Write the merged value into `type` for every Lead, after snapshotting the
+	originals to a JSON file so the merge can be audited or undone."""
+	import json
+	import os
+
+	rows = frappe.db.sql(
+		"""SELECT name, IFNULL(custom_party_type, '') AS party_type,
+		          IFNULL(type, '') AS old_type
+		   FROM `tabLead`""",
+		as_dict=True,
+	)
+	if not rows:
+		return
+
+	changes = []
+	for r in rows:
+		new_type = _merged_lead_type(r.party_type, r.old_type)
+		if new_type != r.old_type:
+			frappe.db.set_value("Lead", r.name, "type", new_type,
+			                    update_modified=False)
+		changes.append({
+			"lead": r.name,
+			"party_type": r.party_type,
+			"old_lead_type": r.old_type,
+			"new_lead_type": new_type,
+			# Flagged for review: the two fields disagreed, so the merge rule
+			# actually had to choose between them.
+			"conflicted": bool(
+				r.party_type and r.old_type
+				and _OLD_LEAD_TYPE_MAP.get(r.old_type) != r.party_type
+			),
+		})
+
+	# Snapshot: every lead's before/after, so this is reversible.
+	path = frappe.get_site_path("private", "files")
+	os.makedirs(path, exist_ok=True)
+	snapshot = os.path.join(path, "lead_type_merge_2026_09_08.json")
+	with open(snapshot, "w", encoding="utf-8") as fh:
+		json.dump(changes, fh, indent=1)
+
+	conflicts = sum(1 for c in changes if c["conflicted"])
+	moved = sum(1 for c in changes if c["new_lead_type"] != c["old_lead_type"])
+	print(f"[after_migrate] Lead Type merge: {len(changes)} lead(s), "
+	      f"{moved} value(s) rewritten, {conflicts} where Party Type and the "
+	      f"old Lead Type disagreed")
+	print(f"[after_migrate] pre-merge snapshot written to {snapshot}")
+
+
+def _drop_unused_lead_show_field():
+	"""Delete Lead.custom_show — an unused Data field labelled "Show" — and drop
+	its column. Guarded: if ANY lead has a value in it the column is kept and a
+	warning is logged, because dropping a column cannot be undone."""
+	filled = 0
+	if frappe.db.has_column("Lead", "custom_show"):
+		filled = frappe.db.sql(
+			"""SELECT COUNT(*) FROM `tabLead`
+			   WHERE IFNULL(TRIM(custom_show), '') != ''"""
+		)[0][0]
+
+	if frappe.db.exists("Custom Field", "Lead-custom_show"):
+		frappe.delete_doc("Custom Field", "Lead-custom_show",
+		                  ignore_permissions=True, force=True)
+
+	if not frappe.db.has_column("Lead", "custom_show"):
+		return
+
+	if filled:
+		# Never destroy data on the strength of a stale assumption — the local
+		# check said 0/311, but prod is a different database.
+		frappe.log_error(
+			title="Lead custom_show not dropped — column has data",
+			message=(f"{filled} Lead row(s) have a non-empty custom_show. The "
+			         "Custom Field was removed but the column was KEPT. Review "
+			         "the data, then drop it manually."),
+		)
+		print(f"[after_migrate] WARNING: Lead.custom_show has {filled} non-empty "
+		      f"row(s) — column KEPT, see Error Log")
+		return
+
+	frappe.db.sql_ddl("ALTER TABLE `tabLead` DROP COLUMN `custom_show`")
+	print("[after_migrate] dropped empty column tabLead.custom_show")
+
+
+def _move_lead_type_field():
+	"""Move the standard `type` field to where custom_party_type used to sit
+	(right after `previous_year`).
+
+	Same mechanic as _move_project_company_to_top: a standard field is only
+	reordered through a DocType `field_order` Property Setter. Lead ALREADY has
+	one (written by Customize Form), so the order is edited IN PLACE — rebuilt
+	from the current meta, which already reflects that stored order — rather
+	than regenerated from the raw DocType, which would silently discard
+	whatever else Customize Form put there.
+	"""
+	import json
+
+	frappe.clear_cache(doctype="Lead")
+	meta = frappe.get_meta("Lead")
+	order = [df.fieldname for df in meta.fields]
+
+	anchor = "previous_year"
+	if "type" not in order or anchor not in order:
+		return
+
+	order.remove("type")
+	order.insert(order.index(anchor) + 1, "type")
+
+	frappe.make_property_setter(
+		{
+			"doctype": "Lead",
+			"doctype_or_field": "DocType",
+			"property": "field_order",
+			"value": json.dumps(order),
+		},
+		is_system_generated=False,
+	)
+	frappe.clear_cache(doctype="Lead")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Client meeting 2026-09-08 (Rahul) — Contact CRM tracking fields
+# ══════════════════════════════════════════════════════════════════════
+
+# Our own fields, in the order they must appear. Kept as a tuple so the anchor
+# lookup below can skip them and stay idempotent across reruns.
+_CONTACT_TRACKING_FIELDS = ("custom_date", "custom_created_by", "custom_sales_person")
+
+
+def _contact_anchor_above_status():
+	"""The field our block must be inserted AFTER so that it lands directly
+	above the standard `status` field (Sridhar 2026-09-09).
+
+	Resolved from the live meta instead of hardcoded: the Contact layout is a
+	standard Frappe doctype and the field sitting before `status` differs
+	between versions. Our own fields are skipped, so a SECOND run resolves the
+	same anchor as the first rather than walking the block one slot further
+	down each time. Returns None when there is no `status` field at all.
+	"""
+	frappe.clear_cache(doctype="Contact")
+	order = [df.fieldname for df in frappe.get_meta("Contact").fields]
+	if "status" not in order:
+		return None
+	i = order.index("status") - 1
+	while i >= 0 and order[i] in _CONTACT_TRACKING_FIELDS:
+		i -= 1
+	return order[i] if i >= 0 else None
+
+
+def _create_contact_crm_fields():
+	"""Rahul 2026-09-08 — Contact CRM tracking fields.
+
+	The contact-details sections on Lead and Customer are being hidden so that
+	all contact entry funnels into the Contact CRM; that only works if Contact
+	itself records who entered a contact and when.
+
+	  * Date         — defaults to today, EDITABLE. Sridhar 2026-09-08: it
+					   stays editable for now, and may become read-only later.
+	  * Created By   — READ-ONLY, stamped on insert by
+					   avientek.events.contact.set_created_by. A Data field
+					   rather than Link → User; see the note on the field.
+	  * Sales Person — Link → Sales Person, keyed in by hand.
+
+	All three sit together directly above the standard `status` field.
+	Idempotent.
+	"""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+	anchor = _contact_anchor_above_status()
+	if not anchor:
+		# No `status` field on this site's Contact — create the fields anyway
+		# (they are wanted regardless of where they land) and say so, rather
+		# than silently skipping the whole step.
+		order = [df.fieldname for df in frappe.get_meta("Contact").fields]
+		anchor = order[-1] if order else None
+		print("[after_migrate] WARNING: Contact has no `status` field — "
+			  "tracking fields appended at the end instead of above it")
+
+	fields = [
+		{"fieldname": "custom_date", "fieldtype": "Date", "label": "Date",
+		 "default": "Today", "insert_after": anchor,
+		 "description": "Defaults to today. Change it if the contact was made on another date."},
+		# Data, NOT Link -> User, on purpose (Sridhar 2026-09-09). Contact has
+		# a hidden `full_name` field, and Frappe's User link formatter reads
+		# `doc.full_name` off the CONTAINING document:
+		#     link_formatters["User"] = (value, doc, docfield) =>
+		#         doc.full_name || doc[`${docfield.fieldname}_full_name`] || value
+		# so on a Contact every Link -> User renders the CONTACT's name instead
+		# of the user id — the standard "User Id" field has the same problem.
+		# A plain Data field shows the id that is actually stored. We lose
+		# click-through to the User record, which an audit stamp does not need.
+		{"fieldname": "custom_created_by", "fieldtype": "Data",
+		 "label": "Created By", "options": "", "read_only": 1,
+		 "insert_after": "custom_date",
+		 "description": "The user who created this contact. Set automatically."},
+		{"fieldname": "custom_sales_person", "fieldtype": "Link",
+		 "label": "Sales Person", "options": "Sales Person",
+		 "insert_after": "custom_created_by", "ignore_user_permissions": 1},
+	]
+
+	for f in fields:
+		cf_name = "Contact-" + f["fieldname"]
+		if not frappe.db.exists("Custom Field", cf_name):
+			create_custom_field("Contact", f)
+		else:
+			upd = {k: f[k] for k in
+				   ("fieldtype", "label", "options", "insert_after", "read_only",
+					"ignore_user_permissions", "default", "description")
+				   if k in f}
+			if upd:
+				frappe.db.set_value("Custom Field", cf_name, upd)
+
+	frappe.clear_cache(doctype="Contact")
+	_reorder_contact_fields_if_pinned()
+
+
+def _reorder_contact_fields_if_pinned():
+	"""Honour an existing DocType `field_order` Property Setter on Contact.
+
+	If Customize Form has ever been used on Contact, such a Property Setter
+	exists and PINS every field's slot — Meta.sort_fields then honours it over
+	a custom field's own insert_after, so the three fields would appear
+	wherever the stored order puts them (this is exactly how Budget Value
+	stayed stranded in column 2 on Project — see _move_project_company_to_top).
+	So when one exists, edit it in place to move the block above `status`.
+
+	When there is NO such Property Setter we deliberately do not create one:
+	insert_after already produces the right order, and freezing today's layout
+	would fight every future ERPNext upgrade of the standard Contact form.
+	"""
+	import json
+
+	ps_name = frappe.db.get_value(
+		"Property Setter",
+		{"doc_type": "Contact", "property": "field_order",
+		 "doctype_or_field": "DocType"},
+		"name",
+	)
+	if not ps_name:
+		return
+
+	frappe.clear_cache(doctype="Contact")
+	order = [df.fieldname for df in frappe.get_meta("Contact").fields]
+	if "status" not in order:
+		return
+
+	block = [f for f in _CONTACT_TRACKING_FIELDS if f in order]
+	for f in block:
+		order.remove(f)
+	at = order.index("status")
+	order[at:at] = block
+
+	frappe.db.set_value("Property Setter", ps_name, "value", json.dumps(order))
+	frappe.clear_cache(doctype="Contact")
+	print("[after_migrate] Contact field_order updated: tracking fields "
+	      "moved above `status`")

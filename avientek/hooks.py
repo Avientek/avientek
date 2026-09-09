@@ -163,7 +163,12 @@ fixtures = [
 					"Brand-custom_show","Brand-custom_contacts","Brand-custom_company_1","Brand-custom_supplier_address","Brand-custom_address",
 					"Lead-custom_date","Lead-custom_designation","Lead-custom_department","Lead-custom_business_size","Lead-custom_industry_rating",
      				"Lead-custom_avientek_rating","Lead-custom_reference_from","Lead-custom_section_break_21cky","Lead-custom_focused_brands","Lead-custom_column_break_wq4gu",
-         			"Lead-custom_show","Lead-custom_credit_limit_and_payment_terms","Lead-custom_payment_terms","Lead-custom_credit_limit","Lead-custom_party_type","Lead-custom_section_break_szjmi","Lead-custom_contact_details","Lead-custom_partner_type",
+					# Rahul 2026-09-08: "Lead-custom_show" (unused "Show" field) and
+					# "Lead-custom_party_type" (merged into the standard Lead Type)
+					# were REMOVED from this list on purpose — leaving them here
+					# would let a fixture sync recreate the very fields
+					# _lead_type_consolidation deletes.
+         			"Lead-custom_credit_limit_and_payment_terms","Lead-custom_payment_terms","Lead-custom_credit_limit","Lead-custom_section_break_szjmi","Lead-custom_contact_details","Lead-custom_partner_type",
 					"Lead Source-custom_column_break_wjdic","Lead Source-custom_country","Lead Source-custom_year","Lead Source-custom_show",
      				"Item Price-custom_date","Item Price-custom_company","Item Price-custom_part_number","Item Price-custom_link","Item Price-custom_standard_price","Item Price-custom_msrp",
                     "Item Price-custom_section_break_wquw3","Item Price-custom_recommended_products","Item Price-custom_must_quote","Item Price-custom_charges_and_percentage","Item Price-custom_shipping__air_","Item Price-custom_shipping__sea_","Item Price-custom_shipping__ddu_",
@@ -288,6 +293,7 @@ doctype_js = {
 	"Supplier Quotation": "public/js/supplier_quotation.js",
 	"Delivery Note": "public/js/delivery_note.js",
 	"Customer": "public/js/customer.js",
+	"Project": "public/js/project.js",
 }
 doctype_list_js = {
 	"Sales Order": ["public/js/sales_order_list.js", "public/js/report_download.js"],
@@ -330,6 +336,10 @@ override_doctype_dashboards = {
 	# Project enhancement (Rahul 2026-08-22, point 9): surface the linked
 	# Quotation(s) in the Project form Connections panel.
 	"Project": "avientek.overrides.project_dashboard.get_data",
+	# Sridhar 2026-09-09: show the converted Customer on the Lead, so the
+	# Lead -> Customer link (which the Project brand fetch walks) is visible
+	# from the Lead form.
+	"Lead": "avientek.overrides.lead_dashboard.get_data",
 }
 
 # Svg Icons
@@ -509,11 +519,24 @@ doc_events = {
     # Project enhancement (Rahul 2026-08-22): stamp Created By on insert;
     # enforce Level-2 approval for status/Expected-Closing-Date changes on an
     # Approved project (see avientek.events.project).
+    # Rahul 2026-09-08: convert the budget to USD at a frozen rate, and mirror
+    # the Lead's Focused Brands (read-only) via the customer.
     "Project": {
         "before_insert": "avientek.events.project.set_created_by",
         "validate": [
             "avientek.events.project.set_parent_sales_person",
             "avientek.events.project.enforce_l2_approval",
+            "avientek.events.project.set_budget_usd",
+            "avientek.events.project.fetch_brands_from_lead",
+        ],
+    },
+    # Contact CRM tracking (Rahul 2026-09-08): stamp the creating user on the
+    # read-only Created By, and default Date to today when nothing supplied it
+    # (the form default covers typed entry; this covers import/API/conversion).
+    "Contact": {
+        "before_insert": [
+            "avientek.events.contact.set_created_by",
+            "avientek.events.contact.set_default_date",
         ],
     },
     "Bank Account": {

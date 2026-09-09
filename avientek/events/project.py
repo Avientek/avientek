@@ -8,11 +8,17 @@ Adds a sales-pipeline layer to Project: a custom status
 a project is Approved, changing its status (to anything but Closed) or its
 Expected Closing Date requires the "Project L2 Approver" role.
 
+Client meeting 2026-09-08 (Rahul) adds two more rules, at the bottom of this
+module: the budget figures are mirrored into read-only USD columns at a FROZEN
+exchange rate, and the Lead's Focused Brands are surfaced read-only on the
+Project via Project.customer -> Customer.lead_name.
+
 The custom fields themselves are created in migrate.py
 (_create_project_enhancement_fields); this module holds the runtime rules.
 """
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 PROJECT_L2_ROLE = "Project L2 Approver"
 _APPROVED = "Approved"
@@ -148,3 +154,210 @@ def enforce_l2_approval(doc, method=None):
               "approval (the <b>{0}</b> role).").format(PROJECT_L2_ROLE),
             title=_("Level 2 Approval Required"),
         )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Client meeting 2026-09-08 (Rahul) — Budget in USD + Brand from Lead
+# ══════════════════════════════════════════════════════════════════════
+USD = "USD"
+
+# The Focused Brands child rows live under this fieldname on BOTH Lead and
+# Project, so the same child DocType ("Focused Brands") is reused verbatim.
+_BRANDS_FIELD = "custom_focused_brands"
+
+
+def _company_currency(company):
+    """Company default currency (AED for the Avientek companies). Empty when
+    the project has no company yet — a brand-new unsaved doc."""
+    if not company:
+        return None
+    return frappe.get_cached_value("Company", company, "default_currency")
+
+
+def _usd_rate(company_currency, on_date=None):
+    """Company currency per 1 USD (e.g. 3.6725 AED = 1 USD).
+
+    Stored on the project so the USD figures stay FROZEN at the rate that was
+    live when the budget was last entered — Rahul 2026-09-08: reporting must
+    not drift with the market. Returns 0.0 when no rate can be resolved, and
+    the caller then leaves the USD fields untouched rather than writing a
+    number we cannot stand behind.
+    """
+    if not company_currency:
+        return 0.0
+    if company_currency == USD:
+        return 1.0
+    try:
+        from erpnext.setup.utils import get_exchange_rate
+        return flt(get_exchange_rate(USD, company_currency, on_date))
+    except Exception:
+        # No Currency Exchange record / provider unreachable. Not fatal — the
+        # project must still save.
+        frappe.log_error(
+            title="Project budget USD conversion: exchange rate lookup failed",
+            message=frappe.get_traceback(),
+        )
+        return 0.0
+
+
+def _budget_inputs_changed(doc):
+    """True when the frozen rate must be re-fetched.
+
+    The ONLY triggers are: a new project, a change to either budget figure, or
+    a change of company currency (which would otherwise leave the stored rate
+    pointing at the wrong currency pair). Editing anything else on the project
+    — status, sales person, dates — deliberately leaves the rate alone.
+    """
+    if doc.is_new():
+        return True
+    before = doc.get_doc_before_save()
+    if not before:
+        return True
+    if flt(before.get("custom_budget_amount")) != flt(doc.get("custom_budget_amount")):
+        return True
+    if flt(before.get("custom_budget_value")) != flt(doc.get("custom_budget_value")):
+        return True
+    # Company (and therefore company currency) switched under a stored rate.
+    if (before.get("custom_company_currency") or "") != (
+        doc.get("custom_company_currency") or ""
+    ):
+        return True
+    return False
+
+
+def set_budget_usd(doc, method=None):
+    """Rahul 2026-09-08: Budget Amount / Budget Value are keyed in the COMPANY
+    currency (AED); mirror both into read-only USD columns.
+
+    Conversion is ALWAYS company currency → USD, never the document currency.
+
+    The rate is frozen: it is fetched when a budget figure is entered and then
+    stored on the project, so the USD columns are stable for reporting. To pick
+    up a newer rate the user re-enters a budget figure and saves — that
+    instruction is on the field descriptions (see migrate.py) so it is visible
+    on the form itself.
+    """
+    company_currency = _company_currency(doc.get("company"))
+    # Stamped so the Currency fields render in the right symbol, and so a
+    # company switch can be detected on the next save.
+    doc.custom_company_currency = company_currency or ""
+
+    amount = flt(doc.get("custom_budget_amount"))
+    value = flt(doc.get("custom_budget_value"))
+
+    if not amount and not value:
+        doc.custom_exchange_rate = 0
+        doc.custom_budget_amount_usd = 0
+        doc.custom_budget_value_usd = 0
+        return
+
+    rate = flt(doc.get("custom_exchange_rate"))
+    if _budget_inputs_changed(doc) or rate <= 0:
+        fresh = _usd_rate(company_currency, doc.get("expected_start_date"))
+        if fresh > 0:
+            rate = fresh
+            doc.custom_exchange_rate = rate
+
+    if rate <= 0:
+        # Leave the USD columns as they are (blank on a new project) and tell
+        # the user why, without blocking the save.
+        frappe.msgprint(
+            _("Could not find a {0} → USD exchange rate, so the USD budget "
+              "columns were not updated. Add a Currency Exchange record and "
+              "re-enter the budget to fill them in.").format(company_currency or "?"),
+            title=_("Exchange Rate Not Found"),
+            indicator="orange",
+        )
+        return
+
+    doc.custom_budget_amount_usd = flt(
+        amount / rate, doc.precision("custom_budget_amount_usd"))
+    doc.custom_budget_value_usd = flt(
+        value / rate, doc.precision("custom_budget_value_usd"))
+
+
+def _lead_for_customer(customer):
+    """The Lead this Customer was converted from, via the standard ERPNext
+    `Customer.lead_name` link. Guarded with has_field because the field is
+    standard-but-optional across ERPNext versions."""
+    if not customer:
+        return None
+    if not frappe.get_meta("Customer").has_field("lead_name"):
+        return None
+    return frappe.db.get_value("Customer", customer, "lead_name")
+
+
+def fetch_brands_from_lead(doc, method=None):
+    """Rahul 2026-09-08: show the Lead's Focused Brands on the Project.
+
+    Chain (all standard links, no new link field needed):
+        Project.customer → Customer.lead_name → Lead.custom_focused_brands
+
+    The table is READ-ONLY and purely for reading the data at a glance, so it
+    is rebuilt from the Lead on every save rather than being editable and
+    drifting out of sync. A customer that was keyed in manually (rather than
+    converted from a Lead) has no `lead_name`, and the table stays empty.
+    """
+    lead = _lead_for_customer(doc.get("customer"))
+    brands = []
+    if lead:
+        brands = frappe.get_all(
+            "Focused Brands",
+            filters={
+                "parent": lead,
+                "parenttype": "Lead",
+                "parentfield": _BRANDS_FIELD,
+            },
+            pluck="brand",
+            order_by="idx asc",
+        )
+
+    brands = [b for b in brands if b]
+
+    # No-op when already in sync. Rebuilding the table unconditionally would
+    # delete and re-insert child rows on EVERY project save (new row names, a
+    # Version entry each time) for a table the user cannot even edit.
+    if [r.brand for r in (doc.get(_BRANDS_FIELD) or [])] == brands:
+        return
+
+    doc.set(_BRANDS_FIELD, [])
+    for brand in brands:
+        doc.append(_BRANDS_FIELD, {"brand": brand})
+
+
+# ── Form-side helpers (public/js/project.js) ──────────────────────────
+@frappe.whitelist()
+def get_budget_usd_preview(company, budget_amount=0, budget_value=0):
+    """Live preview for the form: the SAME numbers set_budget_usd will store,
+    so the user sees the conversion the moment they leave the budget field
+    instead of only after a save. Python stays the single source of truth for
+    the arithmetic."""
+    company_currency = _company_currency(company)
+    rate = _usd_rate(company_currency)
+    if rate <= 0:
+        return {"company_currency": company_currency, "exchange_rate": 0}
+    return {
+        "company_currency": company_currency,
+        "exchange_rate": rate,
+        "budget_amount_usd": flt(flt(budget_amount) / rate, 2),
+        "budget_value_usd": flt(flt(budget_value) / rate, 2),
+    }
+
+
+@frappe.whitelist()
+def get_lead_brands(customer):
+    """Focused Brands of the Lead behind this customer, for the form to render
+    as soon as the customer is picked (mirrors fetch_brands_from_lead)."""
+    lead = _lead_for_customer(customer)
+    if not lead:
+        return {"lead": None, "brands": []}
+    return {
+        "lead": lead,
+        "brands": frappe.get_all(
+            "Focused Brands",
+            filters={"parent": lead, "parenttype": "Lead",
+                     "parentfield": _BRANDS_FIELD},
+            pluck="brand",
+            order_by="idx asc",
+        ),
+    }

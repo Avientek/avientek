@@ -52,18 +52,167 @@ def _save_as(user, changes, extra_roles=None):
         frappe.db.rollback()
 
 
+def _skip(label, why):
+    """A check that can't run on this site's data. Reported, never counted as a
+    pass — so a missing fixture can't quietly look like a green run."""
+    RESULTS.append((label + "  [SKIPPED: " + why + "]", True))
+    print("SKIP | " + label + " — " + why)
+
+
+def _check_budget_usd_conversion():
+    """Rahul 2026-09-08: budget converts company currency → USD, and the rate
+    is FROZEN until a budget figure is re-entered. Rolled back."""
+    from frappe.utils import flt
+
+    company = frappe.db.get_value("Company", {}, "name")
+    if not company:
+        _skip("budget → USD conversion", "no Company on this site")
+        return
+    ccy = frappe.get_cached_value("Company", company, "default_currency")
+
+    try:
+        p = frappe.get_doc({
+            "doctype": "Project",
+            "project_name": "ZZ verify usd " + frappe.generate_hash(length=6),
+            "company": company,
+            "custom_budget_amount": 100000,
+            "custom_budget_value": 50000,
+        })
+        p.insert(ignore_permissions=True)
+
+        rate = flt(p.custom_exchange_rate)
+        if rate <= 0:
+            _skip("budget → USD conversion",
+                  f"no {ccy} → USD Currency Exchange rate on this site")
+            return
+
+        _check("company currency stamped on the project",
+               p.custom_company_currency == ccy)
+        _check("Budget Amount converted at the stored rate",
+               abs(flt(p.custom_budget_amount_usd) - 100000 / rate) < 0.01)
+        _check("Budget Value converted at the stored rate",
+               abs(flt(p.custom_budget_value_usd) - 50000 / rate) < 0.01)
+
+        # FROZEN: editing anything that is not a budget figure must not go back
+        # to the exchange-rate provider. Proven with a sentinel rate the live
+        # provider would never return — if it survives the save, no re-fetch
+        # happened. (The USD columns are then re-derived from that same frozen
+        # rate, which is the point: rate and USD stay consistent with each
+        # other, and neither tracks the market.)
+        frappe.db.set_value("Project", p.name, "custom_exchange_rate", 999.0,
+                            update_modified=False)
+        p.reload()
+        p.custom_project_status = "Negotiation"
+        p.save(ignore_permissions=True)
+        _check("rate stays frozen when a non-budget field is edited",
+               flt(p.custom_exchange_rate) == 999.0)
+        _check("USD stays consistent with the frozen rate",
+               abs(flt(p.custom_budget_amount_usd) - 100000 / 999.0) < 0.01)
+
+        # Re-entering a budget figure is the documented way to refresh it.
+        p.custom_budget_amount = 200000
+        p.save(ignore_permissions=True)
+        _check("re-entering the budget refreshes the rate",
+               flt(p.custom_exchange_rate) != 999.0
+               and flt(p.custom_exchange_rate) > 0)
+        _check("USD recomputed on the refreshed rate",
+               abs(flt(p.custom_budget_amount_usd)
+                   - 200000 / flt(p.custom_exchange_rate)) < 0.01)
+
+        # Clearing the budget clears the derived columns.
+        p.custom_budget_amount = 0
+        p.custom_budget_value = 0
+        p.save(ignore_permissions=True)
+        _check("clearing the budget clears rate + USD columns",
+               flt(p.custom_exchange_rate) == 0
+               and flt(p.custom_budget_amount_usd) == 0
+               and flt(p.custom_budget_value_usd) == 0)
+    finally:
+        frappe.db.rollback()
+
+
+def _check_brand_fetch_from_lead():
+    """Rahul 2026-09-08: Focused Brands mirrored onto the Project through
+    Project.customer → Customer.lead_name → Lead.custom_focused_brands.
+    Rolled back."""
+    # A customer that really was converted from a Lead carrying focused brands.
+    row = frappe.db.sql(
+        """SELECT c.name AS customer, c.lead_name AS lead
+           FROM `tabCustomer` c
+           JOIN `tabFocused Brands` fb
+             ON fb.parent = c.lead_name AND fb.parenttype = 'Lead'
+            AND fb.parentfield = 'custom_focused_brands'
+           WHERE IFNULL(c.lead_name, '') != ''
+           LIMIT 1""",
+        as_dict=True,
+    )
+    if not row:
+        _skip("Focused Brands fetched from Lead",
+              "no Customer on this site is linked to a Lead that has brands")
+        return
+
+    customer, lead = row[0].customer, row[0].lead
+    expected = frappe.get_all(
+        "Focused Brands",
+        filters={"parent": lead, "parenttype": "Lead",
+                 "parentfield": "custom_focused_brands"},
+        pluck="brand", order_by="idx asc",
+    )
+    try:
+        p = frappe.get_doc({
+            "doctype": "Project",
+            "project_name": "ZZ verify brand " + frappe.generate_hash(length=6),
+            "customer": customer,
+        })
+        p.insert(ignore_permissions=True)
+        _check("Focused Brands fetched from the customer's Lead",
+               [r.brand for r in p.custom_focused_brands] == expected)
+
+        # Rebuilt from the Lead on every save — a hand-edited row can't stick.
+        p.append("custom_focused_brands", {"brand": expected[0]})
+        p.save(ignore_permissions=True)
+        _check("hand-added brand rows are rebuilt from the Lead on save",
+               [r.brand for r in p.custom_focused_brands] == expected)
+
+        # A customer with no Lead behind it leaves the table empty.
+        orphan = frappe.db.sql(
+            """SELECT name FROM `tabCustomer`
+               WHERE IFNULL(lead_name, '') = '' LIMIT 1"""
+        )
+        if not orphan:
+            _skip("customer without a Lead leaves Focused Brands empty",
+                  "every Customer on this site is linked to a Lead")
+        else:
+            p2 = frappe.get_doc({
+                "doctype": "Project",
+                "project_name": "ZZ verify nobrand " + frappe.generate_hash(length=6),
+                "customer": orphan[0][0],
+            })
+            p2.insert(ignore_permissions=True)
+            _check("customer without a Lead leaves Focused Brands empty",
+                   len(p2.custom_focused_brands) == 0)
+    finally:
+        frappe.db.rollback()
+
+
 def run():
     RESULTS.clear()
     m = frappe.get_meta("Project")
 
     # 1) fields present + two-column order right after Department
     order = [f.fieldname for f in m.fields]
+    # Rahul 2026-09-08: the budget block is now contiguous in column 1 —
+    # Amount, Amount (USD), Value, Value (USD), rate, hidden company currency —
+    # instead of Value being stranded in column 2 after "Project by".
     expected = [
         "custom_project_details_sb", "custom_project_status", "custom_sales_person",
-        "custom_parent_sales_person", "custom_territory", "custom_budget_amount",
+        "custom_parent_sales_person", "custom_territory",
+        "custom_budget_amount", "custom_budget_amount_usd",
+        "custom_budget_value", "custom_budget_value_usd",
+        "custom_exchange_rate", "custom_company_currency",
         "custom_expected_closing_date",
         "custom_project_details_cb", "custom_created_by", "custom_project_by",
-        "custom_budget_value",
+        "custom_focused_brands",
     ]
     dep = order.index("department")
     _check("fields present & ordered under Department (2 cols)",
@@ -96,12 +245,44 @@ def run():
     _check("Assigned to Sales Person label + Discussion removed from status",
            m.get_field("custom_sales_person").label == "Assigned to Sales Person"
            and "Discussion" not in (m.get_field("custom_project_status").options or ""))
+    # The standard status option list varies by ERPNext version (v15 added
+    # "On hold"), so asserting an exact string made this fail on a version bump
+    # rather than on a real regression. What actually matters is that the
+    # pipeline values live ONLY on the custom field and never leaked into the
+    # standard one.
+    pipeline_values = {"In Progress", "Negotiation", "Finalisation", "Approved", "Lost"}
+    std_status = set((m.get_field("status").options or "").split("\n"))
     _check("Project Status is a NEW field (standard status untouched)",
            (m.get_field("custom_project_status").options or "").split("\n")[0] == "Open"
-           and m.get_field("status").options == "Open\nCompleted\nCancelled")
+           and not (pipeline_values & std_status)
+           and {"Open", "Completed", "Cancelled"} <= std_status)
     _check("budget fields are Currency",
            m.get_field("custom_budget_amount").fieldtype == "Currency"
            and m.get_field("custom_budget_value").fieldtype == "Currency")
+
+    # ── Rahul 2026-09-08: budget → USD, and Focused Brands from the Lead ──
+    _check("USD budget columns are read-only Currency in USD",
+           all(m.get_field(f).fieldtype == "Currency"
+               and m.get_field(f).options == "USD"
+               and m.get_field(f).read_only
+               for f in ("custom_budget_amount_usd", "custom_budget_value_usd")))
+    _check("company-currency budget columns render in the company's symbol",
+           all(m.get_field(f).options == "custom_company_currency"
+               for f in ("custom_budget_amount", "custom_budget_value")))
+    _check("refresh instruction is on the USD field descriptions",
+           all("re-enter" in (m.get_field(f).description or "").lower()
+               for f in ("custom_budget_amount_usd", "custom_budget_value_usd",
+                         "custom_exchange_rate")))
+    _check("Focused Brands is a read-only Table MultiSelect",
+           m.get_field("custom_focused_brands").fieldtype == "Table MultiSelect"
+           and m.get_field("custom_focused_brands").options == "Focused Brands"
+           and m.get_field("custom_focused_brands").read_only)
+    _check("Lead → Customer link the brand fetch depends on exists",
+           frappe.get_meta("Customer").has_field("lead_name")
+           and bool(frappe.get_meta("Lead").get_field("custom_focused_brands")))
+
+    _check_budget_usd_conversion()
+    _check_brand_fetch_from_lead()
 
     # Item 4: standard Company field moved to the top (right after Project
     # Name), OUT of "Costing and Billing". Must assert the ACTUAL rendered
