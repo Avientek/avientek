@@ -780,3 +780,61 @@ def get_previous_doc_rate_and_currency(item_list):
 			if po_details[0] and po_details[0].get("rate"):
 				item["rate"] = po_details[0].get("rate")
 	return item_list
+
+
+def autofill_foreign_conversion_rate(doc, method=None):
+	"""before_validate: guarantee a foreign-currency document carries the real
+	transaction-currency -> company-currency exchange rate, so its base
+	(company-currency) amounts and stock valuation are actually converted.
+
+	Generic sibling of avientek.events.purchase_order.autofill_foreign_conversion_rate
+	(Sammish 2026-08-05, PR #19) for documents whose date field is `posting_date`
+	rather than `transaction_date`.
+
+	SUP-2026-00048 / GRN-KSA-26-00149 (Jithin 2026-09-09): a USD Purchase Receipt
+	on AVIENTEK TRADING LLC (base SAR) saved with conversion_rate = 1.0, so every
+	base/SAR amount equalled the USD amount (SAR 42,500 instead of ~SAR 159,375)
+	and the received stock posted to the ledger undervalued ~3.75x. The PO guard
+	was never wired to Purchase Receipt, so a GRN keyed directly (not pulled from
+	a PO) slipped through with the default 1.0.
+
+	Fix: whenever the transaction currency differs from the company's default
+	currency but conversion_rate is missing or 1.0 (the tell-tale of an
+	unconverted foreign document — none of the currencies Avientek deals in is
+	pegged 1:1 to a base currency), pull the real rate from Currency Exchange and
+	set it here, in before_validate, so the controller then recomputes every base
+	amount and valuation_rate correctly. If no system rate exists, block the save
+	with a clear message rather than persist a wrong 1.0. A genuine, non-1.0 rate
+	already set is left untouched.
+	"""
+	from erpnext.setup.utils import get_exchange_rate
+	from frappe.utils import flt, nowdate
+
+	if not doc.get("currency") or not doc.get("company"):
+		return
+	company_currency = frappe.get_cached_value("Company", doc.company, "default_currency")
+	if not company_currency or doc.currency == company_currency:
+		return  # base-currency document — conversion_rate 1.0 is correct
+
+	rate = flt(doc.get("conversion_rate"))
+	if rate and abs(rate - 1.0) > 1e-9:
+		return  # a real (non-1.0) foreign rate is already set — respect it
+
+	txn_date = doc.get("transaction_date") or doc.get("posting_date") or nowdate()
+	sys_rate = flt(get_exchange_rate(doc.currency, company_currency, txn_date))
+	if sys_rate and abs(sys_rate - 1.0) > 1e-9:
+		doc.conversion_rate = sys_rate
+		frappe.msgprint(
+			_("Exchange rate for {0} → {1} was set to {2} from Currency Exchange "
+			  "(it was left at 1.0). Base amounts recalculated.").format(
+				doc.currency, company_currency, sys_rate),
+			indicator="blue", alert=True,
+		)
+	else:
+		frappe.throw(
+			_("{0} is in {1} but has no valid exchange rate to the company "
+			  "currency {2} for {3}. Set the correct conversion rate (or add a "
+			  "Currency Exchange record) before saving — a rate of 1.0 would book "
+			  "base amounts equal to the {1} amounts.").format(
+				_(doc.doctype), doc.currency, company_currency, txn_date)
+		)

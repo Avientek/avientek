@@ -846,6 +846,12 @@ doc_events = {
             # clubbing rule belongs at Purchase Invoice. Same patch
             # shared with Quotation / SO / DN / PO.
             "avientek.overrides.india_gst_quotation.install_patch",
+            # Jithin 2026-09-09 (SUP-2026-00048, GRN-KSA-26-00149): a USD
+            # GRN on the SAR company saved with conversion_rate 1.0 booked
+            # stock ~3.75x undervalued. The Purchase Order guard was never
+            # applied here — pull the real FX rate when a foreign-currency
+            # GRN is left at 1.0. Same guard as PO's autofill.
+            "avientek.events.utils.autofill_foreign_conversion_rate",
         ],
         "before_save": "avientek.events.utils.validate_date_sanity",
         "validate": [
