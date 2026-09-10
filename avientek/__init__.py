@@ -1151,70 +1151,66 @@ def _patch_query_report_export_keeps_date_typed():
 	except Exception:
 		return
 
-	from frappe.utils import format_duration
 	import datetime as _dt
 
-	def _patched_format_fields(data):
-		for i, col in enumerate(data.columns):
-			if col.get("fieldtype") == "Duration":
-				for row in data.result:
-					index = col.get("fieldname") if isinstance(row, dict) else i
-					val = row.get(index) if isinstance(row, dict) else row[index]
-					if val:
-						row[index] = format_duration(val)
-			elif col.get("fieldtype") == "Currency" and col.get("precision"):
-				for row in data.result:
-					index = col.get("fieldname") if isinstance(row, dict) else i
-					val = row.get(index) if isinstance(row, dict) else row[index]
-					if val:
-						row[index] = round(val, col.get("precision"))
-			elif col.get("fieldtype") in ("Date", "Datetime"):
-				# Sammish 2026-06-25 (Sridhar TSK-2026-00383 TC3/TC4/TC7
-				# failures on qcs-avntk-test): skip formatdate() to keep
-				# date objects typed — AND coerce stray empty-string /
-				# non-date values in this column to None so Excel's
-				# column-type inference still classifies the column as
-				# Date.
-				#
-				# Background: reports like General Ledger and Sales
-				# Register insert SUMMARY rows (Opening / Total /
-				# Closing / opening_row) as dicts that lack the
-				# posting_date key entirely. xlsxutils.build_xlsx_data
-				# falls back to `row.get(fieldname, row.get(label, ""))`
-				# → "" (empty string) → Excel writes that as a TEXT
-				# cell. Even ONE text cell in the column makes Excel's
-				# AutoFilter classify the whole column as text →
-				# Text Filters dropdown + flat string list instead of
-				# the Date Filters tree (year → month → day).
-				#
-				# Coercing "" / non-date strings to None makes openpyxl
-				# emit an empty cell (not a text cell with empty
-				# content), so the column stays cleanly typed as Date.
-				# Genuine date-strings (rare but possible from raw SQL)
-				# are left untouched so make_xlsx's coercion path can
-				# still try to parse them.
-				for row in data.result:
-					index = col.get("fieldname") if isinstance(row, dict) else i
-					if isinstance(row, dict):
-						val = row.get(index)
-					else:
-						try:
-							val = row[index]
-						except (IndexError, TypeError):
-							continue
-					# Leave real date/datetime objects alone (they're
-					# what we WANT make_xlsx to receive raw).
-					if isinstance(val, (_dt.date, _dt.datetime)):
-						continue
-					# Coerce empty/whitespace strings + None to None so
-					# the summary-row cells become empty Excel cells
-					# instead of text cells.
-					if val is None or (isinstance(val, str) and not val.strip()):
-						if isinstance(row, dict):
-							row[index] = None
-						else:
-							row[index] = None
+	core_format_fields = getattr(qr_mod, "format_fields", None)
+	if core_format_fields is None:
+		return
+	# Idempotent — never wrap our own wrapper (e.g. a re-import at runtime).
+	if getattr(core_format_fields, "_avientek_wrapped", False):
+		return
 
+	def _patched_format_fields(data, *args, **kwargs):
+		# Sammish 2026-09-10 (SUP-2026-00048.. helpdesk #0534, "unable to
+		# export reports to Excel"): after the prod Frappe upgrade, core
+		# changed the signature to format_fields(data, file_format_type) and
+		# _export_query now calls it with TWO args. Our old override took only
+		# `data`, so every Query Report export raised
+		# `TypeError: _patched_format_fields() takes 1 positional argument but
+		# 2 were given` → the whole export crashed with a Server Error.
+		#
+		# The upgrade ALSO fixed, in core, the very thing this patch was born
+		# for (Sammish 2026-06-20): core now keeps Date/Datetime columns typed
+		# for Excel (stringify_dates = file_format_type != "Excel") so Excel
+		# can sort/filter by real dates. So we no longer reimplement core —
+		# we DELEGATE to it (passing every arg straight through, which keeps
+		# this working on both the old 1-arg core and the new 2-arg core).
+		#
+		# The only behaviour core still doesn't cover is the summary-row date
+		# fix (Sridhar TSK-2026-00383 TC3/TC4/TC7): General Ledger / Sales
+		# Register etc. add Opening / Total / Closing rows that lack the date
+		# key, so xlsxutils falls back to "" (a TEXT cell) and even one such
+		# cell makes Excel's AutoFilter classify the whole Date column as text
+		# (flat string list instead of the year→month→day Date Filters tree).
+		# We coerce those empty/blank cells to None AFTER core runs, so Excel
+		# emits an empty cell and the column stays cleanly typed as Date.
+		core_format_fields(data, *args, **kwargs)
+
+		# Coercion only matters for Excel (CSV cells are strings anyway, and
+		# core already stringified dates for the non-Excel path).
+		file_format_type = args[0] if args else kwargs.get("file_format_type")
+		if file_format_type not in (None, "Excel"):
+			return
+		for i, col in enumerate(data.columns):
+			if col.get("fieldtype") not in ("Date", "Datetime"):
+				continue
+			for row in data.result:
+				index = col.get("fieldname") if isinstance(row, dict) else i
+				if isinstance(row, dict):
+					val = row.get(index)
+				else:
+					try:
+						val = row[index]
+					except (IndexError, TypeError):
+						continue
+				# Leave real date/datetime objects (and any value core turned
+				# into a non-empty string) alone.
+				if isinstance(val, (_dt.date, _dt.datetime)):
+					continue
+				if val is None or (isinstance(val, str) and not val.strip()):
+					row[index] = None
+
+	_patched_format_fields._avientek_wrapped = True
 	qr_mod.format_fields = _patched_format_fields
 
 
