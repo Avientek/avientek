@@ -1621,3 +1621,74 @@ except Exception:
 # Sales Invoice validate — importing ksa_compliance here would be a
 # circular import (ksa is still initializing while avientek loads).
 
+
+def _patch_get_loyalty_programs_reserved_word_safe():
+	"""Backtick the `to_date` identifier in ERPNext core's get_loyalty_programs.
+
+	Sammish 2026-09-11: core erpnext.selling.doctype.customer.customer
+	.get_loyalty_programs filters Loyalty Program with the raw key
+	`ifnull(to_date, '2500-01-01')` — an UNQUOTED `to_date`. MariaDB 12.x
+	reserves TO_DATE, so that identifier is a 1064 syntax error, which breaks
+	Customer.set_loyalty_program() → EVERY Lead→Customer conversion (e.g.
+	converting a Lead-based Quotation to a Sales Order:
+	pymysql ProgrammingError 1064 near "'2500-01-01') >= ...").
+
+	Fix: replace the function with a faithful copy that backticks the column
+	(`ifnull(\\`to_date\\`, '2500-01-01')`) — a plain quoted identifier that
+	parses on every MariaDB version. Behaviour is identical (NULL to_date is
+	still treated as far-future); the customer_group / territory matching loop
+	is unchanged and still calls the core get_nested_links. The internal call
+	inside set_loyalty_program resolves the module global at call time, so
+	patching the module attribute covers it too.
+
+	Local dev bench runs MariaDB 12.3.2 (affected). Prod's older MariaDB is not
+	yet affected, so this is a forward-safe no-op there until FC upgrades.
+	Idempotent — replaces the function once at app load.
+	"""
+	import frappe  # __init__.py has no module-level `import frappe`
+	try:
+		import erpnext.selling.doctype.customer.customer as _cust
+	except Exception:
+		return
+	# Idempotent: don't re-wrap if already patched.
+	if getattr(_cust.get_loyalty_programs, "__name__", "") == "_patched_get_loyalty_programs":
+		return
+	from frappe.utils import today as _today
+
+	@frappe.whitelist()
+	def _patched_get_loyalty_programs(doc):
+		lp_details = []
+		loyalty_programs = frappe.get_all(
+			"Loyalty Program",
+			fields=["name", "customer_group", "customer_territory"],
+			filters={
+				"auto_opt_in": 1,
+				"from_date": ["<=", _today()],
+				"ifnull(`to_date`, '2500-01-01')": [">=", _today()],
+			},
+		)
+		for lp in loyalty_programs:
+			if (
+				not lp.customer_group
+				or doc.customer_group
+				in _cust.get_nested_links(
+					"Customer Group", lp.customer_group, doc.flags.ignore_permissions
+				)
+			) and (
+				not lp.customer_territory
+				or doc.territory
+				in _cust.get_nested_links(
+					"Territory", lp.customer_territory, doc.flags.ignore_permissions
+				)
+			):
+				lp_details.append(lp.name)
+		return lp_details
+
+	_cust.get_loyalty_programs = _patched_get_loyalty_programs
+
+
+try:
+	_patch_get_loyalty_programs_reserved_word_safe()
+except Exception:
+	pass
+
