@@ -8,10 +8,13 @@ Adds a sales-pipeline layer to Project: a custom status
 a project is Approved, changing its status (to anything but Closed) or its
 Expected Closing Date requires the "Project L2 Approver" role.
 
-Client meeting 2026-09-08 (Rahul) adds two more rules, at the bottom of this
+Client meeting 2026-09-08 (Rahul) adds one more rule, at the bottom of this
 module: the budget figures are mirrored into read-only USD columns at a FROZEN
-exchange rate, and the Lead's Focused Brands are surfaced read-only on the
-Project via Project.customer -> Customer.lead_name.
+exchange rate.
+
+The Focused Brands table on Project is keyed in by hand, exactly like the one
+on Lead — an earlier auto-fetch from the customer's Lead was cancelled by the
+client on 2026-09-10, so there is deliberately no brand logic here.
 
 The custom fields themselves are created in migrate.py
 (_create_project_enhancement_fields); this module holds the runtime rules.
@@ -152,14 +155,9 @@ def enforce_l2_approval(doc, method=None):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Client meeting 2026-09-08 (Rahul) — Budget in USD + Brand from Lead
+# Client meeting 2026-09-08 (Rahul) — Budget in USD
 # ══════════════════════════════════════════════════════════════════════
 USD = "USD"
-
-# The Focused Brands child rows live under this fieldname on BOTH Lead and
-# Project, so the same child DocType ("Focused Brands") is reused verbatim.
-_BRANDS_FIELD = "custom_focused_brands"
-
 
 def _company_currency(company):
     """Company default currency (AED for the Avientek companies). Empty when
@@ -271,55 +269,6 @@ def set_budget_usd(doc, method=None):
         value / rate, doc.precision("custom_budget_value_usd"))
 
 
-def _lead_for_customer(customer):
-    """The Lead this Customer was converted from, via the standard ERPNext
-    `Customer.lead_name` link. Guarded with has_field because the field is
-    standard-but-optional across ERPNext versions."""
-    if not customer:
-        return None
-    if not frappe.get_meta("Customer").has_field("lead_name"):
-        return None
-    return frappe.db.get_value("Customer", customer, "lead_name")
-
-
-def fetch_brands_from_lead(doc, method=None):
-    """Rahul 2026-09-08: show the Lead's Focused Brands on the Project.
-
-    Chain (all standard links, no new link field needed):
-        Project.customer → Customer.lead_name → Lead.custom_focused_brands
-
-    The table is READ-ONLY and purely for reading the data at a glance, so it
-    is rebuilt from the Lead on every save rather than being editable and
-    drifting out of sync. A customer that was keyed in manually (rather than
-    converted from a Lead) has no `lead_name`, and the table stays empty.
-    """
-    lead = _lead_for_customer(doc.get("customer"))
-    brands = []
-    if lead:
-        brands = frappe.get_all(
-            "Focused Brands",
-            filters={
-                "parent": lead,
-                "parenttype": "Lead",
-                "parentfield": _BRANDS_FIELD,
-            },
-            pluck="brand",
-            order_by="idx asc",
-        )
-
-    brands = [b for b in brands if b]
-
-    # No-op when already in sync. Rebuilding the table unconditionally would
-    # delete and re-insert child rows on EVERY project save (new row names, a
-    # Version entry each time) for a table the user cannot even edit.
-    if [r.brand for r in (doc.get(_BRANDS_FIELD) or [])] == brands:
-        return
-
-    doc.set(_BRANDS_FIELD, [])
-    for brand in brands:
-        doc.append(_BRANDS_FIELD, {"brand": brand})
-
-
 # ── Form-side helpers (public/js/project.js) ──────────────────────────
 @frappe.whitelist()
 def get_budget_usd_preview(company, budget_amount=0, budget_value=0):
@@ -339,20 +288,39 @@ def get_budget_usd_preview(company, budget_amount=0, budget_value=0):
     }
 
 
-@frappe.whitelist()
-def get_lead_brands(customer):
-    """Focused Brands of the Lead behind this customer, for the form to render
-    as soon as the customer is picked (mirrors fetch_brands_from_lead)."""
-    lead = _lead_for_customer(customer)
-    if not lead:
-        return {"lead": None, "brands": []}
-    return {
-        "lead": lead,
-        "brands": frappe.get_all(
-            "Focused Brands",
-            filters={"parent": lead, "parenttype": "Lead",
-                     "parentfield": _BRANDS_FIELD},
-            pluck="brand",
-            order_by="idx asc",
-        ),
-    }
+# ══════════════════════════════════════════════════════════════════════
+# Contacts on the Project, Customer-style — Sridhar 2026-09-11
+# ══════════════════════════════════════════════════════════════════════
+# Replaces the 2026-09-10 single Contact link + write-back fields. The Project
+# now works exactly like the Customer's "Address & Contact" section: a list of
+# every Contact linked to the project (through the Contact's `links` Dynamic
+# Link table) with a "New Contact" button, all rendered by Frappe's own
+# frappe.contacts.render_address_and_contact. The Contact record is the only
+# place the details live, so there is nothing to keep in sync.
+#
+# Two things make Frappe's machinery treat Project like Customer:
+#   * an HTML field named exactly `contact_html` (created in migrate.py) — the
+#     renderer draws into it, and the Contact form's Link Document Type picker
+#     only offers doctypes that carry a field of that name;
+#   * `contact_list` in the form's __onload, loaded below.
+
+
+def load_contacts(doc, method=None):
+    """onload: the same contact list Customer.onload builds via
+    load_address_and_contact — contacts only, Project has no addresses."""
+    from frappe.contacts.doctype.contact.contact import get_contact_display_list
+    doc.set_onload("contact_list", get_contact_display_list(doc.doctype, doc.name))
+
+
+def unlink_contacts(doc, method=None):
+    """on_trash: drop this project from its contacts' Links table so the
+    delete isn't blocked by "Project X is linked with Contact Y".
+
+    Deliberately gentler than Customer, which DELETES a contact whose only
+    link is the customer (delete_contact_and_address). A contact made for a
+    project is still a real person in the CRM, so it is kept, just unlinked."""
+    frappe.db.delete("Dynamic Link", {
+        "parenttype": "Contact",
+        "link_doctype": "Project",
+        "link_name": doc.name,
+    })

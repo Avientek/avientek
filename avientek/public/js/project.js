@@ -1,11 +1,18 @@
 // Copyright (c) 2026, Avientek and contributors
 // For license information, please see license.txt
 //
-// Project form helpers — client meeting 2026-09-08 (Rahul):
+// Project form helpers:
 //   1. Budget Amount / Budget Value mirrored into read-only USD columns, at a
 //      rate that is FROZEN until a budget figure is re-entered.
-//   2. Focused Brands shown read-only, fetched from the Lead the selected
-//      customer was converted from.
+//      (client meeting 2026-09-08, Rahul)
+//   2. The two company-currency budget labels carry the company's currency in
+//      brackets, e.g. "Budget Value (AED)", so it is obvious which currency
+//      the figure is keyed in. (2026-09-10)
+//   3. A Contacts section that works like Customer's: linked contacts listed,
+//      plus a "New Contact" button. (2026-09-11)
+//
+// There is deliberately NO brand logic here: the Focused Brands table is keyed
+// in by hand like the Lead's, after the client cancelled the auto-fetch.
 //
 // The arithmetic lives in Python (avientek.events.project) and is re-applied
 // on validate; this file only calls it so the user sees the numbers before
@@ -14,12 +21,15 @@
 frappe.ui.form.on("Project", {
 	refresh(frm) {
 		avientek_project_rate_hint(frm);
+		avientek_project_currency_labels(frm);
+		avientek_project_contacts(frm);
 	},
 
 	company(frm) {
 		// Company (and therefore company currency) changed — the stored rate
 		// now points at the wrong currency pair, so re-rate immediately.
 		avientek_project_convert_budget(frm);
+		avientek_project_currency_labels(frm);
 	},
 
 	custom_budget_amount(frm) {
@@ -28,10 +38,6 @@ frappe.ui.form.on("Project", {
 
 	custom_budget_value(frm) {
 		avientek_project_convert_budget(frm);
-	},
-
-	customer(frm) {
-		avientek_project_fetch_brands(frm);
 	},
 });
 
@@ -85,41 +91,6 @@ function avientek_project_convert_budget(frm) {
 	});
 }
 
-// Mirror the Lead's Focused Brands onto the form. Read-only and rebuilt whole,
-// so it can never drift from the Lead.
-function avientek_project_fetch_brands(frm) {
-	frm.clear_table("custom_focused_brands");
-
-	if (!frm.doc.customer) {
-		frm.refresh_field("custom_focused_brands");
-		return;
-	}
-
-	frappe.call({
-		method: "avientek.events.project.get_lead_brands",
-		args: { customer: frm.doc.customer },
-		callback(r) {
-			const d = r.message || {};
-			(d.brands || []).forEach((brand) => {
-				frm.add_child("custom_focused_brands", { brand: brand });
-			});
-			frm.refresh_field("custom_focused_brands");
-
-			if (!d.lead) {
-				// Not an error — plenty of customers were keyed in directly.
-				// Worth saying once so the empty table isn't read as a bug.
-				frm.get_field("custom_focused_brands").set_description(
-					__("This customer was not created from a Lead, so there are no Focused Brands to show.")
-				);
-			} else {
-				frm.get_field("custom_focused_brands").set_description(
-					__("Fetched from Lead {0}.", [d.lead])
-				);
-			}
-		},
-	});
-}
-
 // Restate the freeze rule next to the rate, including when it was last taken,
 // so nobody has to guess whether the USD figure is current.
 function avientek_project_rate_hint(frm) {
@@ -138,4 +109,42 @@ function avientek_project_rate_hint(frm) {
 		__("1 USD = {0} {1}, frozen. To refresh, re-enter Budget Amount / Budget Value and save.",
 			[format_number(frm.doc.custom_exchange_rate, null, 4), ccy])
 	);
+}
+
+// Show the company's currency in the budget labels — "Budget Amount (AED)" —
+// so it is unambiguous which currency the figure is keyed in. The USD twins
+// are always USD and keep their static labels.
+//
+// Read with frappe.db.get_value rather than frm.doc.custom_company_currency:
+// that field is stamped server-side on validate, so on a freshly opened or
+// brand-new project it is not populated yet. Deliberately does NOT write to
+// the doc — setting a value here would mark an untouched form "Not Saved".
+function avientek_project_currency_labels(frm) {
+	const apply = (ccy) => {
+		const suffix = ccy ? ` (${ccy})` : "";
+		frm.set_df_property("custom_budget_amount", "label", __("Budget Amount") + suffix);
+		frm.set_df_property("custom_budget_value", "label", __("Budget Value") + suffix);
+	};
+
+	if (!frm.doc.company) {
+		apply(null);
+		return;
+	}
+
+	frappe.db.get_value("Company", frm.doc.company, "default_currency").then((r) => {
+		apply((r.message || {}).default_currency);
+	});
+}
+
+// The same call Customer's refresh makes. It draws `__onload.contact_list`
+// (loaded by avientek.events.project.load_contacts) into the contact_html
+// field and wires its "New Contact" button, which opens a new Contact with
+// this project already in its Links table. A new project has no contacts and
+// nothing to link to yet, so the section is cleared instead.
+function avientek_project_contacts(frm) {
+	if (frm.is_new()) {
+		frappe.contacts.clear_address_and_contact(frm);
+	} else {
+		frappe.contacts.render_address_and_contact(frm);
+	}
 }
