@@ -337,8 +337,7 @@ override_doctype_dashboards = {
 	# Quotation(s) in the Project form Connections panel.
 	"Project": "avientek.overrides.project_dashboard.get_data",
 	# Sridhar 2026-09-09: show the converted Customer on the Lead, so the
-	# Lead -> Customer link (which the Project brand fetch walks) is visible
-	# from the Lead form.
+	# Lead -> Customer link is visible from the Lead form.
 	"Lead": "avientek.overrides.lead_dashboard.get_data",
 }
 
@@ -519,16 +518,18 @@ doc_events = {
     # Project enhancement (Rahul 2026-08-22): stamp Created By on insert;
     # enforce Level-2 approval for status/Expected-Closing-Date changes on an
     # Approved project (see avientek.events.project).
-    # Rahul 2026-09-08: convert the budget to USD at a frozen rate, and mirror
-    # the Lead's Focused Brands (read-only) via the customer.
+    # Rahul 2026-09-08: convert the budget to USD at a frozen rate.
+    # Sridhar 2026-09-11: Customer-style Contacts section (list + New Contact
+    # button) — load the linked contacts, and unlink them on delete.
     "Project": {
+        "onload": "avientek.events.project.load_contacts",
         "before_insert": "avientek.events.project.set_created_by",
         "validate": [
             "avientek.events.project.set_parent_sales_person",
             "avientek.events.project.enforce_l2_approval",
             "avientek.events.project.set_budget_usd",
-            "avientek.events.project.fetch_brands_from_lead",
         ],
+        "on_trash": "avientek.events.project.unlink_contacts",
     },
     # Contact CRM tracking (Rahul 2026-09-08): stamp the creating user on the
     # read-only Created By, and default Date to today when nothing supplied it

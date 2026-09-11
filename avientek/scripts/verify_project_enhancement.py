@@ -131,66 +131,59 @@ def _check_budget_usd_conversion():
         frappe.db.rollback()
 
 
-def _check_brand_fetch_from_lead():
-    """Rahul 2026-09-08: Focused Brands mirrored onto the Project through
-    Project.customer → Customer.lead_name → Lead.custom_focused_brands.
-    Rolled back."""
-    # A customer that really was converted from a Lead carrying focused brands.
-    row = frappe.db.sql(
-        """SELECT c.name AS customer, c.lead_name AS lead
-           FROM `tabCustomer` c
-           JOIN `tabFocused Brands` fb
-             ON fb.parent = c.lead_name AND fb.parenttype = 'Lead'
-            AND fb.parentfield = 'custom_focused_brands'
-           WHERE IFNULL(c.lead_name, '') != ''
-           LIMIT 1""",
-        as_dict=True,
-    )
-    if not row:
-        _skip("Focused Brands fetched from Lead",
-              "no Customer on this site is linked to a Lead that has brands")
-        return
+def _check_customer_style_contacts():
+    """Sridhar 2026-09-11: Project lists its linked Contacts with a New Contact
+    button, the same way Customer does. Rolled back."""
+    m = frappe.get_meta("Project")
+    html = m.get_field("contact_html")
+    _check("Project has a `contact_html` HTML field (what the renderer needs)",
+           bool(html) and html.fieldtype == "HTML")
+    _check("old contact fields / separate Contacts section are gone",
+           not any(m.get_field(f) for f in (
+               "custom_contact", "custom_contact_email",
+               "custom_contact_mobile", "custom_contact_designation",
+               "custom_contacts_sb")))
+    # Asserted on the RENDERED order: the field_order Property Setter can pin a
+    # field away from its own insert_after.
+    order = [f.fieldname for f in m.fields]
+    _check("contact list sits in Customer Details, right under Customer",
+           "contact_html" in order and "customer" in order
+           and order.index("contact_html") == order.index("customer") + 1)
 
-    customer, lead = row[0].customer, row[0].lead
-    expected = frappe.get_all(
-        "Focused Brands",
-        filters={"parent": lead, "parenttype": "Lead",
-                 "parentfield": "custom_focused_brands"},
-        pluck="brand", order_by="idx asc",
-    )
+    # The Contact form's "Link Document Type" picker must offer Project.
+    from frappe.contacts.address_and_contact import filter_dynamic_link_doctypes
+    offered = filter_dynamic_link_doctypes(
+        "DocType", "Project", "name", 0, 20,
+        {"fieldtype": "HTML", "fieldname": "contact_html"})
+    _check("Contact links can pick Project as the Link Document Type",
+           ["Project"] in offered)
+
     try:
         p = frappe.get_doc({
             "doctype": "Project",
-            "project_name": "ZZ verify brand " + frappe.generate_hash(length=6),
-            "customer": customer,
-        })
-        p.insert(ignore_permissions=True)
-        _check("Focused Brands fetched from the customer's Lead",
-               [r.brand for r in p.custom_focused_brands] == expected)
+            "project_name": "ZZ verify contacts " + frappe.generate_hash(length=6),
+        }).insert(ignore_permissions=True)
+        c = frappe.get_doc({
+            "doctype": "Contact",
+            "first_name": "ZZ Verify",
+            "links": [{"link_doctype": "Project", "link_name": p.name}],
+        }).insert(ignore_permissions=True)
 
-        # Rebuilt from the Lead on every save — a hand-edited row can't stick.
-        p.append("custom_focused_brands", {"brand": expected[0]})
-        p.save(ignore_permissions=True)
-        _check("hand-added brand rows are rebuilt from the Lead on save",
-               [r.brand for r in p.custom_focused_brands] == expected)
+        from frappe.desk.form.load import run_onload
+        p = frappe.get_doc("Project", p.name)
+        run_onload(p)
+        listed = [r.name for r in (p.get_onload().get("contact_list") or [])]
+        _check("linked contact appears in the Project's contact list",
+               c.name in listed)
 
-        # A customer with no Lead behind it leaves the table empty.
-        orphan = frappe.db.sql(
-            """SELECT name FROM `tabCustomer`
-               WHERE IFNULL(lead_name, '') = '' LIMIT 1"""
-        )
-        if not orphan:
-            _skip("customer without a Lead leaves Focused Brands empty",
-                  "every Customer on this site is linked to a Lead")
-        else:
-            p2 = frappe.get_doc({
-                "doctype": "Project",
-                "project_name": "ZZ verify nobrand " + frappe.generate_hash(length=6),
-                "customer": orphan[0][0],
-            })
-            p2.insert(ignore_permissions=True)
-            _check("customer without a Lead leaves Focused Brands empty",
-                   len(p2.custom_focused_brands) == 0)
+        # Deleting the project must not be blocked by the contact, and must
+        # keep the contact (only the link row goes).
+        frappe.delete_doc("Project", p.name, ignore_permissions=True)
+        _check("deleting a project with contacts works and keeps the Contact",
+               frappe.db.exists("Contact", c.name)
+               and not frappe.db.exists("Dynamic Link", {
+                   "parent": c.name, "link_doctype": "Project",
+                   "link_name": p.name}))
     finally:
         frappe.db.rollback()
 
@@ -260,7 +253,7 @@ def run():
            m.get_field("custom_budget_amount").fieldtype == "Currency"
            and m.get_field("custom_budget_value").fieldtype == "Currency")
 
-    # ── Rahul 2026-09-08: budget → USD, and Focused Brands from the Lead ──
+    # ── Rahul 2026-09-08: budget → USD; Focused Brands (hand-keyed) ──
     _check("USD budget columns are read-only Currency in USD",
            all(m.get_field(f).fieldtype == "Currency"
                and m.get_field(f).options == "USD"
@@ -273,16 +266,21 @@ def run():
            all("re-enter" in (m.get_field(f).description or "").lower()
                for f in ("custom_budget_amount_usd", "custom_budget_value_usd",
                          "custom_exchange_rate")))
-    _check("Focused Brands is a read-only Table MultiSelect",
+    # 2026-09-10: the client cancelled the auto-fetch from the customer's
+    # Lead. Focused Brands is now keyed in by hand, exactly like the Lead
+    # field of the same name, so the field must be EDITABLE — asserted
+    # explicitly because it shipped read-only and an existing site has to
+    # be updated, not just a fresh one.
+    _check("Focused Brands is an EDITABLE Table MultiSelect (no auto-fetch)",
            m.get_field("custom_focused_brands").fieldtype == "Table MultiSelect"
            and m.get_field("custom_focused_brands").options == "Focused Brands"
-           and m.get_field("custom_focused_brands").read_only)
-    _check("Lead → Customer link the brand fetch depends on exists",
-           frappe.get_meta("Customer").has_field("lead_name")
-           and bool(frappe.get_meta("Lead").get_field("custom_focused_brands")))
+           and not m.get_field("custom_focused_brands").read_only)
+    _check("brand auto-fetch is gone from the Project validate chain",
+           not any("fetch_brands_from_lead" in h for h in
+                   frappe.get_hooks("doc_events").get("Project", {}).get("validate", [])))
 
     _check_budget_usd_conversion()
-    _check_brand_fetch_from_lead()
+    _check_customer_style_contacts()
 
     # Item 4: standard Company field moved to the top (right after Project
     # Name), OUT of "Costing and Billing". Must assert the ACTUAL rendered
