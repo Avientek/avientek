@@ -681,12 +681,12 @@ def has_permission_check(doc, ptype, user):
 	if not brand_perms and not ig_perms and not cg_perms and not sp_perms and not company_perms:
 		return None  # No restrictions
 
-	# Quotation visibility rule applies only to users who have explicit restrictions.
-	# Unrestricted users rely on DocPerm alone — applying visibility to them would
-	# prevent global search from working if they have no owned/team quotations.
-	if doctype == "Quotation" and not _user_has_visibility_bypass(user):
-		if not _quotation_doc_visible_to_user(doc, user):
-			return False
+	# #0537: single-doc reads must agree with quotation_permission_query. That
+	# query scopes Quotations to the user's UP (brand / sales person / etc.)
+	# WITHOUT the old workflow_state/probability visibility gate, so this check
+	# must not re-impose it either — otherwise a quote listed for the user could
+	# not be opened. The UP checks below (company / customer group / sales
+	# person / brand / item group) enforce the same scope per-document.
 
 	if not doctype:
 		return None
@@ -921,39 +921,33 @@ def _quotation_doc_visible_to_user(doc, user):
 # ── Individual permission query functions (referenced from hooks.py) ──
 
 def quotation_permission_query(user):
+	# Scope Quotations to the user's User Permissions (brand / item group /
+	# customer group / sales person / company) — exactly like Sales Order /
+	# Sales Invoice — then chain the High-Probability RBAC layer on top.
+	#
+	# #0537 (dr@ / ta@avientek.com, 2026-09-11): a user must see EVERY
+	# quotation within their UP scope, regardless of workflow_state or
+	# probability — a sales person sees all quotes booked in their name
+	# (parent `sales_person`), and a brand-scoped product manager sees all
+	# quotes of their brands. The old `_quotation_visibility_condition`
+	# gate (100% / owner / owned-SP-in-Sales-Team / approver-state) was
+	# ANDed on top of the UP scope and silently hid in-scope quotations:
+	# DEVEN saw 328/392 of his sales-person quotes, and ta@ saw 662/807 of
+	# his brand quotes (Quotations keep the sales person on the parent field,
+	# and the Sales Team child is empty, so the owned-SP branch never matched
+	# anyway). Any restriction for procurement / dispatch roles is handled
+	# SOLELY by the RBAC clause below — never by re-gating every UP-scoped
+	# user. Sridhar 2026-05-06 RBAC: Dispatch / Procurement / Supply Chain /
+	# Logistics only see Approved + probability=100 (or quotes they
+	# own / supervise); whitelisted / non-restricted roles bypass via "".
 	existing = _combined_permission_query(user, "Quotation", "Quotation Item")
-	# Sridhar 2026-05-06 RBAC: also AND in the High-Probability restricted-
-	# role condition so Dispatch / Procurement / Supply Chain / Logistics
-	# only see Approved + probability=100 (or quotes they own / supervise
-	# via Sales Person tree). Whitelisted roles bypass via empty string.
 	from avientek.api.quotation_high_probability import (
 		restricted_visibility_condition,
 	)
 	rbac = restricted_visibility_condition(user)
-
-	if _user_has_visibility_bypass(user):
-		# Existing visibility bypass keeps full access AND chains the
-		# restricted-role rule (it's still safer to enforce — bypass
-		# means brand/sales-person rules don't apply, NOT that RBAC
-		# does not apply).
-		if rbac:
-			return f"({existing}) AND {rbac}" if existing else rbac
-		return existing
-	brand_perms = _get_user_brands(user)
-	ig_perms = _get_user_item_groups(user)
-	cg_perms = _get_user_customer_groups(user)
-	sp_perms = _get_user_sales_persons(user)
-	company_perms = _get_user_companies(user)
-	if not brand_perms and not ig_perms and not cg_perms and not sp_perms and not company_perms:
-		# No brand/IG/CG/SP/company restrictions on this user — only
-		# apply the existing combined query and the RBAC layer.
-		if rbac:
-			return f"({existing}) AND {rbac}" if existing else rbac
-		return existing
-	visibility = _quotation_visibility_condition(user)
-	parts = [p for p in (existing, visibility, rbac) if p]
-	# Wrap each in parens so AND nests correctly.
-	return " AND ".join(f"({p})" for p in parts)
+	if rbac:
+		return f"({existing}) AND ({rbac})" if existing else rbac
+	return existing
 
 def sales_order_permission_query(user):
 	return _combined_permission_query(user, "Sales Order", "Sales Order Item")
