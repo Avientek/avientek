@@ -37,6 +37,7 @@ def after_migrate():
 			"Payment Voucher Fast", "Data", for_doctype="Doctype")),
 		("create_asset_dam_fields", _create_asset_dam_fields),
 		("create_so_po_special_price_fields", _create_so_po_special_price_fields),
+		("create_margin_markup_carry_fields", _create_margin_markup_carry_fields),
 		("prf_bank_fields_allow_on_submit", _prf_bank_fields_allow_on_submit),
 		("so_po_item_derived_fields_allow_on_submit", _so_po_item_derived_fields_allow_on_submit),
 		("ensure_project_l2_role", _ensure_project_l2_role),
@@ -743,6 +744,105 @@ def _create_so_po_special_price_fields():
 				"read_only": f["read_only"],
 				"in_list_view": f["in_list_view"],
 			})
+
+
+def _create_margin_markup_carry_fields():
+	"""Surface Quotation Item's Margin Value / Margin % / Markup Value / Markup %
+	on Sales Order, Delivery Note and Sales Invoice item grids (#0520 / TSK-00681,
+	Orders.Mea — extended to DN 2026-09-11).
+
+	Read-only mirror columns so these figures flow through to SO/DN/SI reports
+	without opening the Quotation. Source = Quotation Item custom_margin_value /
+	custom_margin_ / custom_markup_value / custom_markup_. Values propagate
+	Quotation -> SO -> DN/SI via ERPNext's same-fieldname get_mapped_doc copy,
+	plus the belt-and-braces backfill in
+	avientek.events.sales_order.carry_forward_quotation_fields (Quotation -> SO).
+	Idempotent.
+	"""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+	specs = [
+		("custom_margin_value", "Currency", "Margin Value", "currency", "amount"),
+		("custom_margin_", "Percent", "Margin (%)", None, "custom_margin_value"),
+		("custom_markup_value", "Currency", "Markup Value", "currency", "custom_margin_"),
+		("custom_markup_", "Percent", "Markup (%)", None, "custom_markup_value"),
+	]
+	fields = []
+	for dt in ("Sales Order Item", "Delivery Note Item", "Sales Invoice Item"):
+		for fieldname, fieldtype, label, options, insert_after in specs:
+			f = {
+				"dt": dt, "fieldname": fieldname, "fieldtype": fieldtype,
+				"label": label, "insert_after": insert_after, "read_only": 1,
+				"in_list_view": 0,
+			}
+			if options:
+				f["options"] = options
+			fields.append(f)
+
+	for f in fields:
+		cf_name = f"{f['dt']}-{f['fieldname']}"
+		if not frappe.db.exists("Custom Field", cf_name):
+			create_custom_field(f["dt"], f)
+		else:
+			upd = {"fieldtype": f["fieldtype"], "label": f["label"], "read_only": 1}
+			if f.get("options"):
+				upd["options"] = f["options"]
+			frappe.db.set_value("Custom Field", cf_name, upd)
+
+
+# The four carry columns, in the order they appear on Quotation Item.
+_MARGIN_MARKUP_COLS = ("custom_margin_value", "custom_margin_", "custom_markup_value", "custom_markup_")
+
+
+def _backfill_margin_markup_carry_fields():
+	"""One-off backfill of the margin/markup mirror columns on existing
+	SO / DN / SI items, following the source chain:
+
+	    Quotation Item -> Sales Order Item (quotation_item)
+	    Sales Order Item -> Delivery Note Item (so_detail)
+	    Sales Order Item -> Sales Invoice Item (so_detail)
+	    Delivery Note Item -> Sales Invoice Item (dn_detail)   [SIs made from a DN
+	                                                             with no SO link]
+
+	Set-based UPDATE ... JOIN; does NOT touch `modified` or any ledger — these
+	are display-only fields, so it is safe on submitted / 2025 documents.
+	Idempotent (re-running just re-copies the same values). Run via the
+	backfill_margin_markup_carry_fields patch, which creates the fields first.
+	"""
+	set_clause = lambda tgt, src: ", ".join(
+		f"{tgt}.`{c}` = {src}.`{c}`" for c in _MARGIN_MARKUP_COLS
+	)
+
+	# 1) SO Item <- Quotation Item
+	frappe.db.sql(f"""
+		UPDATE `tabSales Order Item` soi
+		JOIN `tabQuotation Item` qi ON qi.name = soi.quotation_item
+		SET {set_clause('soi', 'qi')}
+		WHERE IFNULL(soi.quotation_item, '') <> ''
+	""")
+	# 2) DN Item <- SO Item
+	frappe.db.sql(f"""
+		UPDATE `tabDelivery Note Item` dni
+		JOIN `tabSales Order Item` soi ON soi.name = dni.so_detail
+		SET {set_clause('dni', 'soi')}
+		WHERE IFNULL(dni.so_detail, '') <> ''
+	""")
+	# 3) SI Item <- SO Item
+	frappe.db.sql(f"""
+		UPDATE `tabSales Invoice Item` sii
+		JOIN `tabSales Order Item` soi ON soi.name = sii.so_detail
+		SET {set_clause('sii', 'soi')}
+		WHERE IFNULL(sii.so_detail, '') <> ''
+	""")
+	# 4) SI Item <- DN Item (only rows without an SO link)
+	frappe.db.sql(f"""
+		UPDATE `tabSales Invoice Item` sii
+		JOIN `tabDelivery Note Item` dni ON dni.name = sii.dn_detail
+		SET {set_clause('sii', 'dni')}
+		WHERE IFNULL(sii.so_detail, '') = '' AND IFNULL(sii.dn_detail, '') <> ''
+	""")
+	frappe.db.commit()
+	print("[patch] backfilled margin/markup carry fields on SO/DN/SI items")
 
 
 def _fix_quotation_item_calc_layout():

@@ -104,13 +104,19 @@ def carry_forward_quotation_fields(doc, method=None):
     # copy: backfill Special Price / Special Price Note per item from the
     # linked Quotation Item, in case a row's copy was skipped (e.g. rows
     # added after the initial mapping).
+    # Also carry Margin Value / Margin % / Markup Value / Markup % (#0520 /
+    # TSK-2026-00681) — read-only mirror columns on SO/DN/SI so these figures
+    # reach reports without opening the Quotation. Same belt-and-braces pattern:
+    # get_mapped_doc already copies same-fieldname custom fields, this fills any
+    # row it skipped. SO -> DN/SI then propagates natively (same fieldnames).
+    _MARGIN_COLS = ("custom_margin_value", "custom_margin_", "custom_markup_value", "custom_markup_")
     qi_names = [it.quotation_item for it in doc.items if getattr(it, "quotation_item", None)]
     if qi_names:
         qi_map = {
             qi.name: qi for qi in frappe.db.get_all(
                 "Quotation Item",
                 filters={"name": ["in", qi_names]},
-                fields=["name", "custom_special_price", "custom_special_price_note"],
+                fields=["name", "custom_special_price", "custom_special_price_note", *_MARGIN_COLS],
             )
         }
         for item in doc.items:
@@ -121,6 +127,9 @@ def carry_forward_quotation_fields(doc, method=None):
                 item.custom_special_price = qi.custom_special_price
             if not item.custom_special_price_note:
                 item.custom_special_price_note = qi.custom_special_price_note
+            for col in _MARGIN_COLS:
+                if not item.get(col):
+                    item.set(col, qi.get(col))
 
 
 # ── Server Script: "Delivery Date" ──

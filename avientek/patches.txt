@@ -647,3 +647,8 @@ avientek.patches.reclassify_freezed_warehouses
 # non-KSA discount-on-Grand-Total invoices (understated tax + GL imbalance on
 # submit). Scope both scripts to Saudi Arabia companies only. Idempotent.
 avientek.patches.scope_zatca_server_scripts_to_ksa
+# #0520/TSK-2026-00681 (Orders.Mea): carry Margin Value / Margin % / Markup
+# Value / Markup % from Quotation Item onto SO/DN/SI item grids for reporting.
+# Creates the mirror fields, then backfills existing docs from the source
+# Quotation. Display-only; safe on submitted/2025 docs. Idempotent.
+avientek.patches.backfill_margin_markup_carry_fields
