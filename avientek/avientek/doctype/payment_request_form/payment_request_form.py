@@ -6,7 +6,11 @@ import io
 import os
 import base64
 import requests
-from pypdf import PdfMerger
+# pypdf removed the legacy `PdfMerger` in 5.0 (frappe 15.120.1 pins
+# pypdf==6.15.0). `PdfWriter` is the supported replacement and exposes the
+# same append()/write()/close() API we use, and it also works on older pypdf
+# (>=3.x), so this is safe on any bench version.
+from pypdf import PdfWriter
 from bs4 import BeautifulSoup
 from frappe.utils.pdf import get_pdf
 from frappe.utils.file_manager import save_file
@@ -2726,7 +2730,7 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     import time as _time
 
     doc = frappe.get_doc("Payment Request Form", docname)
-    merger = PdfMerger()
+    merger = PdfWriter()  # PdfMerger removed in pypdf 5.0; PdfWriter is the drop-in
     appended = 0  # track sections actually merged so we can fail loud on empty output
 
     # Precompute total stage count so the progress bar shows a stable denominator.
