@@ -41,6 +41,9 @@ def after_migrate():
 		("prf_bank_fields_allow_on_submit", _prf_bank_fields_allow_on_submit),
 		("so_po_item_derived_fields_allow_on_submit", _so_po_item_derived_fields_allow_on_submit),
 		("ensure_project_l2_role", _ensure_project_l2_role),
+		# Must precede create_project_enhancement_fields, which pins the
+		# Project field order — see _create_project_contact_fields.
+		("project_contact_fields", _create_project_contact_fields),
 		("create_project_enhancement_fields", _create_project_enhancement_fields),
 		("deactivate_old_quotation_workflows", _deactivate_old_quotation_workflows),
 		("fix_quotation_item_calc_layout", _fix_quotation_item_calc_layout),
@@ -121,8 +124,8 @@ def _create_project_enhancement_fields():
 	    They are now adjacent in column 1, each followed by its USD twin.
 	  * Two read-only USD columns + the frozen rate that produced them
 	    (see avientek.events.project.set_budget_usd).
-	  * Focused Brands, read-only, mirrored from the customer's Lead
-	    (see avientek.events.project.fetch_brands_from_lead)."""
+	  * Focused Brands (keyed in by hand since 2026-09-10, when the client
+	    cancelled the auto-fetch from the customer's Lead)."""
 	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 
 	# Rahul follow-up 2026-08-25: "Discussion" removed from the status list
@@ -197,15 +200,15 @@ def _create_project_enhancement_fields():
 		{"fieldname": "custom_project_by", "fieldtype": "Link", "label": "Project by",
 		 "options": "Sales Person", "insert_after": "custom_created_by",
 		 "ignore_user_permissions": 1},
-		# Rahul 2026-09-08: read-only mirror of the Lead's Focused Brands,
-		# resolved through Project.customer → Customer.lead_name. Display only
-		# — rebuilt from the Lead on every save, never keyed in here.
+		# Focused Brands, keyed in by hand — identical to the Lead field of the
+		# same name (Sridhar 2026-09-10). The client CANCELLED the earlier
+		# auto-fetch from the customer's Lead, so this is a plain editable
+		# multi-select: read_only and the description are cleared explicitly
+		# so an existing site is updated, not just a fresh one.
 		{"fieldname": "custom_focused_brands", "fieldtype": "Table MultiSelect",
-		 "label": "Focused Brands", "options": "Focused Brands", "read_only": 1,
+		 "label": "Focused Brands", "options": "Focused Brands", "read_only": 0,
 		 "insert_after": "custom_project_by", "allow_on_submit": 0,
-		 "description": (
-			 "Fetched from the Lead this customer was converted from. Empty "
-			 "when the customer was not created from a Lead.")},
+		 "description": ""},
 	]
 
 	for f in fields:
@@ -1464,3 +1467,66 @@ def _reorder_contact_fields_if_pinned():
 	frappe.clear_cache(doctype="Contact")
 	print("[after_migrate] Contact field_order updated: tracking fields "
 	      "moved above `status`")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Contacts on the Project, Customer-style — Sridhar 2026-09-11
+# ══════════════════════════════════════════════════════════════════════
+
+# Superseded layouts, deleted on migrate:
+#   * 2026-09-10 — one Contact link + Email/Mobile/Designation written back
+#     to the Contact;
+#   * 2026-09-11 (first cut) — the contact list in its own "Contacts" section
+#     (custom_contacts_sb) under Project Details.
+_OLD_PROJECT_CONTACT_FIELDS = (
+	"custom_contact_sb", "custom_contact", "custom_contact_email",
+	"custom_contact_cb", "custom_contact_mobile", "custom_contact_designation",
+	"custom_contacts_sb",
+)
+
+
+def _create_project_contact_fields():
+	"""Contacts on Project that work like Customer's: every linked Contact
+	listed with an Edit link, plus a "New Contact" button that opens a Contact
+	already linked back to this project.
+
+	Sits in the standard Customer Details section, directly under the Customer
+	field (Sridhar 2026-09-11, after testing).
+
+	The HTML field MUST be named exactly `contact_html`: Frappe's
+	render_address_and_contact draws into that fieldname, and the Contact
+	form's Link Document Type picker only lists doctypes that have it. Frappe
+	keeps a fieldname given explicitly, so no `custom_` prefix is added.
+	Hidden on an unsaved project, like Customer — a contact can only link to a
+	project that exists. The contacts are loaded by
+	avientek.events.project.load_contacts.
+
+	Runs BEFORE create_project_enhancement_fields in after_migrate: that step
+	rebuilds the Project `field_order` Property Setter, which pins every
+	field's slot. Creating or moving this field after the rebuild would leave
+	it in its old slot until the following migrate. Idempotent."""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+	for fn in _OLD_PROJECT_CONTACT_FIELDS:
+		if frappe.db.exists("Custom Field", "Project-" + fn):
+			frappe.delete_doc("Custom Field", "Project-" + fn,
+			                  ignore_permissions=True, force=True)
+
+	fields = [
+		{"fieldname": "contact_html", "fieldtype": "HTML",
+		 "label": "Contact HTML", "read_only": 1,
+		 "insert_after": "customer",
+		 "depends_on": "eval:!doc.__islocal"},
+	]
+
+	for f in fields:
+		cf_name = "Project-" + f["fieldname"]
+		if not frappe.db.exists("Custom Field", cf_name):
+			create_custom_field("Project", f)
+		else:
+			upd = {k: f[k] for k in
+			       ("fieldtype", "label", "insert_after", "read_only", "depends_on")
+			       if k in f}
+			frappe.db.set_value("Custom Field", cf_name, upd)
+
+	frappe.clear_cache(doctype="Project")
