@@ -41,7 +41,10 @@ ITEM_GROUP_DOCTYPES = {
 	"Request for Quotation": "Request for Quotation Item",
 	"Opportunity": "Opportunity Item",
 	"Avientek Proforma Invoice": "Proforma Invoice Item",
-	"Existing Quotation": "Existing Quotation Item",
+	# NB: "Existing Quotation" is intentionally NOT here — its child
+	# "Existing Quotation Item" has no `item_group` column (only `brand`), so
+	# item-group scoping doesn't apply. It stays in BRAND_DOCTYPES. The
+	# has_column guard in _item_group_permission_query is the backstop.
 }
 
 # Parent-level doctypes where item_group is directly on the parent
@@ -341,6 +344,13 @@ def _brand_permission_query(user, parent_dt, child_dt):
 	if not brand_perms:
 		return ""
 
+	# Guard: the child table must actually carry a `brand` column. Some child
+	# doctypes registered in BRAND_DOCTYPES may not have it (data-model drift),
+	# which would produce "Unknown column 'qi.brand'" (1054) and crash the list
+	# view for brand-restricted users. Skip this axis instead. (#0537 audit.)
+	if not frappe.db.has_column(child_dt, "brand"):
+		return ""
+
 	brands_sql = ", ".join(frappe.db.escape(b) for b in brand_perms)
 	parent_table = "`tab{}`".format(parent_dt)
 	child_table = "`tab{}`".format(child_dt)
@@ -413,6 +423,13 @@ def _item_group_permission_query(user, parent_dt, child_dt):
 
 	ig_perms = _get_user_item_groups(user)
 	if not ig_perms:
+		return ""
+
+	# Guard: the child table must actually carry an `item_group` column. E.g.
+	# "Existing Quotation Item" has `brand` but no `item_group`, so building the
+	# clause caused "Unknown column 'qi.item_group'" (1054) and crashed the list
+	# view for item-group-restricted users. Skip this axis instead. (#0537 audit.)
+	if not frappe.db.has_column(child_dt, "item_group"):
 		return ""
 
 	igs_sql = ", ".join(frappe.db.escape(ig) for ig in ig_perms)
