@@ -719,6 +719,10 @@ doc_events = {
             # means an amended SO gets a fresh stamp at ITS submission.
             "avientek.events.sales_order.set_submission_datetime",
         ],
+        # SUP-2026-00052: a Sales Order linked forward by a non-cancelled
+        # Purchase Order must not be cancellable (explicit guard over
+        # ERPNext's LinkExistsError, which the strip-then-cancel path bypassed).
+        "before_cancel": "avientek.events.sales_order.block_cancel_if_linked_to_purchase_order",
     },
     "Quotation": {
         "before_validate": [

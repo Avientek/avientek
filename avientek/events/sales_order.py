@@ -132,6 +132,37 @@ def carry_forward_quotation_fields(doc, method=None):
                     item.set(col, qi.get(col))
 
 
+def block_cancel_if_linked_to_purchase_order(doc, method=None):
+    """SUP-2026-00052 (Jithin): a Sales Order that a non-cancelled Purchase
+    Order links to (via PO Item.sales_order) must NOT be cancellable.
+
+    ERPNext's own LinkExistsError blocks cancellation only while a *submitted*
+    PO link is intact; it was bypassed here because the SO link had first been
+    stripped/re-pointed off the submitted PO (PO-FZCO-26-01218 → SO-FZCO-26-01980),
+    letting the SO be cancelled and orphaning the references. This is an explicit,
+    forward-direction guard: block SO cancel whenever ANY non-cancelled PO
+    (draft or submitted) still references it, with a clear message naming the POs.
+    Runs on before_cancel so it aborts the whole cancel cleanly.
+    """
+    linked = frappe.db.sql(
+        """SELECT DISTINCT poi.parent
+           FROM `tabPurchase Order Item` poi
+           JOIN `tabPurchase Order` po ON po.name = poi.parent
+           WHERE poi.sales_order = %s AND po.docstatus < 2
+           ORDER BY poi.parent""",
+        doc.name, pluck=True,
+    )
+    if linked:
+        pos = ", ".join(linked)
+        frappe.throw(
+            _("Cannot cancel {0} — it is linked to Purchase Order(s): {1}. "
+              "A document linked forward cannot be cancelled. Cancel those "
+              "Purchase Orders first (or re-link them to another Sales Order).").format(
+                doc.name, pos),
+            title=_("Linked to Purchase Order"),
+        )
+
+
 # ── Server Script: "Delivery Date" ──
 # DocType Event: Sales Order, After Save
 def sync_delivery_date_to_items(doc, method=None):

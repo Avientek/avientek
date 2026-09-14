@@ -592,6 +592,25 @@ def get_sales_orders(item, qty, sales_order):
 def set_sales_order(sales_order, item_name, eta):
 	print("\n..........................")
 	print("\nsales order item eta",sales_order,item_name, eta)
+	# SUP-2026-00052: do not let the Swap Sales Order dialog strip/re-point the
+	# forward link off a SUBMITTED PO line whose current Sales Order is still
+	# open (not cancelled). Removing that link is exactly how SO-FZCO-26-01980
+	# was made cancellable and its references lost. Re-linking is allowed when
+	# the line has no SO yet, or its current SO is already cancelled.
+	_cur = frappe.db.get_value(
+		"Purchase Order Item", item_name, ["sales_order", "parent"], as_dict=True
+	)
+	if _cur and _cur.sales_order:
+		_po_ds = frappe.db.get_value("Purchase Order", _cur.parent, "docstatus")
+		_so_ds = frappe.db.get_value("Sales Order", _cur.sales_order, "docstatus")
+		if _po_ds == 1 and _so_ds is not None and _so_ds < 2:
+			frappe.throw(
+				frappe._("This Purchase Order line is already linked to Sales Order "
+				  "{0}, which is not cancelled. Re-linking would remove that forward "
+				  "link. Cancel Sales Order {0} first if this link must change.").format(
+					_cur.sales_order),
+				title=frappe._("Sales Order Link Locked"),
+			)
 	if sales_order and sales_order.split("| ")[1]:
 		sales_order_name = sales_order.split("| ")[0].strip()
 		sales_order_item = sales_order.split("| ")[1]
