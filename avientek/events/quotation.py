@@ -2957,6 +2957,24 @@ def update_special_price(quotation_name, items):
     if doc.docstatus != 1:
         frappe.throw("This action is only allowed on submitted Quotations.")
 
+    # Sridhar 2026-09-17 (#0542): once a Sales Order / Sales Invoice exists
+    # against this Quotation, re-pricing here retroactively changes costing
+    # figures (incl. the incentive) that were ALREADY carried into the SO/SI
+    # and booked (e.g. the Reward/Incentive JV). The downstream docs never
+    # see the change, so the Quotation and the booked JV disagree for good —
+    # exactly the reconciliation mismatch reported on QN-FZCO-26-00275-1
+    # (quote incentive moved to USD 2,254.54 after the JV booked USD 2,480).
+    # ERPNext sets doc.status to "Ordered"/"Partially Ordered" whenever an SO
+    # references the Quotation (same reliable check the sibling apply_* flows
+    # enforce via _guard_quotation_editable_for_update).
+    if doc.status in ("Ordered", "Partially Ordered"):
+        frappe.throw(_(
+            "This Quotation already has a Sales Order created against it "
+            "({0}). Updating Special Price here would change costing/incentive "
+            "figures that were already carried into the Sales Order/Invoice "
+            "(and any booked incentive JV) — not allowed."
+        ).format(doc.status))
+
     for item_update in items:
         row_name = item_update.get("name")
         if not row_name:
@@ -2984,7 +3002,17 @@ def update_special_price(quotation_name, items):
 
         base_amt = flt(new_sp * qty + shipping + finance + transport + reward, 4)
 
-        incentive = flt(_to_flt(row.custom_incentive_) * new_sp * qty / 100, 4)
+        # #0542: only a Percentage incentive tracks the special price. A fixed
+        # "Amount" incentive must NOT be re-derived from its % against the new
+        # price — that silently overwrote the fixed figure the user entered
+        # (USD 2,480 became 7.27% x new price = USD 2,254.54). Keep the row's
+        # stored incentive value as-is when the incentive is a fixed Amount;
+        # recalc_doc_totals + the parent-sync block below then hold the fixed
+        # total and only restate the derived % against the new base.
+        if (doc.custom_incentive_type or "Percentage") == "Amount":
+            incentive = flt(_to_flt(row.custom_incentive_value), 4)
+        else:
+            incentive = flt(_to_flt(row.custom_incentive_) * new_sp * qty / 100, 4)
 
         cogs_before_customs = flt(base_amt + incentive, 4)
         customs = flt(_to_flt(row.custom_customs_) * cogs_before_customs / 100, 4)
