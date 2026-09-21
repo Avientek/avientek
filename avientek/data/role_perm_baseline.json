@@ -89,6 +89,30 @@
         "if_owner": 0
       },
       "create_if_missing": true
+    },
+    {
+      "_comment": "#0544 (accounts.ksa, 2026-09-21): a Custom DocPerm gave Accounts User create=1 but write=0 on Asset, so the New Asset form opened with every field read-only ('fields not active') and could not be saved. Restore ERPNext-standard full CRUD for Accounts User on Asset.",
+      "parent": "Asset",
+      "role": "Accounts User",
+      "permlevel": 0,
+      "perms": {
+        "read": 1,
+        "write": 1,
+        "create": 1,
+        "delete": 1,
+        "submit": 1,
+        "cancel": 1,
+        "amend": 1,
+        "report": 1,
+        "export": 1,
+        "import": 0,
+        "share": 1,
+        "print": 1,
+        "email": 1,
+        "select": 1,
+        "if_owner": 0
+      },
+      "create_if_missing": true
     }
   ]
 }
