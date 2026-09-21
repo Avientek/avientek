@@ -652,3 +652,9 @@ avientek.patches.scope_zatca_server_scripts_to_ksa
 # Creates the mirror fields, then backfills existing docs from the source
 # Quotation. Display-only; safe on submitted/2025 docs. Idempotent.
 avientek.patches.backfill_margin_markup_carry_fields
+
+# Jithin 2026-09-21: add "Logistics Manager" to the PRF Authorise step so a
+# Logistics Manager can authorise Payment Request Forms (department scoping via
+# a Department User Permission, like Dept Head). Creates the role if missing +
+# adds the Draft->Authorise->Authorised transition to the live workflow. Idempotent.
+avientek.patches.add_prf_logistics_manager_authorise

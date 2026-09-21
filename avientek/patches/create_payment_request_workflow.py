@@ -174,8 +174,12 @@ def execute():
 	wf.append("states", {"state": "Cancelled (Rejected)", "doc_status": "0", "allow_edit": "Finance Controller"})
 
 	# Transitions
-	# Authorise — Accounts User, Accounts Manager, plus Dept Head (Jithin 2026-05-12)
-	for role in ["Accounts User", "Accounts Manager", "Dept Head"]:
+	# Authorise — Accounts User, Accounts Manager, Dept Head (Jithin 2026-05-12),
+	# plus Logistics Manager (Jithin 2026-09-21): so a Logistics Manager can
+	# authorise PRFs of the Logistics department. Department scoping is handled
+	# by the visibility layer (a Department User Permission limits each Logistics
+	# Manager to their own department's PRFs), exactly like Dept Head.
+	for role in ["Accounts User", "Accounts Manager", "Dept Head", "Logistics Manager"]:
 		wf.append("transitions", {
 			"state": "Draft", "action": "Authorise", "next_state": "Authorised",
 			"allowed": role, "allow_self_approval": 1,
