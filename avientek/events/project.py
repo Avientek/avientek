@@ -198,6 +198,15 @@ def _usd_rate(company_currency, on_date=None):
         return 0.0
 
 
+def _brand_values(d):
+    """(brand, value) pairs of the Focused Brands rows that carry a Value."""
+    return sorted(
+        ((r.get("brand") or ""), flt(r.get("value")))
+        for r in (d.get("custom_focused_brands") or [])
+        if flt(r.get("value"))
+    )
+
+
 def _budget_inputs_changed(doc):
     """True when the frozen rate must be re-fetched.
 
@@ -214,6 +223,10 @@ def _budget_inputs_changed(doc):
     if flt(before.get("custom_budget_amount")) != flt(doc.get("custom_budget_amount")):
         return True
     if flt(before.get("custom_budget_value")) != flt(doc.get("custom_budget_value")):
+        return True
+    # Focused Brands values are converted at the same frozen rate — entering
+    # or changing a brand Value refreshes the rate exactly like a budget figure.
+    if _brand_values(before) != _brand_values(doc):
         return True
     # Company (and therefore company currency) switched under a stored rate.
     if (before.get("custom_company_currency") or "") != (
@@ -243,10 +256,15 @@ def set_budget_usd(doc, method=None):
     amount = flt(doc.get("custom_budget_amount"))
     value = flt(doc.get("custom_budget_value"))
 
-    if not amount and not value:
+    brand_rows = doc.get("custom_focused_brands") or []
+    has_brand_value = any(flt(r.get("value")) for r in brand_rows)
+
+    if not amount and not value and not has_brand_value:
         doc.custom_exchange_rate = 0
         doc.custom_budget_amount_usd = 0
         doc.custom_budget_value_usd = 0
+        for r in brand_rows:
+            r.value_usd = 0
         return
 
     rate = flt(doc.get("custom_exchange_rate"))
@@ -272,6 +290,9 @@ def set_budget_usd(doc, method=None):
         amount / rate, doc.precision("custom_budget_amount_usd"))
     doc.custom_budget_value_usd = flt(
         value / rate, doc.precision("custom_budget_value_usd"))
+    # 2026-09-24: Focused Brands Value -> Value (USD), same frozen rate.
+    for r in brand_rows:
+        r.value_usd = flt(flt(r.get("value")) / rate, r.precision("value_usd"))
 
 
 # ── Form-side helpers (public/js/project.js) ──────────────────────────
