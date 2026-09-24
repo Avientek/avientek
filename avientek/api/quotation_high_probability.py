@@ -330,6 +330,13 @@ def on_update_after_submit(doc, method=None):
         )
         return
 
+    # Sammish 2026-09-24: a save whose only change is Expected Closing Date
+    # was already vetted by
+    # events.quotation.validate_expected_closing_date_change
+    # (before_update_after_submit) — don't block it here.
+    if _only_expected_closing_date_changed(doc):
+        return
+
     # Permit the whitelist 75->100 bump even after submit.
     new_prob = _flt(doc.probability)
     if new_prob == 100 and not _changed_fields(doc, exclude={"probability"}):
@@ -730,6 +737,28 @@ def _changed_only_special_prices(doc):
         return False
 
     return True
+
+
+def _only_expected_closing_date_changed(doc):
+    """True when, versus the pre-save copy, the only top-level field that
+    changed is expected_closing_dates (bookkeeping fields ignored)."""
+    try:
+        before = doc.get_doc_before_save()
+    except Exception:
+        before = None
+    if not before:
+        return False
+    from frappe.model import no_value_fields, table_fields
+    ignore = {"modified", "modified_by", "workflow_status"}
+    changed = set()
+    for df in doc.meta.fields:
+        if df.fieldtype in table_fields or df.fieldtype in no_value_fields:
+            continue
+        if df.fieldname in ignore:
+            continue
+        if str(doc.get(df.fieldname) or "") != str(before.get(df.fieldname) or ""):
+            changed.add(df.fieldname)
+    return changed == {"expected_closing_dates"}
 
 
 def _changed_fields(doc, exclude=None):

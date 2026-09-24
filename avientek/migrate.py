@@ -79,6 +79,7 @@ def after_migrate():
 		("print_format_ignore_report_up", lambda: make_property_setter(
 			"Print Format", "report", "ignore_user_permissions", 1, "Check")),
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
+		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
 		("lead_type_consolidation", _lead_type_consolidation),
@@ -437,6 +438,21 @@ def _allow_quotation_cost_fields_after_submit():
 	gets the same treatment to avoid the block simply shifting to it."""
 	for fieldname in ("valuation_rate", "custom_final_valuation_rate"):
 		make_property_setter("Quotation Item", fieldname, "allow_on_submit", 1, "Check")
+
+
+def _allow_quotation_expected_closing_date_after_submit():
+	"""Sammish 2026-09-24: Expected Closing Date must be editable on a submitted
+	Quotation (like Sales Person). Who may change it, and when approval is
+	needed, is enforced by
+	avientek.events.quotation.validate_expected_closing_date_change.
+	The field is a site-only Custom Field (not in fixtures), so flip it here.
+	Idempotent."""
+	name = "Quotation-expected_closing_dates"
+	if frappe.db.exists("Custom Field", name) and not frappe.db.get_value(
+		"Custom Field", name, "allow_on_submit"
+	):
+		frappe.db.set_value("Custom Field", name, "allow_on_submit", 1)
+		frappe.clear_cache(doctype="Quotation")
 
 
 def _unblock_avientek_module():

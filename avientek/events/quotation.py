@@ -2480,6 +2480,60 @@ def validate_probability_change_approval(doc, method=None):
         )
 
 
+def validate_expected_closing_date_change(doc, method=None):
+    """Sammish 2026-09-24: Expected Closing Date on a submitted Quotation.
+
+    - Probability below 75% (10% / 50%): may be changed any time.
+    - Probability 75% or higher:
+        * date currently blank  -> may be set (once);
+        * date already set      -> fixed; changing it needs approval, i.e.
+          the quote is in "Approved for Update" / "Sent for Revision"
+          (Request for Update flow) or the user is a probability approver.
+
+    Uses the higher of the saved and new probability, so raising 50% -> 75%
+    in the same save is treated as 75%.
+    """
+    if doc.docstatus != 1:
+        return
+    try:
+        before = doc.get_doc_before_save()
+    except Exception:
+        before = None
+    if not before:
+        return
+
+    old_date = before.get("expected_closing_dates")
+    new_date = doc.get("expected_closing_dates")
+    if str(old_date or "") == str(new_date or ""):
+        return
+
+    prob = max(
+        _pct_int(before.get("probabilities") or ""),
+        _pct_int(doc.get("probabilities") or ""),
+    )
+    if prob < 75:
+        return
+    if not old_date:
+        # Blank at >=75% -> first-time set is allowed.
+        return
+
+    ws = (doc.get("workflow_state") or "").strip()
+    if ws in ("Approved for Update", "Sent for Revision"):
+        return
+    if _user_can_approve_probability():
+        return
+
+    frappe.throw(
+        _(
+            "Expected Closing Date is fixed once set on a Quotation with "
+            "probability {0}%. To change it from {1}, scroll to the "
+            "<b>Document Approval</b> section, tick <i>Request for Update</i>, "
+            "fill the note and Save — the approver will review."
+        ).format(prob, frappe.utils.formatdate(old_date)),
+        title=_("Approval Required"),
+    )
+
+
 def _get_probability_revision_approver_roles():
     """Return the configured list of roles allowed to approve / reject
     pending probability changes.
