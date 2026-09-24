@@ -2395,24 +2395,28 @@ def validate_probability_change_approval(doc, method=None):
         if not trigger_reason:
             return
     else:
-        submitted_pct = _pct_int(submitted)
-        if submitted_pct < 75:
-            # Originally low-prob deal — all edits are free per BRD.
+        try:
+            before = doc.get_doc_before_save()
+        except Exception:
+            before = None
+        saved = (before.get("probabilities") or "") if before else ""
+        # Baseline = the HIGHER of the frozen submitted value and the
+        # currently saved value. Using submitted alone let a quote that was
+        # submitted low (10%/50%) and later raised to 75%/100% be dropped
+        # back below 75% with no approval (Sammish 2026-09-24).
+        baseline = saved if _pct_int(saved) > _pct_int(submitted) else submitted
+        if _pct_int(baseline) < 75:
+            # Never reached the high range — edits are free per BRD.
             return
         new_pct = _pct_int(doc.get("probabilities") or "")
         if new_pct >= 75:
             # New value still in high range — also free per BRD.
             return
-        # Check value actually changed from current saved (cheap dirty check)
-        try:
-            before = doc.get_doc_before_save()
-        except Exception:
-            before = None
-        if before and (before.get("probabilities") or "") == (doc.get("probabilities") or ""):
+        if before and saved == (doc.get("probabilities") or ""):
             # No change on this save (e.g., status-only update) — don't fire.
             return
-        trigger_reason = _("Probability downgraded from submitted value {0} to {1}").format(
-            submitted, doc.get("probabilities") or ""
+        trigger_reason = _("Probability downgraded from {0} to {1}").format(
+            baseline, doc.get("probabilities") or ""
         )
 
     change_reason = (doc.get("probability_change_reason") or "").strip()
@@ -2554,6 +2558,12 @@ def submit_probability_change(quotation_name, new_probability, reason):
     if not submitted:
         frappe.throw(_("No submitted_probability captured on this quote — cannot validate change."))
 
+    # Baseline = the higher of the submitted value and the current saved
+    # value, so a quote raised to 75%+ after submission still needs approval
+    # to go back below 75% (Sammish 2026-09-24).
+    current = (row.probabilities or "").strip()
+    if _pct_int(current) > _pct_int(submitted):
+        submitted = current
     submitted_pct = _pct_int(submitted)
     new_pct = _pct_int(new_probability)
 

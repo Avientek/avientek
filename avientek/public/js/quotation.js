@@ -3489,14 +3489,17 @@ frappe.ui.form.on('Quotation', {
         // BASELINE = the probability captured at submit time (never changes).
         // Falls back to the last-saved snapshot for legacy docs that don't
         // have submitted_probability backfilled yet.
-        const submitted = (frm.doc.submitted_probability || '').trim();
-        const oldRaw = submitted || frm.__last_probabilities_snapshot || '';
-        const newRaw = (frm.doc.probabilities || '');
-
         const pct = (v) => {
             const n = parseInt(String(v || '').replace('%', '').trim(), 10);
             return isNaN(n) ? 0 : n;
         };
+        // Baseline = the HIGHER of the submitted value and the current
+        // value, so a quote raised to 75%+ after submission still needs
+        // approval to go back below 75% (Sammish 2026-09-24).
+        const submitted = (frm.doc.submitted_probability || '').trim();
+        const snapshot = frm.__last_probabilities_snapshot || '';
+        const oldRaw = (pct(snapshot) > pct(submitted) ? snapshot : submitted) || snapshot;
+        const newRaw = (frm.doc.probabilities || '');
         const oldPct = pct(oldRaw);
         const newPct = pct(newRaw);
 
