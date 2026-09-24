@@ -795,6 +795,11 @@ doc_events = {
             # against the ORIGINAL probability, not the last-saved value.
             "avientek.events.quotation.capture_submitted_probability",
         ],
+        # Sammish 2026-09-24: Expected Closing Date edit rules on a
+        # submitted Quotation (free below 75%; at >=75% a blank date may be
+        # set once, an existing date needs approval).
+        "before_update_after_submit":
+            "avientek.events.quotation.validate_expected_closing_date_change",
         "on_update_after_submit": [
             "avientek.api.quotation_high_probability.on_update_after_submit",
             # Sridhar 2026-05-29: validate also fires from on_update_after_submit
