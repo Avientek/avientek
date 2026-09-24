@@ -7,7 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "brand",
-  "value"
+  "value",
+  "value_usd"
  ],
  "fields": [
   {
@@ -16,7 +17,7 @@
    "label": "Brand",
    "options": "Brand",
    "in_list_view": 1,
-   "columns": 5
+   "columns": 4
   },
   {
    "fieldname": "value",
@@ -24,14 +25,24 @@
    "label": "Value",
    "options": "custom_company_currency",
    "in_list_view": 1,
-   "columns": 5
+   "columns": 3
+  },
+  {
+   "fieldname": "value_usd",
+   "fieldtype": "Currency",
+   "label": "Value (USD)",
+   "options": "USD",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 3,
+   "description": "Converted from Value at the project's frozen exchange rate (same rate as the Budget USD columns)."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-24 12:00:00.000000",
+ "modified": "2026-09-24 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Focused Brands",

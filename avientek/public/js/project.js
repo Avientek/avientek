@@ -39,6 +39,18 @@ frappe.ui.form.on("Project", {
 	custom_budget_value(frm) {
 		avientek_project_convert_budget(frm);
 	},
+
+	custom_focused_brands_remove(frm) {
+		avientek_project_convert_budget(frm);
+	},
+});
+
+// 2026-09-24: Focused Brands row Value -> Value (USD) at the same frozen rate
+// as the Budget USD columns.
+frappe.ui.form.on("Focused Brands", {
+	value(frm) {
+		if (frm.doctype === "Project") avientek_project_convert_budget(frm);
+	},
 });
 
 // Re-fetch the exchange rate and recompute both USD columns. Called ONLY from
@@ -49,11 +61,14 @@ function avientek_project_convert_budget(frm) {
 
 	const amount = flt(frm.doc.custom_budget_amount);
 	const value = flt(frm.doc.custom_budget_value);
+	const brand_rows = frm.doc.custom_focused_brands || [];
+	const has_brand_value = brand_rows.some((row) => flt(row.value));
 
-	if (!amount && !value) {
+	if (!amount && !value && !has_brand_value) {
 		frm.set_value("custom_exchange_rate", 0);
 		frm.set_value("custom_budget_amount_usd", 0);
 		frm.set_value("custom_budget_value_usd", 0);
+		brand_rows.forEach((row) => frappe.model.set_value(row.doctype, row.name, "value_usd", 0));
 		return;
 	}
 
@@ -86,6 +101,8 @@ function avientek_project_convert_budget(frm) {
 			frm.set_value("custom_exchange_rate", d.exchange_rate);
 			frm.set_value("custom_budget_amount_usd", d.budget_amount_usd);
 			frm.set_value("custom_budget_value_usd", d.budget_value_usd);
+			brand_rows.forEach((row) => frappe.model.set_value(
+				row.doctype, row.name, "value_usd", flt(flt(row.value) / d.exchange_rate, 2)));
 			avientek_project_rate_hint(frm);
 		},
 	});
