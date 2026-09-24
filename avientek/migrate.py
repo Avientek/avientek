@@ -201,12 +201,12 @@ def _create_project_enhancement_fields():
 		{"fieldname": "custom_project_by", "fieldtype": "Link", "label": "Project by",
 		 "options": "Sales Person", "insert_after": "custom_created_by",
 		 "ignore_user_permissions": 1},
-		# Focused Brands, keyed in by hand — identical to the Lead field of the
-		# same name (Sridhar 2026-09-10). The client CANCELLED the earlier
-		# auto-fetch from the customer's Lead, so this is a plain editable
-		# multi-select: read_only and the description are cleared explicitly
-		# so an existing site is updated, not just a fresh one.
-		{"fieldname": "custom_focused_brands", "fieldtype": "Table MultiSelect",
+		# Focused Brands, keyed in by hand (Sridhar 2026-09-10; client cancelled
+		# the auto-fetch from the customer's Lead). 2026-09-24: changed from a
+		# tag-style Table MultiSelect to a grid (Brand + Value per row). Same
+		# child doctype + parentfield, so existing Project rows carry over
+		# untouched (Value blank); Lead keeps its Table MultiSelect.
+		{"fieldname": "custom_focused_brands", "fieldtype": "Table",
 		 "label": "Focused Brands", "options": "Focused Brands", "read_only": 0,
 		 "insert_after": "custom_project_by", "allow_on_submit": 0,
 		 "description": ""},
