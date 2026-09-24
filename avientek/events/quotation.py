@@ -1212,6 +1212,7 @@ def _finalize_submitted_quotation_save(doc, notify_discount_incentive_reapply=Fa
     # different GST rate than the rest of the quote), and everything
     # above this point can still change item.rate/amount.
     doc.set_qty_as_per_stock_uom()
+    _sync_zero_rate_marker(doc)
     doc.calculate_taxes_and_totals()
     # payment_schedule is the one field calculate_taxes_and_totals()
     # does NOT recompute (it's a separate method) — call explicitly so
@@ -1546,9 +1547,33 @@ def run_calculation_pipeline(doc, method=None):
                 pre_discount_total=pre_discount_total,
             )
 
+    _sync_zero_rate_marker(doc)
     rebuild_brand_summary(doc)
     recalc_doc_totals(doc)
     set_margin_flags(doc)
+
+
+def _sync_zero_rate_marker(doc):
+    """#0547 (QN-FZCO-26-00749): keep ERPNext's native "free line" marker in
+    step with the FINAL item rate.
+
+    ERPNext's calculate_item_values treats rate == 0 as "not set" and restores
+    price_list_rate unless the line has discount_percentage == 100 (what the
+    form sets when a user types rate 0). Our pipeline is skipped on Submit, so
+    a line our pipeline priced at zero went back to list price there. Runs
+    after every override has set the final rate. Only our own marker is
+    touched: a stale 100% is cleared once the line has a price again; any
+    other discount % is left as it is.
+    """
+    for it in (doc.get("items") or []):
+        plr = flt(it.get("price_list_rate"))
+        rate = flt(it.get("rate"))
+        if not rate and plr > 0:
+            it.discount_percentage = 100
+            it.discount_amount = plr
+        elif rate and flt(it.get("discount_percentage")) == 100:
+            it.discount_percentage = 0
+            it.discount_amount = 0
 
 
 # ──────────────────────────────────────────────────────────────
