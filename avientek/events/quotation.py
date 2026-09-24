@@ -3046,23 +3046,15 @@ def update_special_price(quotation_name, items):
     if doc.docstatus != 1:
         frappe.throw("This action is only allowed on submitted Quotations.")
 
-    # Sridhar 2026-09-17 (#0542): once a Sales Order / Sales Invoice exists
-    # against this Quotation, re-pricing here retroactively changes costing
-    # figures (incl. the incentive) that were ALREADY carried into the SO/SI
-    # and booked (e.g. the Reward/Incentive JV). The downstream docs never
-    # see the change, so the Quotation and the booked JV disagree for good —
-    # exactly the reconciliation mismatch reported on QN-FZCO-26-00275-1
-    # (quote incentive moved to USD 2,254.54 after the JV booked USD 2,480).
-    # ERPNext sets doc.status to "Ordered"/"Partially Ordered" whenever an SO
-    # references the Quotation (same reliable check the sibling apply_* flows
-    # enforce via _guard_quotation_editable_for_update).
-    if doc.status in ("Ordered", "Partially Ordered"):
-        frappe.throw(_(
-            "This Quotation already has a Sales Order created against it "
-            "({0}). Updating Special Price here would change costing/incentive "
-            "figures that were already carried into the Sales Order/Invoice "
-            "(and any booked incentive JV) — not allowed."
-        ).format(doc.status))
+    # #0542 / #0548: once a Sales Order exists (ERPNext sets status to
+    # "Ordered" / "Partially Ordered"), the incentive has already been carried
+    # into the SO/SI and booked (Reward/Incentive JV). Re-deriving it from the
+    # new special price made the quote disagree with the booked JV (#0542,
+    # QN-FZCO-26-00275-1). #0542 first blocked Update Special Price outright on
+    # ordered quotes, but the Orders team legitimately records the final
+    # supplier special price AFTER the order (#0548) — so the update is allowed
+    # again and only the incentive is frozen at its current value.
+    incentive_frozen = doc.status in ("Ordered", "Partially Ordered")
 
     for item_update in items:
         row_name = item_update.get("name")
@@ -3098,7 +3090,7 @@ def update_special_price(quotation_name, items):
         # stored incentive value as-is when the incentive is a fixed Amount;
         # recalc_doc_totals + the parent-sync block below then hold the fixed
         # total and only restate the derived % against the new base.
-        if (doc.custom_incentive_type or "Percentage") == "Amount":
+        if incentive_frozen or (doc.custom_incentive_type or "Percentage") == "Amount":
             incentive = flt(_to_flt(row.custom_incentive_value), 4)
         else:
             incentive = flt(_to_flt(row.custom_incentive_) * new_sp * qty / 100, 4)
@@ -3178,8 +3170,10 @@ def update_special_price(quotation_name, items):
     )
     synced_incentive = flt(doc.get("custom_total_incentive_new") or 0, 4)
     incentive_pct = _safe_pct(synced_incentive, total_sp_now)
-    parent_updates["custom_incentive_amount"] = synced_incentive
-    parent_updates["custom_incentive_"] = incentive_pct
+    if not incentive_frozen:
+        # Ordered quote: the parent Incentive Amount / % stay exactly as booked.
+        parent_updates["custom_incentive_amount"] = synced_incentive
+        parent_updates["custom_incentive_"] = incentive_pct
     # Same number, same base as recalc_doc_totals' custom_total_incentive_
     # percent_new — total_sp_now is that function's totals["buying_price"],
     # computed identically. This flow writes rows straight to the DB and never
