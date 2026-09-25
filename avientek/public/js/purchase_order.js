@@ -188,39 +188,61 @@ frappe.ui.form.on("Purchase Order Item", {
 })
 
 var add_so_dialog = function (frm, cdt, cdn) {
+	// #0549 (Jithin 2026-09-25): link a PO line to a Sales Order line — also on a
+	// SUBMITTED PO. Previously the chosen SO was never sent to the server (the
+	// Swap action only refreshed the ETA of the line's EXISTING SO), and an
+	// unlinked line had no current SO so the options call failed.
 	var row = locals[cdt][cdn];
 	frappe.call({
 		'method': 'avientek.events.purchase_order.get_sales_orders',
-		'args':{
+		'args': {
 			'item': row.item_code,
 			'qty': row.qty,
-			'sales_order': row.sales_order
+			'sales_order': row.sales_order || '',
+			'company': frm.doc.company,
 		},
-	freeze: true,
-	callback: (r) => {
-		if (r && r.message) {
+		freeze: true,
+		callback: (r) => {
+			if (!r || !r.message || !r.message.length) {
+				frappe.msgprint(__('No open Sales Order lines found for item {0} (qty {1} or less) in {2}.',
+					[row.item_code, row.qty, frm.doc.company]));
+				return;
+			}
 			let d = new frappe.ui.Dialog({
-				title: 'Swap Sales Order',
+				title: row.sales_order ? __('Swap Sales Order') : __('Link Sales Order'),
 				fields: [
 					{
-						label: 'Sales Order',
+						label: __('Sales Order'),
 						fieldname: 'sales_order',
 						fieldtype: 'Select',
-						options: r.message
+						options: r.message,
+						reqd: 1,
 					}
 				],
-				primary_action_label: 'Swap',
+				primary_action_label: row.sales_order ? __('Swap') : __('Link'),
 				primary_action(values) {
-					if (values && values.sales_order) {
-						set_so_eta(frm, values.sales_order, row)
-					}
-					d.hide();
+					if (!values || !values.sales_order) return;
+					frappe.call({
+						'method': 'avientek.events.purchase_order.set_sales_order',
+						'args': {
+							'sales_order': values.sales_order,
+							'item_name': row.name,
+							'eta': row.avientek_eta || '',
+						},
+						freeze: true,
+						callback: (res) => {
+							if (!res.exc) {
+								d.hide();
+								frm.reload_doc();
+								frappe.show_alert({ message: __('Sales Order linked'), indicator: 'green' }, 5);
+							}
+						}
+					});
 				}
 			});
 			d.show();
 		}
-	}
-	})
+	});
 }
 
 var set_so_eta = function(frm, sales_order,row) {

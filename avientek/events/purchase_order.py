@@ -559,33 +559,88 @@ def set_history(po_eta_history):
 
 
 @frappe.whitelist()
-def get_sales_orders(item, qty, sales_order):
-	so_option = []
-	query = f"""
-		SELECT
-			soi.name AS child,
-			so.name AS so,
-			so.customer AS customer,
-			soi.qty AS qty
-		FROM
-			`tabSales Order Item` as soi LEFT JOIN
-			`tabSales Order` as so ON soi.parent = so.name
-		WHERE
-			soi.item_code = {frappe.db.escape(item)} AND
-			soi.qty <= {qty} AND
-			so.name != {frappe.db.escape(sales_order)} AND
-			so.is_internal_customer=0 AND
-			so.status = {frappe.db.escape("To Deliver and Bill")}
-			"""
-	sales_orders = frappe.db.sql(query, as_dict=1)
-	for so in sales_orders:
-		if so.get('so'):
-			so_option.append({
-				"label": str(so.get('so'))+" - "+str(so.get('customer'))+" - "+str(so.get('qty')),
-				"value": str(so.get('so'))+" | "+str(so.get('child'))
-			})
+def get_sales_orders(item, qty, sales_order=None, company=None):
+	"""Sales Order lines this PO line can be linked / swapped to.
 
-	return so_option
+	#0549 (Jithin 2026-09-25): `sales_order` is optional — an UNLINKED line
+	(the main "link a submitted PO to its SO" case) has none, and the old
+	required arg made the dialog fail. `company` keeps the list to the PO's
+	own company.
+	"""
+	conditions = [
+		"soi.item_code = %(item)s",
+		"soi.qty <= %(qty)s",
+		"so.is_internal_customer = 0",
+		"so.status = 'To Deliver and Bill'",
+		"so.docstatus = 1",
+	]
+	params = {"item": item, "qty": flt(qty)}
+	if sales_order:
+		conditions.append("so.name != %(sales_order)s")
+		params["sales_order"] = sales_order
+	if company:
+		conditions.append("so.company = %(company)s")
+		params["company"] = company
+	sales_orders = frappe.db.sql(
+		"""SELECT soi.name AS child, so.name AS so, so.customer AS customer, soi.qty AS qty
+		   FROM `tabSales Order Item` soi
+		   JOIN `tabSales Order` so ON soi.parent = so.name
+		   WHERE """ + " AND ".join(conditions) + """
+		   ORDER BY so.transaction_date DESC, so.name""",
+		params, as_dict=1,
+	)
+	return [
+		{
+			"label": "{0} - {1} - {2}".format(r.so, r.customer, r.qty),
+			"value": "{0} | {1}".format(r.so, r.child),
+		}
+		for r in sales_orders
+	]
+
+
+def _refresh_po_line_from_so_item(item_name, sales_order, sales_order_item):
+	"""After (re)linking a PO line: refresh its read-only Special Price / Note
+	mirror from the SO Item (converted into the PO's currency, as in
+	update_eta) and recompute the SO Item's ordered_qty from every SUBMITTED
+	PO line now pointing at it. ERPNext only updates ordered_qty on PO
+	submit/cancel, so a link made after submit must do it here — otherwise
+	"make Purchase Order" from the SO would offer the qty again."""
+	so_item = frappe.db.get_value(
+		"Sales Order Item", sales_order_item,
+		["custom_special_price", "custom_special_price_note"], as_dict=True,
+	)
+	po_parent = frappe.db.get_value("Purchase Order Item", item_name, "parent")
+	if so_item and po_parent:
+		so_doc = frappe.db.get_value(
+			"Sales Order", sales_order, ["currency", "conversion_rate"], as_dict=True
+		) or frappe._dict()
+		po_doc = frappe.db.get_value(
+			"Purchase Order", po_parent, ["currency", "conversion_rate"], as_dict=True
+		) or frappe._dict()
+		frappe.db.set_value("Purchase Order Item", item_name, {
+			"custom_special_price": _convert_txn_amount(
+				so_item.custom_special_price,
+				so_doc.currency, so_doc.conversion_rate,
+				po_doc.currency, po_doc.conversion_rate,
+			),
+			"custom_special_price_note": so_item.custom_special_price_note,
+		}, update_modified=False)
+
+	ordered = frappe.db.sql(
+		"""SELECT IFNULL(SUM(stock_qty), 0) FROM `tabPurchase Order Item`
+		   WHERE sales_order_item = %s AND docstatus = 1""",
+		sales_order_item,
+	)[0][0]
+	# A PO line may be larger than the SO line it serves (the rest goes to
+	# stock) — cap at the SO line's own stock qty so the SO reads "fully
+	# ordered", never over 100%.
+	so_stock_qty = flt(frappe.db.get_value("Sales Order Item", sales_order_item, "stock_qty"))
+	if so_stock_qty:
+		ordered = min(flt(ordered), so_stock_qty)
+	frappe.db.set_value(
+		"Sales Order Item", sales_order_item, "ordered_qty", flt(ordered),
+		update_modified=False,
+	)
 
 
 @frappe.whitelist()
@@ -632,17 +687,22 @@ def set_sales_order(sales_order, item_name, eta):
 			so_child_eta_history = frappe.db.get_value("Sales Order Item", sales_order_item, ["eta_history"])
 
 		
-		if so_child_eta_history:
-			so_eta_history = append_to_eta_list(eta, so_child_eta_history)
-		else:
-			so_eta_history = [{"eta": eta, "date": frappe.utils.nowdate()}]
-		eta_history_text = set_history(so_eta_history)
-		eta_history = json.dumps(so_eta_history)
-		frappe.db.set_value("Sales Order Item", sales_order_item, {
-			"avientek_eta": eta,
-			"eta_history_text": eta_history_text,
-			"eta_history" : eta_history
-			})
+		# #0549: linking a line that has no ETA yet must not push a blank ETA
+		# entry into the Sales Order's ETA history.
+		if eta:
+			if so_child_eta_history:
+				so_eta_history = append_to_eta_list(eta, so_child_eta_history)
+			else:
+				so_eta_history = [{"eta": eta, "date": frappe.utils.nowdate()}]
+			eta_history_text = set_history(so_eta_history)
+			eta_history = json.dumps(so_eta_history)
+			frappe.db.set_value("Sales Order Item", sales_order_item, {
+				"avientek_eta": eta,
+				"eta_history_text": eta_history_text,
+				"eta_history" : eta_history
+				})
+		if frappe.db.exists("Sales Order Item", {"name": sales_order_item}):
+			_refresh_po_line_from_so_item(item_name, sales_order_name, sales_order_item)
 		return True
 
 @frappe.whitelist()
