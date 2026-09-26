@@ -43,14 +43,30 @@ frappe.ui.form.on('Purchase Receipt', {
             });
         }
 
-        // Zero out tax rates when item_tax_template is used
-        var has_item_tax_template = frm.doc.items.some(function(item) { return item.item_tax_template; });
-        if (has_item_tax_template && frm.doc.taxes) {
-            frm.doc.taxes.forEach(function(tax) {
+        // Zero a tax row's own rate ONLY when its account is covered by an
+        // item's Item Tax Template — ERPNext then takes the rate for that
+        // account from each item's map, and items without it get 0 (the India
+        // GST intent this was written for). #0550 (Avientek Singapore): the old
+        // version zeroed EVERY row whenever any item had a template, so a row
+        // whose account no template covers (2-05-01-28 GST 9% vs the template's
+        // old "GST - AETPLS" 7% account) ended up at 0% on every item.
+        var covered = {};
+        (frm.doc.items || []).forEach(function(item) {
+            if (!item.item_tax_rate) return;
+            try {
+                Object.keys(JSON.parse(item.item_tax_rate) || {}).forEach(function(acc) {
+                    covered[acc] = true;
+                });
+            } catch (e) { /* malformed map — leave rates untouched */ }
+        });
+        var changed = false;
+        (frm.doc.taxes || []).forEach(function(tax) {
+            if (covered[tax.account_head] && flt(tax.rate) !== 0) {
                 tax.rate = 0;
-            });
-            frm.refresh_field('taxes');
-        }
+                changed = true;
+            }
+        });
+        if (changed) frm.refresh_field('taxes');
     }
 });
 
