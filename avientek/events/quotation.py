@@ -12,8 +12,16 @@ _DEC_ZERO_TOL = Decimal("0.005")
 
 
 @frappe.whitelist()
-def get_customer_outstanding(customer, company):
-    """Get total outstanding from Sales Invoices for a customer (bypasses doctype permission)."""
+def get_customer_outstanding(customer, company=None):
+    """Get total outstanding from Sales Invoices for a customer (bypasses doctype permission).
+
+    #0554 side-finding: the quotation form fires this when the customer is
+    picked, and if Company isn't set yet the JS sends no `company` - the
+    required arg made the call crash (Error Log, 2026-09-28). Outstanding is
+    per company, so with no company there is nothing to report: return 0.
+    """
+    if not customer or not company:
+        return 0
     outstanding = frappe.db.sql("""
         SELECT IFNULL(SUM(outstanding_amount), 0) as total
         FROM `tabSales Invoice`

@@ -502,7 +502,9 @@ frappe.ui.form.on('Quotation', {
                 frm.set_value('custom_existing_payment_term', '');
             }
 
-            frappe.call({
+            // #0554: Outstanding is per company — skip until Company is set
+            // (was crashing the server call with no company).
+            if (company) frappe.call({
                 method: 'avientek.events.quotation.get_customer_outstanding',
                 args: { customer: frm.doc.party_name, company: company },
                 callback(r) {
@@ -538,7 +540,9 @@ frappe.ui.form.on('Quotation', {
             }
             frm.set_value('credit_limit', credit_limit);
 
-            frappe.call({
+            // #0554: Outstanding is per company — skip until Company is set
+            // (was crashing the server call with no company).
+            if (company) frappe.call({
                 method: 'avientek.events.quotation.get_customer_outstanding',
                 args: { customer: frm.doc.customer, company: company },
                 callback(r) {
