@@ -2026,14 +2026,20 @@ frappe.ui.form.on('Payment Request Form', {
                 }
             }
 
-            // 3. Linked Purchase Order preview.
+            // 3. Linked Purchase Order preview — one section per PO on the
+            // invoice (#0553: an invoice can consolidate several POs; older
+            // servers only send po_name / po_images for the first).
             const po_images = data.po_images || [];
             const po_name = data.po_name || "";
-            if (po_images.length && po_name) {
+            const po_sections = (data.po_sections && data.po_sections.length)
+                ? data.po_sections
+                : (po_name ? [{ po_name: po_name, images: po_images }] : []);
+            for (const sec of po_sections) {
+                if (!sec.po_name || !(sec.images || []).length) continue;
                 const po_print = "/printview?doctype=Purchase%20Order&name="
-                    + encodeURIComponent(po_name) + "&trigger_print=0&no_letterhead=0";
-                html += _section_header(`Linked Purchase Order: ${po_name}`, po_print);
-                for (const img of po_images) {
+                    + encodeURIComponent(sec.po_name) + "&trigger_print=0&no_letterhead=0";
+                html += _section_header(`Linked Purchase Order: ${sec.po_name}`, po_print);
+                for (const img of sec.images) {
                     html += `<img src="${img}" loading="lazy" style="max-width:100%;border:1px solid #eee;border-radius:4px;margin-bottom:8px;" />`;
                 }
             }
