@@ -2954,6 +2954,8 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
             "file_urls": [],
             "po": None,
             "qn": None,
+            "pos": [],
+            "qns": [],
             # legacy keys kept for back-compat with any downstream caller
             "pi": None,
             "pi_att": None,
@@ -3024,20 +3026,17 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         if target_doctype == "Purchase Invoice":
             out["pi"] = target_name  # back-compat
             out["pi_att"] = _read_local_pdf(out["file_urls"][0]) if out["file_urls"] else None
-            out["po"] = frappe.get_value(
-                "Purchase Invoice Item",
-                {"parent": target_name},
-                fieldname="purchase_order",
-                order_by="idx asc",
-            )
-            if out["po"]:
-                so = frappe.db.get_value(
-                    "Purchase Order Item", {"parent": out["po"]}, "sales_order"
-                )
-                if so:
-                    out["qn"] = frappe.db.get_value(
-                        "Sales Order Item", {"parent": so}, "prevdoc_docname"
-                    )
+            # #0553: ALL POs on the invoice (was first only), and every
+            # Quotation behind them via the same fan-out resolver the Brand
+            # Summary uses (was a first-row PO→SO→Quote walk).
+            out["pos"] = get_linked_pos_for_invoice(target_name)
+            out["po"] = out["pos"][0] if out["pos"] else None
+            if out["pos"]:
+                try:
+                    out["qns"] = _aggregate_quotations_for_pos(out["pos"]) or []
+                except Exception:
+                    out["qns"] = []
+                out["qn"] = out["qns"][0] if out["qns"] else None
         return out
 
     t_resolve = _time.time()
@@ -3048,16 +3047,18 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     unique_pos = []
     seen_pos = set()
     for r in resolved:
-        if r["po"] and r["po"] not in seen_pos:
-            seen_pos.add(r["po"])
-            unique_pos.append(r["po"])
+        for _po in (r.get("pos") or ([r["po"]] if r["po"] else [])):
+            if _po not in seen_pos:
+                seen_pos.add(_po)
+                unique_pos.append(_po)
 
     unique_qns = []
     seen_qns = set()
     for r in resolved:
-        if r["qn"] and r["qn"] not in seen_qns:
-            seen_qns.add(r["qn"])
-            unique_qns.append(r["qn"])
+        for _qn in (r.get("qns") or ([r["qn"]] if r["qn"] else [])):
+            if _qn not in seen_qns:
+                seen_qns.add(_qn)
+                unique_qns.append(_qn)
 
     po_pdf_cache = {}
     for _i, po in enumerate(unique_pos, start=1):
@@ -3138,17 +3139,21 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         # the originating PO + Quotation. Other reference types stop
         # at attachments.
         if r["target_doctype"] == "Purchase Invoice" and r["po"]:
-            po_pdf = po_pdf_cache.get(r["po"])
-            if po_pdf:
-                merger.append(io.BytesIO(po_pdf))
-                appended += 1
+            # #0553: every PO on the invoice, then every Quotation behind
+            # them (one progress step per stage, regardless of count).
+            for _po in (r.get("pos") or [r["po"]]):
+                po_pdf = po_pdf_cache.get(_po)
+                if po_pdf:
+                    merger.append(io.BytesIO(po_pdf))
+                    appended += 1
             _step(_("Reference {0}/{1} — Purchase Order").format(_ref_idx, ref_count))
 
             if r["qn"]:
-                q_pdf = qn_pdf_cache.get(r["qn"])
-                if q_pdf:
-                    merger.append(io.BytesIO(q_pdf))
-                    appended += 1
+                for _qn in (r.get("qns") or [r["qn"]]):
+                    q_pdf = qn_pdf_cache.get(_qn)
+                    if q_pdf:
+                        merger.append(io.BytesIO(q_pdf))
+                        appended += 1
                 _step(_("Reference {0}/{1} — Quotation").format(_ref_idx, ref_count))
             else:
                 _step(_("Reference {0}/{1} — Quotation (none)").format(_ref_idx, ref_count))
@@ -3604,10 +3609,17 @@ def get_voucher_print_data(docname):
 
             # Linked PO (supplier only)
             if doc.party_type == "Supplier" and row.reference_doctype in ("Purchase Invoice", "Debit Note"):
-                linked_po = get_linked_po_for_invoice(row.reference_name)
-                if linked_po:
-                    row_data["linked_po"] = linked_po
-                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=10) or []
+                # #0553: an invoice can consolidate SEVERAL POs — render every
+                # one, not just the first. linked_po stays a string (names
+                # joined) so existing print formats keep working.
+                _pos = get_linked_pos_for_invoice(row.reference_name)
+                if _pos:
+                    row_data["linked_po"] = ", ".join(_pos)
+                    row_data["linked_pos"] = _pos
+                    _po_imgs = []
+                    for _po in _pos:
+                        _po_imgs += get_print_format_as_images("Purchase Order", _po, print_format="Purchase Order - India", max_pages=10) or []
+                    row_data["po_images"] = _po_imgs
 
                 # Manual costing sheet
                 if row.costing_sheet_attachment:
@@ -4606,10 +4618,17 @@ def get_payment_voucher_context(docname):
             # Linked PO (supplier only). For PI rows, derive the PO from
             # the resolved canonical PI name (not from the freetext bill_no).
             if doc.party_type == "Supplier" and row.reference_doctype in ("Purchase Invoice", "Debit Note"):
-                linked_po = get_linked_po_for_invoice(tgt_name)
-                if linked_po:
-                    row_data["linked_po"] = linked_po
-                    row_data["po_images"] = get_print_format_as_images("Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=10) or []
+                # #0553: an invoice can consolidate SEVERAL POs — render every
+                # one, not just the first. linked_po stays a string (names
+                # joined) so existing print formats keep working.
+                _pos = get_linked_pos_for_invoice(tgt_name)
+                if _pos:
+                    row_data["linked_po"] = ", ".join(_pos)
+                    row_data["linked_pos"] = _pos
+                    _po_imgs = []
+                    for _po in _pos:
+                        _po_imgs += get_print_format_as_images("Purchase Order", _po, print_format="Purchase Order - India", max_pages=10) or []
+                    row_data["po_images"] = _po_imgs
 
                 # Manual costing sheet
                 if row.costing_sheet_attachment:
@@ -5293,15 +5312,16 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
     # 6) Issue 4 — Linked Purchase Order preview (for Purchase Invoice references)
     po_images = []
     po_name = ""
+    po_sections = []
     if actual_doctype == "Purchase Invoice":
-        po_name = frappe.db.get_value(
-            "Purchase Invoice Item",
-            {"parent": reference_name},
-            "purchase_order",
-            order_by="idx asc",
-        ) or ""
-        if po_name:
-            po_images = get_print_format_as_images("Purchase Order", po_name, max_pages=max_pages, print_format="Avientek PO") or []
+        # #0553: one section per PO on the invoice (was first only).
+        # po_name / po_images keep the first PO for older cached clients.
+        for _po in get_linked_pos_for_invoice(reference_name):
+            _imgs = get_print_format_as_images("Purchase Order", _po, max_pages=max_pages, print_format="Avientek PO") or []
+            po_sections.append({"po_name": _po, "images": _imgs})
+        if po_sections:
+            po_name = po_sections[0]["po_name"]
+            po_images = po_sections[0]["images"]
 
     # 7) Issue 4 — Costing Sheet attachment from the PRF row
     costing_images = []
@@ -5348,6 +5368,7 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         "print_images": print_images,
         "po_images": po_images,
         "po_name": po_name,
+        "po_sections": po_sections,
         "costing_images": costing_images,
         "costing_url": costing_url,
         "linked_quotation": linked_quotations[0] if linked_quotations else "",
@@ -5558,13 +5579,14 @@ def get_all_print_attachments(docname):
 
         # Linked Purchase Orders (Supplier only)
         if doc.party_type == "Supplier" and row.reference_doctype in ["Purchase Invoice", "Debit Note"]:
-            linked_po = get_linked_po_for_invoice(row.reference_name)
-            if linked_po:
-                po_imgs = get_print_format_as_images(
-                    "Purchase Order", linked_po, print_format="Purchase Order - India", max_pages=5
+            _pos = get_linked_pos_for_invoice(row.reference_name)  # #0553: all POs
+            po_imgs = []
+            for _po in _pos:
+                po_imgs += get_print_format_as_images(
+                    "Purchase Order", _po, print_format="Purchase Order - India", max_pages=5
                 ) or []
-                if po_imgs:
-                    result["po_images"][str(idx)] = {"po_name": linked_po, "images": po_imgs}
+            if po_imgs:
+                result["po_images"][str(idx)] = {"po_name": ", ".join(_pos), "images": po_imgs}
 
             # Costing sheets
             if row.costing_sheet_attachment:
