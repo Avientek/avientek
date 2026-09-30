@@ -162,3 +162,36 @@ def _copy_contact_details_from_lead(doc, lead_name):
 		})
 
 	doc.save(ignore_permissions=True)
+
+
+import re as _re
+
+_SAUDI_VAT = _re.compile(r"^3\d{13}3$")
+
+
+def _saudi_vat(value):
+    """Return the value if it is a valid-format Saudi VAT number
+    (15 digits, starts and ends with 3), else None."""
+    v = (value or "").strip().replace(" ", "")
+    return v if _SAUDI_VAT.match(v) else None
+
+
+def sync_ksa_vat_from_tax_id(doc, method=None):
+    """KSA ZATCA (INV-AT-26-00523, BR-KSA-31): ksa_compliance decides B2B
+    (Standard, cleared) vs B2C (Simplified) ONLY from its own field
+    `custom_vat_registration_number` (or Additional Buyer IDs). Avientek
+    users enter the VAT number in ERPNext's standard Tax ID, so VAT-registered
+    Saudi companies were reported to ZATCA as Simplified/B2C — and an export
+    invoice to one was rejected outright (export is Standard-only).
+
+    When the ksa field is empty and Tax ID holds a valid-format Saudi VAT
+    number (15 digits, starts and ends with 3), copy it across. Never
+    overwrites a value already in the ksa field; non-Saudi tax IDs (UAE TRN,
+    India GSTIN, ...) are left alone."""
+    if not doc.meta.has_field("custom_vat_registration_number"):
+        return
+    if (doc.get("custom_vat_registration_number") or "").strip():
+        return
+    vat = _saudi_vat(doc.get("tax_id"))
+    if vat:
+        doc.custom_vat_registration_number = vat

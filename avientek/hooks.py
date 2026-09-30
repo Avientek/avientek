@@ -512,7 +512,12 @@ override_doctype_class = {
 doc_events = {
     "Customer": {
         "after_insert": "avientek.events.customer.after_insert",
-        "validate": "avientek.events.customer.validate_alias",
+        "validate": [
+            "avientek.events.customer.validate_alias",
+            # KSA ZATCA: copy a Saudi VAT number from Tax ID into
+            # ksa_compliance's custom_vat_registration_number (B2B detection).
+            "avientek.events.customer.sync_ksa_vat_from_tax_id",
+        ],
         "before_save": "avientek.events.customer.sync_credit_limit_totals",
     },
     # Project enhancement (Rahul 2026-08-22): stamp Created By on insert;
