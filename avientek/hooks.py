@@ -555,6 +555,11 @@ doc_events = {
         "on_submit": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
         "on_cancel": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
     },
+    # #0544 follow-up: assets auto-created from a GRN had blank Asset Owner
+    # Company -> strict User Permissions refused them (empty Company link).
+    "Asset": {
+        "before_validate": "avientek.events.asset.default_asset_owner_company",
+    },
     "Payment Request Form": {
         # Jithin Avientek 2026-06-19 (Phase 2 of PRF authorization
         # rewrite): match the PRF against active PRF Approval Rule

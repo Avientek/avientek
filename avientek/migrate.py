@@ -80,6 +80,7 @@ def after_migrate():
 			"Print Format", "report", "ignore_user_permissions", 1, "Check")),
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
+		("backfill_asset_owner_company", _backfill_asset_owner_company),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
 		("lead_type_consolidation", _lead_type_consolidation),
@@ -453,6 +454,26 @@ def _allow_quotation_expected_closing_date_after_submit():
 	):
 		frappe.db.set_value("Custom Field", name, "allow_on_submit", 1)
 		frappe.clear_cache(doctype="Quotation")
+
+
+def _backfill_asset_owner_company():
+	"""#0544 follow-up: existing assets (incl. submitted) with a blank Asset
+	Owner / Asset Owner Company are unreadable for Company-restricted users
+	under strict User Permissions. Fill them from the asset's own company —
+	same default avientek.events.asset.default_asset_owner_company applies on
+	save. Ownership fields only (no GL / depreciation impact). Idempotent."""
+	frappe.db.sql(
+		"""UPDATE `tabAsset`
+		   SET asset_owner = 'Company'
+		   WHERE IFNULL(asset_owner, '') = '' AND IFNULL(company, '') != ''"""
+	)
+	frappe.db.sql(
+		"""UPDATE `tabAsset`
+		   SET asset_owner_company = company
+		   WHERE asset_owner = 'Company'
+		     AND IFNULL(asset_owner_company, '') = ''
+		     AND IFNULL(company, '') != ''"""
+	)
 
 
 def _unblock_avientek_module():
