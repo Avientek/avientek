@@ -3222,9 +3222,126 @@ def update_special_price(quotation_name, items):
         bs_doc.db_insert()
 
     frappe.db.set_value("Quotation", quotation_name, "modified", frappe.utils.now())
+
+    # #0555: carry the revised Special Price / margin to the connected SO/PO.
+    try:
+        _propagate_special_price_to_so_po(
+            quotation_name, [u.get("name") for u in items if u.get("name")]
+        )
+    except Exception:
+        frappe.log_error(
+            title="update_special_price: SO/PO propagation failed",
+            message=frappe.get_traceback(),
+        )
     frappe.db.commit()
 
     return {"message": "Special Price updated successfully"}
+
+
+_SO_SP_MARGIN_FIELDS = (
+    "custom_special_price", "custom_special_price_note",
+    "custom_margin_value", "custom_margin_", "custom_markup_value", "custom_markup_",
+)
+
+
+def _propagate_special_price_to_so_po(quotation_name, quotation_item_names):
+    """#0555 (Orders.Mea, QN-KSA-26-00634-2 -> SO-AT-26-00309): the Special
+    Price / Margin were copied to the Sales Order only once, when the SO was
+    created (carry_forward_quotation_fields), and the PO takes them from the
+    SO — so a revision on the submitted Quotation never reached SO / PO.
+
+    After Update Special Price, push the revised values to:
+      * Sales Order lines created from these Quotation lines
+        (SO Item.quotation_item + prevdoc_docname), not cancelled:
+        Special Price, Special Price Note, Margin / Markup value and %;
+      * Purchase Order lines linked to those SO lines (sales_order_item),
+        not cancelled: Special Price (converted SO -> PO currency, same as
+        purchase_order.sync_special_price_from_sales_order) and Note.
+    The SO selling rate and totals are never touched — these are read-only
+    information columns. Each changed SO / PO gets a timeline comment with
+    old -> new and the source Quotation. SOs not created from this Quotation
+    are not touched.
+    """
+    from frappe.utils import escape_html
+    from avientek.events.purchase_order import _convert_txn_amount
+
+    qi_names = [n for n in (quotation_item_names or []) if n]
+    if not qi_names:
+        return
+    qi_map = {
+        r.name: r for r in frappe.db.get_all(
+            "Quotation Item", filters={"name": ["in", qi_names], "parent": quotation_name},
+            fields=["name", "item_code", *_SO_SP_MARGIN_FIELDS],
+        )
+    }
+    if not qi_map:
+        return
+
+    so_items = frappe.db.get_all(
+        "Sales Order Item",
+        filters={"quotation_item": ["in", list(qi_map)], "prevdoc_docname": quotation_name,
+                 "docstatus": ["<", 2]},
+        fields=["name", "parent", "item_code", "quotation_item", *_SO_SP_MARGIN_FIELDS],
+    )
+    so_changes, po_changes = {}, {}
+    so_hdr_cache = {}
+    for soi in so_items:
+        qi = qi_map.get(soi.quotation_item)
+        if not qi:
+            continue
+        upd = {f: qi.get(f) for f in _SO_SP_MARGIN_FIELDS
+               if str(qi.get(f) or "") != str(soi.get(f) or "")}
+        if upd:
+            frappe.db.set_value("Sales Order Item", soi.name, upd, update_modified=False)
+            so_changes.setdefault(soi.parent, []).append(
+                "{0}: Special Price {1} → {2}".format(
+                    soi.item_code, flt(soi.custom_special_price), flt(qi.custom_special_price)))
+
+        # PO lines fed by this SO line
+        if soi.parent not in so_hdr_cache:
+            so_hdr_cache[soi.parent] = frappe.db.get_value(
+                "Sales Order", soi.parent, ["currency", "conversion_rate"], as_dict=True
+            ) or frappe._dict()
+        so_hdr = so_hdr_cache[soi.parent]
+        for poi in frappe.db.get_all(
+            "Purchase Order Item",
+            filters={"sales_order_item": soi.name, "docstatus": ["<", 2]},
+            fields=["name", "parent", "item_code", "custom_special_price", "custom_special_price_note"],
+        ):
+            po_hdr = frappe.db.get_value(
+                "Purchase Order", poi.parent, ["currency", "conversion_rate"], as_dict=True
+            ) or frappe._dict()
+            new_sp = _convert_txn_amount(
+                qi.custom_special_price, so_hdr.currency, so_hdr.conversion_rate,
+                po_hdr.currency, po_hdr.conversion_rate,
+            )
+            pupd = {}
+            if abs(flt(new_sp) - flt(poi.custom_special_price)) > 1e-9:
+                pupd["custom_special_price"] = new_sp
+            if (qi.custom_special_price_note or "") != (poi.custom_special_price_note or ""):
+                pupd["custom_special_price_note"] = qi.custom_special_price_note
+            if pupd:
+                frappe.db.set_value("Purchase Order Item", poi.name, pupd, update_modified=False)
+                po_changes.setdefault(poi.parent, []).append(
+                    "{0}: Special Price {1} → {2}".format(
+                        poi.item_code, flt(poi.custom_special_price), flt(new_sp)))
+
+    def _note(dt, name, lines):
+        try:
+            frappe.get_doc({
+                "doctype": "Comment", "comment_type": "Info",
+                "reference_doctype": dt, "reference_name": name,
+                "content": _("Special Price / margin updated from Quotation {0} by {1}:<br>{2}").format(
+                    escape_html(quotation_name), escape_html(frappe.session.user),
+                    "<br>".join(escape_html(l) for l in lines)),
+            }).insert(ignore_permissions=True)
+        except Exception:
+            frappe.log_error(title="special price propagation comment", message=frappe.get_traceback())
+
+    for so, lines in so_changes.items():
+        _note("Sales Order", so, lines)
+    for po, lines in po_changes.items():
+        _note("Purchase Order", po, lines)
 
 
 @frappe.whitelist()
