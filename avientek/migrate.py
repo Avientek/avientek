@@ -81,6 +81,7 @@ def after_migrate():
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
 		("backfill_asset_owner_company", _backfill_asset_owner_company),
+		("backfill_ksa_vat_from_tax_id", _backfill_ksa_vat_from_tax_id),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
 		("lead_type_consolidation", _lead_type_consolidation),
@@ -473,6 +474,23 @@ def _backfill_asset_owner_company():
 		   WHERE asset_owner = 'Company'
 		     AND IFNULL(asset_owner_company, '') = ''
 		     AND IFNULL(company, '') != ''"""
+	)
+
+
+def _backfill_ksa_vat_from_tax_id():
+	"""KSA ZATCA B2B detection: fill ksa_compliance's
+	custom_vat_registration_number from ERPNext Tax ID on existing customers
+	where it is empty and Tax ID is a valid-format Saudi VAT number (see
+	avientek.events.customer.sync_ksa_vat_from_tax_id). 16 customers invoiced
+	by AVIENTEK TRADING LLC since ZATCA go-live were being reported as
+	Simplified/B2C. Idempotent; never overwrites."""
+	if not frappe.db.has_column("Customer", "custom_vat_registration_number"):
+		return
+	frappe.db.sql(
+		"""UPDATE `tabCustomer`
+		   SET custom_vat_registration_number = TRIM(tax_id)
+		   WHERE IFNULL(custom_vat_registration_number, '') = ''
+		     AND TRIM(IFNULL(tax_id, '')) REGEXP '^3[0-9]{13}3$'"""
 	)
 
 
