@@ -81,6 +81,15 @@ def after_migrate():
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
 		("backfill_asset_owner_company", _backfill_asset_owner_company),
+		# #0556 (accounts.ksa, AS-0926-00001): saving an asset with depreciation
+		# inserts an Asset Depreciation Schedule whose `company` is fetched from
+		# the asset AFTER Frappe's create-permission check, so under "Apply
+		# Strict User Permissions" a Company-restricted user is refused ("linked
+		# to Company 'empty'... need 'create' permission"). The schedule always
+		# belongs to an asset whose company IS checked, so the field can safely
+		# ignore User Permissions. Idempotent.
+		("asset_depr_schedule_company_ignore_up", lambda: make_property_setter(
+			"Asset Depreciation Schedule", "company", "ignore_user_permissions", 1, "Check")),
 		("backfill_ksa_vat_from_tax_id", _backfill_ksa_vat_from_tax_id),
 		("seed_quotation_approval_v3_workflow", _seed_quotation_approval_v3_workflow),
 		("purge_custom_quote_project_field", _purge_custom_quote_project_field),
