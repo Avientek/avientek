@@ -228,66 +228,55 @@ def get_last_5_transactions(item_code, customer):
     return result
 @frappe.whitelist()
 def get_company_stock(item_code, company=None):
+    """Stock of this item in EVERY company, for the Quote's Stock Availability
+    panel — the quote's own `company` (if given) is listed first.
+
+    #0558 (Orders.Mea): commit 797caed (2026-07-08, PR #13 perf port) scoped
+    this to the quote's company only, so the panel stopped showing the other
+    companies' stock that sales relied on. Restored to all companies, but as
+    ONE grouped query instead of two queries per company.
+
+    Venkatesh/Rahul 2026-06-11 ERP-TKT-29: RMA / Demo / Service / Repair
+    warehouses are tagged `warehouse_type = "Freezed Items"` and hold stock
+    that is NOT available for sale — excluded. `IS NULL OR != 'Freezed Items'`
+    is deliberate: plain `!=` would also drop untagged (NULL) warehouses,
+    which are regular inventory.
+    """
+    rows = frappe.db.sql(
+        """
+        SELECT w.company,
+               SUM(b.actual_qty)    AS actual_qty,
+               SUM(b.reserved_qty)  AS reserved_qty,
+               SUM(b.projected_qty) AS projected_qty
+        FROM `tabBin` b
+        JOIN `tabWarehouse` w ON w.name = b.warehouse
+        WHERE b.item_code = %s
+          AND w.is_group = 0
+          AND (w.warehouse_type IS NULL OR w.warehouse_type != 'Freezed Items')
+        GROUP BY w.company
+        """,
+        (item_code,),
+        as_dict=True,
+    )
+
     stock = []
-
-    # Quotation always has a company set before items are added, so scope
-    # the warehouse/bin lookup to it instead of looping every company.
-    companies = [company] if company else frappe.get_all("Company", pluck="name")
-
-    for c in companies:
-        # Venkatesh/Rahul 2026-06-11 ERP-TKT-29: RMA / Demo / Service /
-        # Repair warehouses (21 of them on prod as of 2026-06-11) carry
-        # inventory that's NOT available for sale — replacement units,
-        # demo loans, FOC stock. Avientek's convention is to tag those
-        # with `Warehouse.warehouse_type = "Freezed Items"`. Excluding
-        # them here makes the Quote line-item stock indicator reflect
-        # what the sales rep can actually quote against.
-        #
-        # The `IS NULL OR != 'Freezed Items'` clause is deliberate —
-        # `["!=", "Freezed Items"]` via Frappe's filter dict would
-        # SQL-translate to `<> 'Freezed Items'` which excludes NULL
-        # rows too (NULL != X is NULL in SQL). We want NULL-typed
-        # warehouses INCLUDED (they're regular inventory warehouses
-        # the user just hasn't tagged with a warehouse_type).
-        warehouses = frappe.db.sql_list(
-            """
-            SELECT name FROM `tabWarehouse`
-            WHERE company = %s
-              AND is_group = 0
-              AND (warehouse_type IS NULL OR warehouse_type != 'Freezed Items')
-            """,
-            (c,),
-        )
-
-        if not warehouses:
-            continue
-
-        bin_data = frappe.db.sql("""
-            SELECT
-                SUM(actual_qty) AS actual_qty,
-                SUM(reserved_qty) AS reserved_qty,
-                SUM(projected_qty) AS projected_qty
-            FROM `tabBin`
-            WHERE item_code = %s
-              AND warehouse IN %s
-        """, (item_code, tuple(warehouses)), as_dict=True)[0]
-
-        actual = flt(bin_data.actual_qty)
-        reserved = flt(bin_data.reserved_qty)
-        projected = flt(bin_data.projected_qty)
+    for r in rows:
+        actual = flt(r.actual_qty)
+        reserved = flt(r.reserved_qty)
+        projected = flt(r.projected_qty)
         free_stock = max(actual - reserved, 0)
-
-        # 🚨 IMPORTANT FILTER
+        # Skip companies with nothing to show.
         if actual == 0 and free_stock == 0 and projected == 0:
             continue
-
         stock.append({
-            "company": c,
+            "company": r.company,
             "actual_stock": actual,
             "free_stock": free_stock,
-            "projected_stock": projected
+            "projected_stock": projected,
         })
 
+    # Quote's own company first, then the rest alphabetically.
+    stock.sort(key=lambda x: (x["company"] != company, x["company"] or ""))
     return stock
 
 @frappe.whitelist()
