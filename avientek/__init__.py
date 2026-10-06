@@ -1692,3 +1692,59 @@ try:
 except Exception:
 	pass
 
+
+
+def _patch_sales_order_delivery_date_optional():
+	"""Make Sales Order Delivery Date optional (header and item lines).
+
+	Sammish 2026-10-06 (#0560, Orders.Mea): the Orders team confirms delivery
+	dates later, line by line. Core SalesOrder.validate_delivery_date throws
+	"Please enter Delivery Date" for every Sales-type order with no date, and
+	runs again in before_update_after_submit — so the date was effectively
+	mandatory on save, submit and update. Both fields are already
+	allow_on_submit in core.
+
+	Replacement keeps core behaviour except:
+	  - no date anywhere → allowed (no throw);
+	  - blank item lines are filled from the header ONLY when no line has its
+	    own date (header-only entry, as before). Once any line has a date,
+	    other blank lines stay blank so they can be set later.
+	Header stays = latest item date, and a set date before the order date is
+	still rejected. Idempotent.
+	"""
+	try:
+		from erpnext.selling.doctype.sales_order.sales_order import SalesOrder
+	except Exception:
+		return
+	if getattr(SalesOrder.validate_delivery_date, "__name__", "") == "_optional_validate_delivery_date":
+		return
+
+	def _optional_validate_delivery_date(self):
+		import frappe
+		from frappe import _
+		from frappe.utils import getdate
+
+		if self.order_type != "Sales" or self.skip_delivery_note:
+			return
+		item_dates = [d.delivery_date for d in self.get("items") if d.delivery_date]
+		if item_dates:
+			self.delivery_date = max(getdate(d) for d in item_dates)
+		elif self.delivery_date:
+			for d in self.get("items"):
+				d.delivery_date = self.delivery_date
+		for d in self.get("items"):
+			if d.delivery_date and getdate(self.transaction_date) > getdate(d.delivery_date):
+				frappe.msgprint(
+					_("Expected Delivery Date should be after Sales Order Date"),
+					indicator="orange",
+					title=_("Invalid Delivery Date"),
+					raise_exception=True,
+				)
+
+	SalesOrder.validate_delivery_date = _optional_validate_delivery_date
+
+
+try:
+	_patch_sales_order_delivery_date_optional()
+except Exception:
+	pass

@@ -1,3 +1,13 @@
+// Sammish 2026-10-06 (#0560): Delivery Date is optional on Sales Order lines
+// (Orders team sets it later, line by line). Core toggle_delivery_date marks
+// the items column required for Sales orders; server side the matching check
+// is relaxed in avientek/__init__.py (_patch_sales_order_delivery_date_optional).
+if (window.erpnext && erpnext.selling && erpnext.selling.SalesOrderController) {
+	erpnext.selling.SalesOrderController.prototype.toggle_delivery_date = function () {
+		this.frm.fields_dict.items.grid.toggle_reqd("delivery_date", false);
+	};
+}
+
 frappe.ui.form.on('Sales Order',{
 	// ── Client Script: "Fetch Customer Name" - filter customer by company ──
 	setup: function(frm) {
