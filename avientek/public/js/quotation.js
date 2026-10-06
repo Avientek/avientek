@@ -471,6 +471,40 @@ frappe.ui.form.on('Quotation', {
         }
     },
 
+    // ── Payment terms on a submitted quote (#0559) ──────────
+    // Unlocked only in "Approved for Update" (_unlock_payment_terms_for_update).
+    // Not allow_on_submit for a plain Save — persist via the bypass RPC,
+    // same as Shipping Mode. The confirm also lets ERPNext's own
+    // payment_terms_template handler finish before the reload.
+    payment_terms_template(frm) {
+        if (frm.doc.docstatus !== 1) return;
+        if ((frm.doc.workflow_state || "") !== "Approved for Update") return;
+        if (!frm.doc.payment_terms_template) return;
+        frappe.confirm(
+            __("Change Payment Terms to <b>{0}</b>? The quote must then be sent for approval.",
+                [frm.doc.payment_terms_template]),
+            () => {
+                frappe.call({
+                    method: "avientek.events.quotation.apply_payment_terms_on_submitted",
+                    args: {
+                        quotation_name: frm.doc.name,
+                        payment_terms_template: frm.doc.payment_terms_template,
+                    },
+                    freeze: true,
+                    freeze_message: __("Applying Payment Terms..."),
+                    callback(r) {
+                        frm.reload_doc();
+                        if (r.message) {
+                            frappe.show_alert({message: __("Payment terms applied"), indicator: "green"});
+                        }
+                    },
+                    error() { frm.reload_doc(); },
+                });
+            },
+            () => frm.reload_doc()
+        );
+    },
+
     // ── Customer credit / outstanding lookup (UI only) ──────
     party_name(frm) {
         if (!frm.doc.party_name) return;
@@ -1091,6 +1125,7 @@ frappe.ui.form.on('Quotation', {
         // which of the two (percentage vs amount) is the editable one.
         _unlock_discount_incentive_for_update(frm);
         _unlock_shipping_for_update(frm);
+        _unlock_payment_terms_for_update(frm);
 
         // Toggle discount fields based on type selection
         toggle_discount_fields(frm);
@@ -2572,6 +2607,23 @@ function _unlock_shipping_for_update(frm) {
     if (frm.fields_dict.custom_shipping_mode) {
         frm.set_df_property("custom_shipping_mode", "allow_on_submit", 1);
         frm.set_df_property("custom_shipping_mode", "read_only", 0);
+    }
+}
+
+/**
+ * #0559 — same allow_on_submit rationale and "Approved for Update" scoping
+ * as _unlock_shipping_for_update(). Persistence goes through
+ * apply_payment_terms_on_submitted (quotation.py), called from the
+ * payment_terms_template(frm) handler.
+ */
+function _unlock_payment_terms_for_update(frm) {
+    if (frm.is_new()) return;
+    if (frm.doc.docstatus !== 1) return;
+    if ((frm.doc.workflow_state || "") !== "Approved for Update") return;
+
+    if (frm.fields_dict.payment_terms_template) {
+        frm.set_df_property("payment_terms_template", "allow_on_submit", 1);
+        frm.set_df_property("payment_terms_template", "read_only", 0);
     }
 }
 

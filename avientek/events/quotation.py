@@ -3630,6 +3630,49 @@ def apply_shipping_on_submitted(quotation_name, shipping_mode):
     return {"message": "Shipping mode applied successfully"}
 
 
+@frappe.whitelist()
+def apply_payment_terms_on_submitted(quotation_name, payment_terms_template):
+    """Change the Payment Terms Template on a submitted Quotation while
+    workflow_state is "Approved for Update" (#0559) — sibling to
+    apply_shipping_on_submitted() above.
+
+    Before this, the only way to change payment terms after submit was a
+    full cancel (L1 -> L2) + amend. Scoped to "Approved for Update" so the
+    change still goes through Request for Update (L1) and then Send for
+    Approval (L1 -> L2) — terms are a credit decision, not a free edit.
+    Pricing is untouched, so no recalculation: only the template and the
+    payment schedule rebuilt from it. Quotation has track_changes off, so
+    the old -> new terms are logged on the timeline for the approver."""
+    doc = frappe.get_doc("Quotation", quotation_name)
+    _guard_quotation_editable_for_update(doc)
+
+    if not payment_terms_template or not frappe.db.exists(
+        "Payment Terms Template", payment_terms_template
+    ):
+        frappe.throw(_("Please select a valid Payment Terms Template."))
+
+    old = doc.payment_terms_template
+    if old == payment_terms_template:
+        return {"message": "No change"}
+
+    doc.payment_terms_template = payment_terms_template
+    # Empty table -> set_payment_schedule() rebuilds it from the template.
+    doc.set("payment_schedule", [])
+    doc.set_payment_schedule()
+
+    doc.flags.ignore_validate_update_after_submit = True
+    doc.save()
+
+    doc.add_comment(
+        "Info",
+        _("Payment Terms changed from {0} to {1}").format(
+            frappe.bold(old or _("(none)")), frappe.bold(payment_terms_template)
+        ),
+    )
+
+    return {"message": "Payment terms applied successfully"}
+
+
 # Venkatesh/Rahul 2026-06-11 ERP-TKT-31: Quote print should be gated
 # on Approval — users keep generating PDFs of draft/pending quotes and
 # share them with customers, then the price changes on L2 approval and
