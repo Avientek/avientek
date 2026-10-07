@@ -236,6 +236,12 @@ def _collect_outward_batch_deltas(doc):
 		if not item:
 			continue
 
+		# #0561 (DN-LLC-26-01233, Service Charge I023525): a non-stock item
+		# never writes to the Stock Ledger, so its batch can't go negative —
+		# even if it wrongly has Has Batch No ticked.
+		if not frappe.get_cached_value("Item", item, "is_stock_item"):
+			continue
+
 		# Reads from either Serial and Batch Bundle (v15) or legacy batch_no
 		sbb_name = getattr(row, "serial_and_batch_bundle", None)
 		warehouse = _row_source_warehouse(doctype, row)
