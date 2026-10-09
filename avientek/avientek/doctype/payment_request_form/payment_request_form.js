@@ -374,7 +374,7 @@ frappe.ui.form.on('Payment Request Form', {
             );
             const ws = frm.doc.workflow_state || "";
             const next_roles_by_state = {
-                "Draft": "Accounts User or Accounts Manager",
+                "Pending Authorisation": "Accounts User, Accounts Manager, Dept Head or Logistics Manager",
                 "Authorised": "Finance Manager (Approve Level 1) or Accounts Manager / Finance Manager / GM / Director (Reject)",
                 "Approved Level 1": "General Manager or Director (Approve Level 2) or Accounts Manager / Finance Manager / GM / Director (Reject)",
             };
@@ -452,6 +452,7 @@ frappe.ui.form.on('Payment Request Form', {
             // Anything not in this set keeps the field locked.
             const PRE_RELEASED_STATES = new Set([
                 "Draft",
+                "Pending Authorisation",
                 "Pending For Approval",
                 "Sent For Approval",
                 "Authorised",
@@ -494,6 +495,7 @@ frappe.ui.form.on('Payment Request Form', {
             // state, give them full edit (don't lock them down).
             const owner_roles = {
                 "Draft": ["Sales User", "Purchase User", "Stock User"],
+                "Pending Authorisation": ["Accounts User", "Accounts Manager", "Dept Head", "Logistics Manager"],
                 "Pending For Approval": ["Sales User", "Purchase User", "Stock User"],
                 "Sent For Approval": ["Sales User", "Purchase User", "Stock User"],
                 "Authorised": ["Finance Manager", "Accounts Manager"],

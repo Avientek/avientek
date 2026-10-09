@@ -45,6 +45,10 @@ def enforce_no_self_approval():
         print("[block_prf_workflow_self_approval] no PRF workflow transitions")
         return {"updated": 0, "already_clean": 0}
 
+    # The requester's own "Submit for Authorisation" (Draft -> Pending
+    # Authorisation, 2026-10-09) is not an approval — it must stay
+    # self-allowed or the creator could never send their PRF on.
+    rows = [r for r in rows if r.get("action") != "Submit for Authorisation"]
     to_fix = [r for r in rows if (r.get("allow_self_approval") or 0)]
     already = len(rows) - len(to_fix)
 
