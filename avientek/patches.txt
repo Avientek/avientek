@@ -658,3 +658,4 @@ avientek.patches.backfill_margin_markup_carry_fields
 # a Department User Permission, like Dept Head). Creates the role if missing +
 # adds the Draft->Authorise->Authorised transition to the live workflow. Idempotent.
 avientek.patches.add_prf_logistics_manager_authorise
+avientek.patches.add_prf_pending_authorisation_state

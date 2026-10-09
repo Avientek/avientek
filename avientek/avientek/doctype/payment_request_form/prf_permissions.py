@@ -134,6 +134,11 @@ def get_permission_query_conditions(user=None):
         if dept_clause:
             clauses.append(dept_clause)
 
+    # 2026-10-09 (Jithin): a Draft is still being prepared by the requester —
+    # authorisers see it only after "Submit for Authorisation".
+    not_draft = f"IFNULL({tbl}.workflow_state, '') != 'Draft'"
+    clauses = [f"({c} AND {not_draft})" for c in clauses]
+
     # Implicit Requestor floor — every user always sees their own.
     clauses.append(f"{tbl}.owner = {frappe.db.escape(user)}")
 
@@ -160,6 +165,18 @@ def has_permission(doc, user=None, permission_type=None):
     # Owner always allowed
     if (doc.get("owner") if hasattr(doc, "get") else getattr(doc, "owner", None)) == user:
         return True
+
+    # Others' Drafts stay hidden until submitted for authorisation —
+    # mirrors the not_draft clause in get_permission_query_conditions.
+    # Use the SAVED state: an authoriser's "Send Back" saves the doc with
+    # workflow_state already set to Draft in memory, and must not be
+    # refused by its own transition.
+    doc_name = doc.get("name") if hasattr(doc, "get") else getattr(doc, "name", None)
+    saved_state = frappe.db.get_value(_PRF, doc_name, "workflow_state") if doc_name else None
+    state = saved_state if saved_state is not None else (
+        doc.get("workflow_state") if hasattr(doc, "get") else getattr(doc, "workflow_state", None))
+    if state == "Draft":
+        return False
 
     # Accounts User — company match OR processing-queue state
     if "Accounts User" in roles:

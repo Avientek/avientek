@@ -36,6 +36,7 @@ frappe.query_reports["Payment Request Form Summary"] = {
             options: [
                 "",
                 "Draft",
+                "Pending Authorisation",
                 "Authorised",
                 "Approved Level 1",
                 "Approved Level 2",
