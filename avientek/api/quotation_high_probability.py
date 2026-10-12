@@ -749,7 +749,9 @@ def _only_expected_closing_date_changed(doc):
     if not before:
         return False
     from frappe.model import no_value_fields, table_fields
-    ignore = {"modified", "modified_by", "workflow_status"}
+    ignore = {"modified", "modified_by", "workflow_status",
+              # set by validate_expected_closing_date_change alongside the date
+              "custom_ecd_changed_at_high_probability"}
     changed = set()
     for df in doc.meta.fields:
         if df.fieldtype in table_fields or df.fieldtype in no_value_fields:
