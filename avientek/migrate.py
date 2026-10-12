@@ -464,6 +464,22 @@ def _allow_quotation_expected_closing_date_after_submit():
 	):
 		frappe.db.set_value("Custom Field", name, "allow_on_submit", 1)
 		frappe.clear_cache(doctype="Quotation")
+	# Rahul 2026-10-12: at 75%+ the date may be set / changed ONCE without
+	# approval. This hidden flag records that the one change has been used.
+	if frappe.db.exists("Custom Field", name) and not frappe.db.exists(
+		"Custom Field", "Quotation-custom_ecd_changed_at_high_probability"
+	):
+		from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+		create_custom_field("Quotation", {
+			"fieldname": "custom_ecd_changed_at_high_probability",
+			"label": "Expected Closing Date Changed at 75%+",
+			"fieldtype": "Check",
+			"insert_after": "expected_closing_dates",
+			"hidden": 1,
+			"read_only": 1,
+			"allow_on_submit": 1,
+			"no_copy": 1,
+		})
 
 
 def _backfill_asset_owner_company():

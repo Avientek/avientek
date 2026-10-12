@@ -2506,11 +2506,12 @@ def validate_expected_closing_date_change(doc, method=None):
     """Sammish 2026-09-24: Expected Closing Date on a submitted Quotation.
 
     - Probability below 75% (10% / 50%): may be changed any time.
-    - Probability 75% or higher:
-        * date currently blank  -> may be set (once);
-        * date already set      -> fixed; changing it needs approval, i.e.
-          the quote is in "Approved for Update" / "Sent for Revision"
-          (Request for Update flow) or the user is a probability approver.
+    - Probability 75% or higher: the date may be set or changed ONCE
+      (Rahul 2026-10-12 — e.g. raising 50% -> 75% and correcting the date
+      entered earlier). After that one change it is fixed; changing it again
+      needs approval, i.e. the quote is in "Approved for Update" / "Sent for
+      Revision" (Request for Update flow) or the user is a probability
+      approver. custom_ecd_changed_at_high_probability records the change.
 
     Uses the higher of the saved and new probability, so raising 50% -> 75%
     in the same save is treated as 75%.
@@ -2535,8 +2536,16 @@ def validate_expected_closing_date_change(doc, method=None):
     )
     if prob < 75:
         return
-    if not old_date:
-        # Blank at >=75% -> first-time set is allowed.
+
+    flag = "custom_ecd_changed_at_high_probability"
+    has_flag = bool(doc.meta.get_field(flag))
+    if has_flag and not before.get(flag):
+        # The one free change at >=75%: allow it and record it.
+        doc.set(flag, 1)
+        return
+    if not has_flag and not old_date:
+        # Flag field not migrated yet: keep the previous rule
+        # (blank -> first-time set allowed).
         return
 
     ws = (doc.get("workflow_state") or "").strip()
@@ -2547,11 +2556,12 @@ def validate_expected_closing_date_change(doc, method=None):
 
     frappe.throw(
         _(
-            "Expected Closing Date is fixed once set on a Quotation with "
-            "probability {0}%. To change it from {1}, scroll to the "
-            "<b>Document Approval</b> section, tick <i>Request for Update</i>, "
-            "fill the note and Save — the approver will review."
-        ).format(prob, frappe.utils.formatdate(old_date)),
+            "Expected Closing Date can be changed only once on a Quotation "
+            "with probability {0}%, and it has already been changed. To "
+            "change it from {1}, scroll to the <b>Document Approval</b> "
+            "section, tick <i>Request for Update</i>, fill the note and "
+            "Save — the approver will review."
+        ).format(prob, frappe.utils.formatdate(old_date) if old_date else _("blank")),
         title=_("Approval Required"),
     )
 
