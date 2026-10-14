@@ -1748,3 +1748,49 @@ try:
 	_patch_sales_order_delivery_date_optional()
 except Exception:
 	pass
+
+
+def _patch_quotation_expiry_skips_100():
+	"""#0565 (Orders.Mea): ERPNext's daily set_expired_status marks every
+	submitted Quotation past Valid Till with no Sales Order as "Expired".
+	A 100%-probability quote is won and waiting for its order, so it must stay
+	"Open" (the dispatch team filters on Open). Faithful copy of the core job
+	with one extra condition: probabilities != '100%'. The scheduler resolves
+	the dotted path at run time, so replacing the module attribute is enough.
+	Idempotent."""
+	try:
+		import erpnext.selling.doctype.quotation.quotation as _q
+	except Exception:
+		return
+	if getattr(_q.set_expired_status, "__name__", "") == "_set_expired_status_skip_100":
+		return
+
+	def _set_expired_status_skip_100():
+		import frappe
+		from frappe.utils import nowdate
+
+		cond = (
+			"`tabQuotation`.docstatus = 1 and `tabQuotation`.status NOT IN ('Expired', 'Lost') "
+			"and `tabQuotation`.valid_till < %s "
+			"and IFNULL(`tabQuotation`.probabilities, '') != '100%%'"
+		)
+		so_against_quo = """
+			SELECT so.name FROM `tabSales Order` so, `tabSales Order Item` so_item
+			WHERE so_item.docstatus = 1 and so.docstatus = 1
+				and so_item.parent = so.name
+				and so_item.prevdoc_docname = `tabQuotation`.name"""
+		frappe.db.multisql(
+			{
+				"mariadb": f"""UPDATE `tabQuotation` SET `tabQuotation`.status = 'Expired' WHERE {cond} and not exists({so_against_quo})""",
+				"postgres": f"""UPDATE `tabQuotation` SET status = 'Expired' FROM `tabSales Order`, `tabSales Order Item` WHERE {cond} and not exists({so_against_quo})""",
+			},
+			(nowdate()),
+		)
+
+	_q.set_expired_status = _set_expired_status_skip_100
+
+
+try:
+	_patch_quotation_expiry_skips_100()
+except Exception:
+	pass

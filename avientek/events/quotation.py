@@ -3735,3 +3735,25 @@ def block_print_unless_approved(doc, method=None, *args, **kwargs):
         ).format(ws or "Draft"),
         title=_("Print Not Allowed"),
     )
+
+
+QUOTATION_LETTER_HEAD = "Avientek Header"
+
+
+def default_quotation_letter_head(doc, method=None):
+    """#0563 (Orders.Mea): "Avientek Header" is the default letter head for
+    quotation prints, for every company (it renders each company's own name
+    and address). ERPNext fills letter_head from Company.default_letter_head;
+    replace that company default (or a blank) on draft quotations. A letter
+    head the user picked deliberately (anything other than the company
+    default) is kept."""
+    if doc.docstatus != 0 or not frappe.db.exists("Letter Head", QUOTATION_LETTER_HEAD):
+        return
+    if doc.letter_head == QUOTATION_LETTER_HEAD:
+        return
+    company_default = (
+        frappe.get_cached_value("Company", doc.company, "default_letter_head")
+        if doc.company else None
+    )
+    if not doc.letter_head or doc.letter_head == company_default:
+        doc.letter_head = QUOTATION_LETTER_HEAD

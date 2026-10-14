@@ -746,6 +746,8 @@ doc_events = {
             # Quotation don't trip the clubbing error. Quotation is
             # pre-sale; clubbing is enforced at Sales Invoice instead.
             "avientek.overrides.india_gst_quotation.install_patch",
+            # #0563: Avientek Header is the default quotation letter head.
+            "avientek.events.quotation.default_quotation_letter_head",
         ],
         "validate": [
             "avientek.events.quotation.validate_item_tax_template",

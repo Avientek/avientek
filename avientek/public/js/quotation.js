@@ -1322,54 +1322,7 @@ frappe.ui.form.on('Quotation Item', {
     },
 
     shipping_per(frm, cdt, cdn) {
-        let row = locals[cdt][cdn];
-        const mode = row.custom_shipping_mode || frm.doc.custom_shipping_mode;
-
-        // EXW / DDP: shipping is always zero — the customer collects/pays
-        // for it themselves. Locked in the UI via read_only_depends_on on
-        // the field, but revert here too in case a value slips through
-        // (e.g. a value carried over before the mode was switched).
-        if (["EXW", "DDP"].includes(mode)) {
-            if (flt(row.shipping_per) !== 0) {
-                frappe.msgprint({
-                    title: __('Shipping Locked at 0%'),
-                    message: __('Shipping (%) is always 0% for {0} — resetting.', [mode]),
-                    indicator: 'orange'
-                });
-                frappe.model.set_value(cdt, cdn, "shipping_per", 0);
-                return;
-            }
-        } else {
-            // Enforce minimum shipping % from THIS item's own Item Price
-            // (per mode). Uses the per-item value stored on the row at load
-            // (row.__min_ship_air / __min_ship_sea / __min_ship_ddu) — NOT
-            // the doc-level custom_shipment_and_margin[0] row, which only
-            // held the first item's values and wrongly forced every line
-            // to that minimum. When the item's own minimum is 0, 0 is
-            // falsy so no minimum is enforced and the user can legitimately
-            // set 0%.
-            let min_shipping = 0;
-            if (mode === "Air") min_shipping = flt(row.__min_ship_air);
-            else if (mode === "Sea") min_shipping = flt(row.__min_ship_sea);
-            else if (mode === "DDU") min_shipping = flt(row.__min_ship_ddu);
-
-            if (min_shipping && flt(row.shipping_per) < min_shipping) {
-                frappe.msgprint({
-                    title: __('Minimum Shipping %'),
-                    message: __('Shipping (%) cannot be less than {0}% (from Item Price). Resetting to minimum.', [min_shipping]),
-                    indicator: 'orange'
-                });
-                frappe.model.set_value(cdt, cdn, "shipping_per", min_shipping);
-                return;
-            }
-        }
-
-        calculate_all_preview(frm, cdt, cdn);
-        update_doc_totals_preview(frm);
-        if (row.parentfield === 'custom_service_items') {
-            handle_qty_or_rate_change(frm, cdt, cdn);
-            update_custom_service_totals(frm);
-        }
+        validate_and_apply_row_shipping_per(frm, cdt, cdn);
     },
 
     reward_per(frm, cdt, cdn) {
@@ -1527,32 +1480,90 @@ frappe.ui.form.on('Quotation Item', {
 
     // ── Item-level shipping mode ────────────────────────────
     custom_shipping_mode(frm, cdt, cdn) {
-        const item = frappe.get_doc(cdt, cdn);
-
-        // EXW / DDP: always zero, unconditionally — customer collects/pays
-        // for their own shipping, so no Item Price lookup is needed at all.
-        if (["EXW", "DDP"].includes(item.custom_shipping_mode)) {
-            frappe.model.set_value(item.doctype, item.name, "shipping_per", 0);
-            return;
-        }
-
-        // Use THIS item's own air/sea/ddu shipping (stored on the row at
-        // load), not custom_shipment_and_margin[0] (the first item's
-        // values). If the per-item values aren't loaded (e.g. a reloaded
-        // doc whose item wasn't re-selected this session), leave
-        // shipping_per untouched rather than clobbering it to 0.
-        if (item.__min_ship_air === undefined && item.__min_ship_sea === undefined
-            && item.__min_ship_ddu === undefined) return;
-
-        let shipping_percent = 0;
-        if (item.custom_shipping_mode === "Air") shipping_percent = flt(item.__min_ship_air) || 0;
-        else if (item.custom_shipping_mode === "Sea") shipping_percent = flt(item.__min_ship_sea) || 0;
-        else if (item.custom_shipping_mode === "DDU") shipping_percent = flt(item.__min_ship_ddu) || 0;
-
-        frappe.model.set_value(item.doctype, item.name, "shipping_per", shipping_percent);
+        apply_row_shipping_mode(frm, cdt, cdn);
     },
 });
 
+
+// #0564: shared by the 'Quotation Item' and 'Optional Item' handlers — the
+// Optional Item table is its own child doctype, so handlers registered on
+// 'Quotation Item' never fire for it (same cause as #0511).
+function validate_and_apply_row_shipping_per(frm, cdt, cdn) {
+    let row = locals[cdt][cdn];
+    const mode = row.custom_shipping_mode || frm.doc.custom_shipping_mode;
+
+    // EXW / DDP: shipping is always zero — the customer collects/pays
+    // for it themselves. Locked in the UI via read_only_depends_on on
+    // the field, but revert here too in case a value slips through
+    // (e.g. a value carried over before the mode was switched).
+    if (["EXW", "DDP"].includes(mode)) {
+        if (flt(row.shipping_per) !== 0) {
+            frappe.msgprint({
+                title: __('Shipping Locked at 0%'),
+                message: __('Shipping (%) is always 0% for {0} — resetting.', [mode]),
+                indicator: 'orange'
+            });
+            frappe.model.set_value(cdt, cdn, "shipping_per", 0);
+            return;
+        }
+    } else {
+        // Enforce minimum shipping % from THIS item's own Item Price
+        // (per mode). Uses the per-item value stored on the row at load
+        // (row.__min_ship_air / __min_ship_sea / __min_ship_ddu) — NOT
+        // the doc-level custom_shipment_and_margin[0] row, which only
+        // held the first item's values and wrongly forced every line
+        // to that minimum. When the item's own minimum is 0, 0 is
+        // falsy so no minimum is enforced and the user can legitimately
+        // set 0%.
+        let min_shipping = 0;
+        if (mode === "Air") min_shipping = flt(row.__min_ship_air);
+        else if (mode === "Sea") min_shipping = flt(row.__min_ship_sea);
+        else if (mode === "DDU") min_shipping = flt(row.__min_ship_ddu);
+
+        if (min_shipping && flt(row.shipping_per) < min_shipping) {
+            frappe.msgprint({
+                title: __('Minimum Shipping %'),
+                message: __('Shipping (%) cannot be less than {0}% (from Item Price). Resetting to minimum.', [min_shipping]),
+                indicator: 'orange'
+            });
+            frappe.model.set_value(cdt, cdn, "shipping_per", min_shipping);
+            return;
+        }
+    }
+
+    calculate_all_preview(frm, cdt, cdn);
+    update_doc_totals_preview(frm);
+    if (row.parentfield === 'custom_service_items') {
+        handle_qty_or_rate_change(frm, cdt, cdn);
+        update_custom_service_totals(frm);
+    }
+}
+
+function apply_row_shipping_mode(frm, cdt, cdn) {
+    const item = frappe.get_doc(cdt, cdn);
+
+    // EXW / DDP: always zero, unconditionally — customer collects/pays
+    // for their own shipping, so no Item Price lookup is needed at all.
+    if (["EXW", "DDP"].includes(item.custom_shipping_mode)) {
+        frappe.model.set_value(item.doctype, item.name, "shipping_per", 0);
+        return;
+    }
+
+    // Use THIS item's own air/sea/ddu shipping (stored on the row at
+    // load), not custom_shipment_and_margin[0] (the first item's
+    // values). If the per-item values aren't loaded (e.g. a reloaded
+    // doc whose item wasn't re-selected this session), leave
+    // shipping_per untouched rather than clobbering it to 0.
+    if (item.__min_ship_air === undefined && item.__min_ship_sea === undefined
+        && item.__min_ship_ddu === undefined) return;
+
+    let shipping_percent = 0;
+    if (item.custom_shipping_mode === "Air") shipping_percent = flt(item.__min_ship_air) || 0;
+    else if (item.custom_shipping_mode === "Sea") shipping_percent = flt(item.__min_ship_sea) || 0;
+    else if (item.custom_shipping_mode === "DDU") shipping_percent = flt(item.__min_ship_ddu) || 0;
+
+    frappe.model.set_value(item.doctype, item.name, "shipping_per", shipping_percent);
+}
 
 // ── Optional Item rows (custom_service_items table) ─────────────
 //
@@ -1619,7 +1630,39 @@ frappe.ui.form.on('Optional Item', {
     custom_service_items_remove(frm) {
         update_custom_service_totals(frm);
     },
+
+    // #0564: shipping / cost inputs — same calculation as the main grid.
+    // load_item_defaults sets custom_shipping_mode on a new row, which must
+    // fire here to fill shipping_per from the item's Air/Sea/DDU minimum.
+    custom_shipping_mode(frm, cdt, cdn) {
+        apply_row_shipping_mode(frm, cdt, cdn);
+    },
+
+    shipping_per(frm, cdt, cdn) {
+        validate_and_apply_row_shipping_per(frm, cdt, cdn);
+    },
+
+    shipping(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        let qty = flt(row.qty) || 1;
+        let standard_price = flt(row.custom_standard_price_) * qty;
+        if (standard_price) {
+            row.shipping_per = 100 * flt(row.shipping) / standard_price;
+        }
+        recalc_optional_row(frm, cdt, cdn);
+    },
+
+    custom_transport_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
+    custom_finance_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
+    custom_customs_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
+    custom_incentive_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
 });
+
+function recalc_optional_row(frm, cdt, cdn) {
+    calculate_all_preview(frm, cdt, cdn);
+    handle_qty_or_rate_change(frm, cdt, cdn);
+    update_custom_service_totals(frm);
+}
 
 
 // ══════════════════════════════════════════════════════════════
@@ -2460,11 +2503,13 @@ function default_shipping_per_for_mode(mode, d) {
  * already did before this fix, just now actually visible per-row too.
  */
 function update_items_shipping_percent(frm) {
-    if (!frm.doc.items || !frm.doc.items.length) return;
+    // #0564: Optional Items follow the quotation's Shipping Mode too.
+    const rows = (frm.doc.items || []).concat(frm.doc.custom_service_items || []);
+    if (!rows.length) return;
     const mode = frm.doc.custom_shipping_mode;
 
     function apply_mode_to_all_rows() {
-        frm.doc.items.forEach(item => {
+        rows.forEach(item => {
             if (!item.item_code) return;
             frappe.model.set_value(item.doctype, item.name, "custom_shipping_mode", mode);
         });
@@ -2476,7 +2521,7 @@ function update_items_shipping_percent(frm) {
     // load_item_defaults_bulk, not persisted fields) — backfill them
     // first so the per-row handler above computes the correct minimum
     // instead of silently leaving shipping_per untouched.
-    const need_defaults = frm.doc.items.filter(item =>
+    const need_defaults = rows.filter(item =>
         item.item_code &&
         item.__min_ship_air === undefined &&
         item.__min_ship_sea === undefined &&
