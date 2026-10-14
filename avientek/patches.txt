@@ -660,3 +660,4 @@ avientek.patches.backfill_margin_markup_carry_fields
 avientek.patches.add_prf_logistics_manager_authorise
 avientek.patches.add_prf_pending_authorisation_state
 avientek.patches.quotation_default_avientek_header_and_reopen_100
+avientek.patches.quotation_avientek_header_reopened_100
