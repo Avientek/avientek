@@ -153,8 +153,11 @@ def _create_project_enhancement_fields():
 		{"fieldname": "custom_project_details_sb", "fieldtype": "Section Break",
 		 "label": "Project Details", "insert_after": "department"},
 		# ── Column 1 ──
+		# Rahul 2026-10-13: Project Status is mandatory, defaulting to Open
+		# (existing blanks backfilled by patches.project_status_mandatory).
 		{"fieldname": "custom_project_status", "fieldtype": "Select",
 		 "label": "Project Status", "options": status_options,
+		 "reqd": 1, "default": "Open",
 		 "insert_after": "custom_project_details_sb"},
 		{"fieldname": "custom_sales_person", "fieldtype": "Link",
 		 "label": "Assigned to Sales Person", "options": "Sales Person",
@@ -231,7 +234,8 @@ def _create_project_enhancement_fields():
 		else:
 			upd = {k: f[k] for k in
 			       ("fieldtype", "label", "options", "insert_after", "read_only",
-			        "ignore_user_permissions", "description", "precision", "hidden")
+			        "ignore_user_permissions", "description", "precision", "hidden",
+			        "reqd", "default")
 			       if k in f}
 			if upd:
 				frappe.db.set_value("Custom Field", cf_name, upd)

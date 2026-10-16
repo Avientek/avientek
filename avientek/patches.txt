@@ -661,3 +661,8 @@ avientek.patches.add_prf_logistics_manager_authorise
 avientek.patches.add_prf_pending_authorisation_state
 avientek.patches.quotation_default_avientek_header_and_reopen_100
 avientek.patches.quotation_avientek_header_reopened_100
+
+# Rahul 2026-10-13: switch off the old events/webinar Project Workflow that froze
+# project editing, and backfill the now-mandatory Project Status (blank /
+# retired "Discussion" -> Open). Idempotent.
+avientek.patches.project_status_mandatory
