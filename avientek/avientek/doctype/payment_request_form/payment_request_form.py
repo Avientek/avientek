@@ -1487,6 +1487,24 @@ def create_workflow():
 #         return """(`tabPayment Request Form`.workflow_state = 'Pending Accounts Manager'
 #                     OR `tabPayment Request Form`.modified_by = '{user}')""".format(user=user)
 
+
+def _resolve_ref_name(row, target_doctype, name):
+    """#0567: canonical document name for a PRF reference row.
+
+    Credit Note rows always resolve to the credit note in reference_name
+    (older rows stored the ORIGINAL invoice, or nothing, in
+    document_reference). Any other row with a blank document_reference falls
+    back to reference_name when that is a real document of the target type.
+    """
+    ref_name = (row.reference_name or "").strip()
+    if (row.reference_doctype or "").strip() == "Credit Note" and ref_name \
+            and frappe.db.exists("Sales Invoice", ref_name):
+        return ref_name
+    if not name and ref_name and target_doctype \
+            and frappe.db.exists(target_doctype, ref_name):
+        return ref_name
+    return name
+
 def _get_customer_credit_documents(args):
     """Fetch Credit Notes (return Sales Invoices) and credit Journal Entries for a customer."""
     from frappe.utils import flt
@@ -1532,7 +1550,10 @@ def _get_customer_credit_documents(args):
             "exchange_rate": exchange_rate,
             "is_return": 1,
             "return_against": cn.return_against or "",
-            "document_reference": cn.return_against or "",
+            # #0567: point at the credit note itself (was return_against =
+            # the ORIGINAL invoice, blank for standalone credit notes), so
+            # print / Combined PDF / Payment Entry use the right document.
+            "document_reference": cn.name,
         })
 
     # 2. Journal Entries with credit for this customer
@@ -2976,6 +2997,7 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
         #   - All others: use document_reference (the picker's system
         #     pointer).
         target_name = (row.document_reference or "").strip() or None
+        target_name = _resolve_ref_name(row, target_doctype, target_name) or None
 
         if not target_name and target_doctype == "Purchase Invoice":
             # Legacy path — bill_no lookup. Only attempt when
@@ -3560,12 +3582,17 @@ def get_voucher_print_data(docname):
         supplier_swift = supplier_bank.get("branch_code") or ""
 
     # Issued bank details (single query instead of two)
+    # Bank Account has no account_currency column (it crashed this method);
+    # the currency lives on its linked GL Account.
     issued_bank_details = frappe.db.get_value(
         "Bank Account", doc.issued_bank,
-        ["bank", "bank_account_no", "iban", "account_currency"],
+        ["bank", "bank_account_no", "iban", "account"],
         as_dict=True
     ) or {}
-    issued_bank_currency = issued_bank_details.get("account_currency") or company_currency
+    issued_bank_currency = (
+        frappe.db.get_value("Account", issued_bank_details.get("account"), "account_currency")
+        if issued_bank_details.get("account") else None
+    ) or company_currency
 
     # Payment history
     payment_history = get_supplier_payment_history(doc.party, doc.company, limit=10)
@@ -4578,6 +4605,7 @@ def get_payment_voucher_context(docname):
         if not tgt:
             return None, None
         name = (row.document_reference or "").strip()
+        name = _resolve_ref_name(row, tgt, name)
         if not name and tgt == "Purchase Invoice":
             bill = (row.reference_name or "").strip()
             if bill:
