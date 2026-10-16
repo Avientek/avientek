@@ -130,14 +130,20 @@ def prevent_duplicate_project_name(doc, method=None):
     doc.project_name = name
 
     clash = frappe.db.sql(
-        """SELECT name, company, IFNULL(custom_project_status, '')
+        """SELECT name, company
            FROM `tabProject`
            WHERE LOWER(TRIM(project_name)) = %(pn)s AND name != %(me)s
            LIMIT 1""",
         {"pn": name.lower(), "me": doc.name or ""},
     )
     if clash:
-        other, company, status = clash[0]
+        other, company = clash[0]
+        # custom_project_status is created in after_migrate — guard so a
+        # fresh install (before the first migrate) doesn't hit a missing column.
+        status = (
+            frappe.db.get_value("Project", other, "custom_project_status")
+            if frappe.db.has_column("Project", "custom_project_status") else ""
+        ) or ""
         frappe.throw(
             _("A project named <b>{0}</b> already exists: {1} ({2}{3}). "
               "Please use a different name.").format(
