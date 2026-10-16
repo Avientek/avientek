@@ -3000,12 +3000,15 @@ function render_item_info_html(data, item_code) {
 
 
 // Rahul 2026-10-13: Free Stock (Company) beside the standard Qty (Company).
-// Taken from the get_item_all_details response the item pick already makes
-// (its `stock` is scoped to the quotation's company), so no extra round trip.
+// Taken from the get_item_all_details response the item pick already makes,
+// so no extra round trip. That `stock` list covers EVERY company (#0558),
+// with the quotation's company first only when it has stock — so pick the
+// quotation's company row explicitly (none = 0), never stock[0].
 // The server re-computes it on every Draft save.
 function set_free_stock_company(frm, item_code, stock) {
     if (frm.doc.docstatus !== 0) return;
-    let free = flt(((stock || [])[0] || {}).free_stock);
+    const own = (stock || []).find(s => s.company === frm.doc.company);
+    let free = flt((own || {}).free_stock);
     (frm.doc.items || []).forEach(row => {
         if (row.item_code === item_code && flt(row.custom_free_stock_company) !== free) {
             frappe.model.set_value(row.doctype, row.name, "custom_free_stock_company", free);
