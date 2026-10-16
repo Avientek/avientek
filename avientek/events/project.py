@@ -116,6 +116,45 @@ def has_project_permission(doc, ptype=None, user=None):
     return False
 
 
+# ── Rahul 2026-10-13: no duplicate project names ──────────────────────
+# ERPNext already puts a UNIQUE index on Project.project_name (all companies,
+# every status), but a clash surfaced as a raw "Duplicate entry" database
+# error. This check runs first and says which project holds the name.
+def prevent_duplicate_project_name(doc, method=None):
+    """Block saving a project whose name, ignoring case and surrounding
+    spaces, is already used by another project. Surrounding spaces are
+    trimmed off the saved name so "Acme" and " Acme " cannot both exist."""
+    name = (doc.get("project_name") or "").strip()
+    if not name:
+        return
+    doc.project_name = name
+
+    clash = frappe.db.sql(
+        """SELECT name, company
+           FROM `tabProject`
+           WHERE LOWER(TRIM(project_name)) = %(pn)s AND name != %(me)s
+           LIMIT 1""",
+        {"pn": name.lower(), "me": doc.name or ""},
+    )
+    if clash:
+        other, company = clash[0]
+        # custom_project_status is created in after_migrate — guard so a
+        # fresh install (before the first migrate) doesn't hit a missing column.
+        status = (
+            frappe.db.get_value("Project", other, "custom_project_status")
+            if frappe.db.has_column("Project", "custom_project_status") else ""
+        ) or ""
+        frappe.throw(
+            _("A project named <b>{0}</b> already exists: {1} ({2}{3}). "
+              "Please use a different name.").format(
+                frappe.utils.escape_html(name),
+                frappe.utils.get_link_to_form("Project", other),
+                company or "",
+                f", {status}" if status else ""),
+            title=_("Duplicate Project Name"),
+        )
+
+
 def enforce_l2_approval(doc, method=None):
     """Points 8 & 11: once a Project reaches 'Approved' (custom_project_status),
     changing its status to anything other than 'Closed', or changing its

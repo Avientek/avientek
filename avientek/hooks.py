@@ -531,6 +531,7 @@ doc_events = {
         "before_insert": "avientek.events.project.set_created_by",
         "validate": [
             "avientek.events.project.set_parent_sales_person",
+            "avientek.events.project.prevent_duplicate_project_name",
             "avientek.events.project.enforce_l2_approval",
             "avientek.events.project.set_budget_usd",
         ],
