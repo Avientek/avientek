@@ -1704,6 +1704,7 @@ function compute_row_preview(frm, cdt, cdn) {
 
     // Write directly to row (no frappe.model.set_value to avoid cascading)
     row.shipping              = shipping;
+    row.custom_shipping_per_unit = flt(row.shipping_per) * std_price / 100;
     row.custom_finance_value  = finance;
     row.custom_transport_value = transport;
     row.reward                = reward;
@@ -2998,6 +2999,21 @@ function render_item_info_html(data, item_code) {
 }
 
 
+// Rahul 2026-10-13: Free Stock (Company) beside the standard Qty (Company).
+// Taken from the get_item_all_details response the item pick already makes
+// (its `stock` is scoped to the quotation's company), so no extra round trip.
+// The server re-computes it on every Draft save.
+function set_free_stock_company(frm, item_code, stock) {
+    if (frm.doc.docstatus !== 0) return;
+    let free = flt(((stock || [])[0] || {}).free_stock);
+    (frm.doc.items || []).forEach(row => {
+        if (row.item_code === item_code && flt(row.custom_free_stock_company) !== free) {
+            frappe.model.set_value(row.doctype, row.name, "custom_free_stock_company", free);
+        }
+    });
+}
+
+
 /**
  * Fetch and refresh item info HTML for a given item code.
  * @param {object} frm - Form object
@@ -3031,6 +3047,12 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
                 if (flt(ir.custom_margin_)) { cal_margin = flt(ir.custom_margin_); break; }
             }
             r.message.cal_margin = cal_margin;
+
+            // Without a company the stock list spans every company, which
+            // is not what this column means.
+            if (frm.doc.company) {
+                set_free_stock_company(frm, item_code, r.message.stock);
+            }
 
             // Populate tables for backward compatibility (only on new item selection)
             if (populate_tables) {

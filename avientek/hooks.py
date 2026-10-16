@@ -776,6 +776,8 @@ doc_events = {
             # creator vs approver — this blocks one approver from doing
             # both gates).
             "avientek.api.quotation_dual_approval_block.enforce_l1_l2_different_users",
+            # Rahul 2026-10-13: Free Stock (Company) on each line.
+            "avientek.events.quotation.set_free_stock_company",
         ],
         "before_save": [
             "avientek.events.quotation.run_calculation_pipeline",

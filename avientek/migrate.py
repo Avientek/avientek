@@ -815,6 +815,20 @@ def _create_so_po_special_price_fields():
 				"read_only": 1,
 				"in_list_view": 1,
 			},
+			# Rahul 2026-10-13: Quotation Item's Shipping per Unit, carried
+			# by the same hooks as Special Price (PO value converted into the
+			# PO's currency). Not in the grid by default — the PO/SO grids
+			# are already at Frappe's column limit; add it via grid settings.
+			{
+				"dt": dt,
+				"fieldname": "custom_shipping_per_unit",
+				"fieldtype": "Currency",
+				"label": "Shipping per Unit",
+				"options": "currency",
+				"insert_after": "custom_special_price_note",
+				"read_only": 1,
+				"in_list_view": 0,
+			},
 		]
 
 	for f in fields:

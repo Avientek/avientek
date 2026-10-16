@@ -279,6 +279,48 @@ def get_company_stock(item_code, company=None):
     stock.sort(key=lambda x: (x["company"] != company, x["company"] or ""))
     return stock
 
+
+# Rahul 2026-10-13: the standard "Qty (Company)" column (company_total_stock)
+# is ERPNext's raw on-hand sum across ALL the company's warehouses — reserved
+# qty not deducted, Freezed Items (RMA / Demo / Service) included. Sales also
+# want the free figure on the line itself, for the quotation's company only.
+# Same warehouse filter and arithmetic as get_company_stock above, so it never
+# disagrees with the Stock table — but one query for every item on the quote
+# instead of two per item, so the save hook costs the same for 5 lines or 100.
+def get_free_stock_by_item(item_codes, company):
+    item_codes = list({c for c in item_codes if c})
+    if not item_codes or not company:
+        return {}
+    rows = frappe.db.sql(
+        """
+        SELECT b.item_code,
+               SUM(b.actual_qty) AS actual_qty,
+               SUM(b.reserved_qty) AS reserved_qty
+        FROM `tabBin` b
+        INNER JOIN `tabWarehouse` w ON w.name = b.warehouse
+        WHERE b.item_code IN %(items)s
+          AND w.company = %(company)s
+          AND w.is_group = 0
+          AND (w.warehouse_type IS NULL OR w.warehouse_type != 'Freezed Items')
+        GROUP BY b.item_code
+        """,
+        {"items": tuple(item_codes), "company": company},
+        as_dict=True,
+    )
+    return {r.item_code: max(flt(r.actual_qty) - flt(r.reserved_qty), 0) for r in rows}
+
+
+def set_free_stock_company(doc, method=None):
+    """Quotation validate: refresh Free Stock (Company) on every line of a
+    Draft, so the figure is as of the last save even if stock moved after the
+    item was picked. Submitted quotes keep the value they were sent with."""
+    if doc.docstatus != 0 or not doc.company:
+        return
+    items = doc.get("items") or []
+    free = get_free_stock_by_item([it.item_code for it in items], doc.company)
+    for it in items:
+        it.custom_free_stock_company = free.get(it.item_code, 0)
+
 @frappe.whitelist()
 def get_shipment_and_margin(item_code, price_list, company=None):
     if not item_code or not price_list:
@@ -463,10 +505,14 @@ def calc_item_totals(it):
         it.custom_incentive_value = 0
         it.reward = 0
         it.shipping = 0
+        it.custom_shipping_per_unit = 0
         return
 
     # Layer 1: percentage-based charges (total values)
     shipping  = flt(_to_flt(it.shipping_per)      * std_price / 100 * qty, 4)
+    # Rahul 2026-10-13: `shipping` is the LINE total; buyers need the unit
+    # rate, carried to SO / PO. Display only — shipping itself is unchanged.
+    shipping_per_unit = flt(_to_flt(it.shipping_per) * std_price / 100, 4)
     finance   = flt(_to_flt(it.custom_finance_)   * sp        / 100 * qty, 4)
     transport = flt(_to_flt(it.custom_transport_)  * std_price / 100 * qty, 4)
     reward    = flt(_to_flt(it.reward_per)         * sp        / 100 * qty, 4)
@@ -501,6 +547,7 @@ def calc_item_totals(it):
 
     it.update({
         "shipping":               shipping,
+        "custom_shipping_per_unit": shipping_per_unit,
         "custom_finance_value":   finance,
         "custom_transport_value": transport,
         "reward":                 reward,
@@ -3240,6 +3287,7 @@ def update_special_price(quotation_name, items):
 _SO_SP_MARGIN_FIELDS = (
     "custom_special_price", "custom_special_price_note",
     "custom_margin_value", "custom_margin_", "custom_markup_value", "custom_markup_",
+    "custom_shipping_per_unit",
 )
 
 
@@ -3292,9 +3340,12 @@ def _propagate_special_price_to_so_po(quotation_name, quotation_item_names):
                if str(qi.get(f) or "") != str(soi.get(f) or "")}
         if upd:
             frappe.db.set_value("Sales Order Item", soi.name, upd, update_modified=False)
-            so_changes.setdefault(soi.parent, []).append(
-                "{0}: Special Price {1} → {2}".format(
-                    soi.item_code, flt(soi.custom_special_price), flt(qi.custom_special_price)))
+            line = "{0}: Special Price {1} → {2}".format(
+                soi.item_code, flt(soi.custom_special_price), flt(qi.custom_special_price))
+            if "custom_shipping_per_unit" in upd:
+                line += ", Shipping per Unit {0} → {1}".format(
+                    flt(soi.custom_shipping_per_unit), flt(qi.custom_shipping_per_unit))
+            so_changes.setdefault(soi.parent, []).append(line)
 
         # PO lines fed by this SO line
         if soi.parent not in so_hdr_cache:
@@ -3305,7 +3356,8 @@ def _propagate_special_price_to_so_po(quotation_name, quotation_item_names):
         for poi in frappe.db.get_all(
             "Purchase Order Item",
             filters={"sales_order_item": soi.name, "docstatus": ["<", 2]},
-            fields=["name", "parent", "item_code", "custom_special_price", "custom_special_price_note"],
+            fields=["name", "parent", "item_code", "custom_special_price", "custom_special_price_note",
+                    "custom_shipping_per_unit"],
         ):
             po_hdr = frappe.db.get_value(
                 "Purchase Order", poi.parent, ["currency", "conversion_rate"], as_dict=True
@@ -3314,16 +3366,25 @@ def _propagate_special_price_to_so_po(quotation_name, quotation_item_names):
                 qi.custom_special_price, so_hdr.currency, so_hdr.conversion_rate,
                 po_hdr.currency, po_hdr.conversion_rate,
             )
+            new_ship = _convert_txn_amount(
+                qi.custom_shipping_per_unit, so_hdr.currency, so_hdr.conversion_rate,
+                po_hdr.currency, po_hdr.conversion_rate,
+            )
             pupd = {}
             if abs(flt(new_sp) - flt(poi.custom_special_price)) > 1e-9:
                 pupd["custom_special_price"] = new_sp
             if (qi.custom_special_price_note or "") != (poi.custom_special_price_note or ""):
                 pupd["custom_special_price_note"] = qi.custom_special_price_note
+            if abs(flt(new_ship) - flt(poi.custom_shipping_per_unit)) > 1e-9:
+                pupd["custom_shipping_per_unit"] = new_ship
             if pupd:
                 frappe.db.set_value("Purchase Order Item", poi.name, pupd, update_modified=False)
-                po_changes.setdefault(poi.parent, []).append(
-                    "{0}: Special Price {1} → {2}".format(
-                        poi.item_code, flt(poi.custom_special_price), flt(new_sp)))
+                line = "{0}: Special Price {1} → {2}".format(
+                    poi.item_code, flt(poi.custom_special_price), flt(new_sp))
+                if "custom_shipping_per_unit" in pupd:
+                    line += ", Shipping per Unit {0} → {1}".format(
+                        flt(poi.custom_shipping_per_unit), flt(new_ship))
+                po_changes.setdefault(poi.parent, []).append(line)
 
     def _note(dt, name, lines):
         try:

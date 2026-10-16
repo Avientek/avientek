@@ -299,7 +299,8 @@ def sync_special_price_from_sales_order(doc, method=None):
 	so_rows = frappe.db.get_all(
 		"Sales Order Item",
 		filters={"name": ["in", so_items]},
-		fields=["name", "parent", "custom_special_price", "custom_special_price_note"],
+		fields=["name", "parent", "custom_special_price", "custom_special_price_note",
+				"custom_shipping_per_unit"],
 	)
 	so_map = {so.name: so for so in so_rows}
 
@@ -327,6 +328,12 @@ def sync_special_price_from_sales_order(doc, method=None):
 			doc.currency, doc.conversion_rate,
 		)
 		item.custom_special_price_note = so_item.custom_special_price_note
+		# Rahul 2026-10-13: same currency rule as Special Price.
+		item.custom_shipping_per_unit = _convert_txn_amount(
+			so_item.custom_shipping_per_unit,
+			so_doc.currency, so_doc.conversion_rate,
+			doc.currency, doc.conversion_rate,
+		)
 
 
 @frappe.whitelist()
@@ -438,7 +445,8 @@ def update_eta(item):
 		so_child_doc = frappe.db.get_value(
 			"Sales Order Item",
 			item.sales_order_item,
-			["eta_history", "purchase_order_item", "custom_special_price", "custom_special_price_note"],
+			["eta_history", "purchase_order_item", "custom_special_price", "custom_special_price_note",
+			 "custom_shipping_per_unit"],
 			as_dict=True
 		)
 
@@ -477,6 +485,11 @@ def update_eta(item):
 				po_doc.currency, po_doc.conversion_rate,
 			),
 			"custom_special_price_note": so_child_doc.custom_special_price_note,
+			"custom_shipping_per_unit": _convert_txn_amount(
+				so_child_doc.custom_shipping_per_unit,
+				so_doc.currency, so_doc.conversion_rate,
+				po_doc.currency, po_doc.conversion_rate,
+			),
 		}, update_modified=False)
 
 		# Handle Purchase Order Item ETA history if linked to Sales Order
