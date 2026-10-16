@@ -109,7 +109,9 @@ def carry_forward_quotation_fields(doc, method=None):
     # reach reports without opening the Quotation. Same belt-and-braces pattern:
     # get_mapped_doc already copies same-fieldname custom fields, this fills any
     # row it skipped. SO -> DN/SI then propagates natively (same fieldnames).
-    _MARGIN_COLS = ("custom_margin_value", "custom_margin_", "custom_markup_value", "custom_markup_")
+    # Rahul 2026-10-13: Shipping per Unit rides the same backfill.
+    _MARGIN_COLS = ("custom_margin_value", "custom_margin_", "custom_markup_value", "custom_markup_",
+                    "custom_shipping_per_unit")
     qi_names = [it.quotation_item for it in doc.items if getattr(it, "quotation_item", None)]
     if qi_names:
         qi_map = {
