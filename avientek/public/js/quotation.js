@@ -1154,8 +1154,9 @@ frappe.ui.form.on('Quotation', {
         // Fields fetched from Price List (not manually editable)
         const readonly_fields = [
             "custom_standard_price_",   // from price_list_rate
-            "custom_finance_",          // from Item Price / Brand
-            "custom_transport_",        // from Item Price (processing)
+            // #0566: custom_finance_ / custom_transport_ (Processing %) are now
+            // editable like Shipping (%) — may be raised, never below the
+            // item's Item Price value (validate_and_apply_min_pct below).
             "custom_customs_",          // from Item Price
             "std_margin_per",           // from Item Price
             // Calculated value fields
@@ -1431,13 +1432,11 @@ frappe.ui.form.on('Quotation Item', {
     },
 
     custom_finance_(frm, cdt, cdn) {
-        calculate_all_preview(frm, cdt, cdn);
-        update_doc_totals_preview(frm);
+        validate_and_apply_min_pct(frm, cdt, cdn, "custom_finance_", "__min_finance", __("Finance (%)"));
     },
 
     custom_transport_(frm, cdt, cdn) {
-        calculate_all_preview(frm, cdt, cdn);
-        update_doc_totals_preview(frm);
+        validate_and_apply_min_pct(frm, cdt, cdn, "custom_transport_", "__min_processing", __("Processing (%)"));
     },
 
     custom_margin_(frm, cdt, cdn) {
@@ -1565,6 +1564,55 @@ function apply_row_shipping_mode(frm, cdt, cdn) {
     frappe.model.set_value(item.doctype, item.name, "shipping_per", shipping_percent);
 }
 
+// #0566: Finance (%) and Processing (%) work like Shipping (%) — editable,
+// may be raised, but not below this item's own Item Price value
+// (custom_min_finance_charge_ / custom_processing_). Rows opened from a saved
+// quote don't have the minimum in memory yet, so fetch it once (same
+// get_item_defaults call as item selection) without touching other fields.
+function validate_and_apply_min_pct(frm, cdt, cdn, field, min_key, label) {
+    const row = locals[cdt][cdn];
+    if (!row) return;
+    const finish = () => {
+        const min = flt(row[min_key]);
+        if (min && flt(row[field]) < min) {
+            frappe.msgprint({
+                title: __("Minimum {0}", [label]),
+                message: __("{0} cannot be less than {1}% (from Item Price). Resetting to minimum.", [label, min]),
+                indicator: "orange",
+            });
+            frappe.model.set_value(cdt, cdn, field, min);
+            return;
+        }
+        calculate_all_preview(frm, cdt, cdn);
+        update_doc_totals_preview(frm);
+        if (row.parentfield === "custom_service_items") {
+            handle_qty_or_rate_change(frm, cdt, cdn);
+            update_custom_service_totals(frm);
+        }
+    };
+    if (row[min_key] !== undefined || !row.item_code || !frm.doc.selling_price_list) {
+        finish();
+        return;
+    }
+    frappe.call({
+        method: "avientek.events.quotation.get_item_defaults",
+        args: {
+            item_code: row.item_code,
+            price_list: frm.doc.selling_price_list,
+            currency: frm.doc.currency,
+            price_list_currency: frm.doc.price_list_currency,
+            plc_conversion_rate: frm.doc.plc_conversion_rate || 1,
+            company: frm.doc.company,
+        },
+        callback(r) {
+            const d = (r && r.message) || {};
+            row.__min_finance = flt(d.custom_finance_);
+            row.__min_processing = flt(d.custom_transport_);
+            finish();
+        },
+    });
+}
+
 // ── Optional Item rows (custom_service_items table) ─────────────
 //
 // #0511 (Orders.Mea / Avientek Electronics Trading LLC): an Optional
@@ -1652,8 +1700,12 @@ frappe.ui.form.on('Optional Item', {
         recalc_optional_row(frm, cdt, cdn);
     },
 
-    custom_transport_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
-    custom_finance_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
+    custom_transport_(frm, cdt, cdn) {
+        validate_and_apply_min_pct(frm, cdt, cdn, "custom_transport_", "__min_processing", __("Processing (%)"));
+    },
+    custom_finance_(frm, cdt, cdn) {
+        validate_and_apply_min_pct(frm, cdt, cdn, "custom_finance_", "__min_finance", __("Finance (%)"));
+    },
     custom_customs_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
     custom_incentive_(frm, cdt, cdn) { recalc_optional_row(frm, cdt, cdn); },
 });
@@ -2131,6 +2183,8 @@ function load_item_defaults(frm, cdt, cdn) {
             // first item's % and blocked revising back to 0 (Rahul
             // QN-FZCO-26-00287, I024578/M4250 — 2026-06-30).
             row.__min_ship_air = flt(d.shipping_per_air);
+            row.__min_finance = flt(d.custom_finance_);
+            row.__min_processing = flt(d.custom_transport_);
             row.__min_ship_sea = flt(d.shipping_per_sea);
             row.__min_ship_ddu = flt(d.shipping_per_ddu);
 
@@ -2217,6 +2271,8 @@ function apply_item_defaults_to_row_silent(frm, cdt, cdn, d) {
     // Per-item shipping minimums (parity with load_item_defaults) so the
     // shipping_per validation uses this row's own Item Price values.
     row.__min_ship_air = flt(d.shipping_per_air);
+    row.__min_finance = flt(d.custom_finance_);
+    row.__min_processing = flt(d.custom_transport_);
     row.__min_ship_sea = flt(d.shipping_per_sea);
     row.__min_ship_ddu = flt(d.shipping_per_ddu);
 
