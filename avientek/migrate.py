@@ -80,6 +80,7 @@ def after_migrate():
 			"Print Format", "report", "ignore_user_permissions", 1, "Check")),
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
+		("quote_finance_processing_editable", _make_quote_finance_processing_editable),
 		("backfill_asset_owner_company", _backfill_asset_owner_company),
 		# #0556 (accounts.ksa, AS-0926-00001): saving an asset with depreciation
 		# inserts an Asset Depreciation Schedule whose `company` is fetched from
@@ -454,6 +455,26 @@ def _allow_quotation_cost_fields_after_submit():
 	for fieldname in ("valuation_rate", "custom_final_valuation_rate"):
 		make_property_setter("Quotation Item", fieldname, "allow_on_submit", 1, "Check")
 
+
+def _make_quote_finance_processing_editable():
+	"""#0566 (Orders.Mea): Finance (%) and Processing (%) on quotation lines are
+	editable like Shipping (%) — the minimum (the item's Item Price value) is
+	enforced in quotation.js. Clears read_only on both tables; the Optional
+	Item copies are DB-only (cloned by clone_quotation_item_custom_fields_to_
+	optional_item), so the fixture alone can't reach them. Idempotent."""
+	names = [
+		f"{dt}-{fn}"
+		for dt in ("Quotation Item", "Optional Item")
+		for fn in ("custom_finance_", "custom_transport_")
+	]
+	changed = False
+	for name in names:
+		if frappe.db.get_value("Custom Field", name, "read_only"):
+			frappe.db.set_value("Custom Field", name, "read_only", 0)
+			changed = True
+	if changed:
+		for dt in ("Quotation Item", "Optional Item", "Quotation"):
+			frappe.clear_cache(doctype=dt)
 
 def _allow_quotation_expected_closing_date_after_submit():
 	"""Sammish 2026-09-24: Expected Closing Date must be editable on a submitted
