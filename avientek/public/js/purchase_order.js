@@ -42,9 +42,11 @@ frappe.ui.form.on('Purchase Order',{
 		// 		}, __("Get Items From"));
 		// }
 		if (!frm.doc.__islocal && frm.doc.docstatus != 2 && frm.doc.items) {
+			// Rahul 2026-10-13: the button also shows, and syncs, lines that
+			// only have an ETA Date (eta) — before, only the ETA Note counted.
 			let avientek_eta = []
 			frm.doc.items.map((d) => {
-				if(d.avientek_eta && d.avientek_eta != '') avientek_eta.push(d.avientek_eta)
+				if((d.avientek_eta && d.avientek_eta != '') || d.eta) avientek_eta.push(d.name)
 			});
 			if(avientek_eta.length > 0){
 				frm.add_custom_button(__('Set SO ETA'),
@@ -54,7 +56,7 @@ frappe.ui.form.on('Purchase Order',{
 						var unique_so = arrayso.filter(e => {return !['',undefined].includes(e)});
 						console.log(unique_so)
 						frm.doc["items"].forEach(d => {
-							if(d.avientek_eta && d.sales_order){
+							if((d.avientek_eta || d.eta) && d.sales_order){
 								var sales_order = String(d.sales_order)+ " | " + (String(d.sales_order_item))
 								set_so_eta(frm, sales_order, d);
 							}
@@ -228,6 +230,7 @@ var add_so_dialog = function (frm, cdt, cdn) {
 							'sales_order': values.sales_order,
 							'item_name': row.name,
 							'eta': row.avientek_eta || '',
+							'eta_date': row.eta || '',
 						},
 						freeze: true,
 						callback: (res) => {

@@ -81,6 +81,7 @@ def after_migrate():
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
 		("quote_finance_processing_editable", _make_quote_finance_processing_editable),
+		("label_eta_date_and_note_fields", _label_eta_date_and_note_fields),
 		("backfill_asset_owner_company", _backfill_asset_owner_company),
 		# #0556 (accounts.ksa, AS-0926-00001): saving an asset with depreciation
 		# inserts an Asset Depreciation Schedule whose `company` is fetched from
@@ -474,6 +475,32 @@ def _make_quote_finance_processing_editable():
 			changed = True
 	if changed:
 		for dt in ("Quotation Item", "Optional Item", "Quotation"):
+			frappe.clear_cache(doctype=dt)
+
+
+def _label_eta_date_and_note_fields():
+	"""Rahul 2026-10-13 (point 8): PO and SO lines had two columns both
+	labelled "ETA" — the date `eta` and the free-text `avientek_eta` — so
+	users could not tell which one they were filling. Label them "ETA Date"
+	and "ETA Note". The fixture covers the rest; Purchase Order Item-eta
+	exists only in the database, so the fixture alone can't reach it.
+	Idempotent."""
+	labels = {
+		"Purchase Order Item-eta": "ETA Date",
+		"Sales Order Item-eta": "ETA Date",
+		"Purchase Order Item-avientek_eta": "ETA Note",
+		"Sales Order Item-avientek_eta": "ETA Note",
+		"Purchase Order-avientek_eta": "ETA Note",
+		"Purchase Order Item-eta_history_text": "ETA History",
+	}
+	changed = False
+	for name, label in labels.items():
+		current = frappe.db.get_value("Custom Field", name, "label")
+		if current is not None and current != label:
+			frappe.db.set_value("Custom Field", name, "label", label)
+			changed = True
+	if changed:
+		for dt in ("Purchase Order", "Purchase Order Item", "Sales Order", "Sales Order Item"):
 			frappe.clear_cache(doctype=dt)
 
 def _allow_quotation_expected_closing_date_after_submit():

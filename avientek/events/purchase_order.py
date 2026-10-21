@@ -438,8 +438,23 @@ def line_update_eta(item):
 	if item:
 		update_eta(item)
 
+def _eta_values(note, eta_date):
+	"""ETA fields to copy onto a linked line. Rahul 2026-10-13 (points 8-10):
+	the ETA Date (`eta`) now travels with the ETA Note (`avientek_eta`) —
+	before, only the note reached the Sales Order. A blank value is not
+	copied, so a PO line without an ETA Date never wipes a date already
+	entered on the SO line."""
+	values = {}
+	if note:
+		values["avientek_eta"] = note
+	if eta_date:
+		values["eta"] = eta_date
+	return values
+
+
 def update_eta(item):
 	eta = item.avientek_eta
+	eta_date = item.get("eta") or None
 	# Proceed if Sales Order and Sales Order Item are present
 	if item.sales_order and item.sales_order_item:
 		so_child_doc = frappe.db.get_value(
@@ -450,13 +465,12 @@ def update_eta(item):
 			as_dict=True
 		)
 
-		so_eta_history = append_to_eta_list(item.avientek_eta, so_child_doc.eta_history) if so_child_doc.eta_history else [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
-		so_eta_history_text = set_history(so_eta_history)
+		so_eta_history = append_to_eta_list(eta, so_child_doc.eta_history, eta_date)
 
 		frappe.db.set_value("Sales Order Item", item.sales_order_item, {
-			"avientek_eta": item.avientek_eta,
+			**_eta_values(eta, eta_date),
 			"eta_history": json.dumps(so_eta_history),
-			"eta_history_text": so_eta_history_text
+			"eta_history_text": set_history(so_eta_history)
 		}, update_modified=False)
 
 		# Orders.Mea 2026-08-17: this PO row is now (re)linked to this SO
@@ -496,20 +510,25 @@ def update_eta(item):
 		if so_child_doc.purchase_order_item:
 			# Fetch the Purchase Order Item's existing ETA history
 			first_po_eta_history = frappe.db.get_value("Purchase Order Item", so_child_doc.purchase_order_item, "eta_history")
-			po_eta_history = append_to_eta_list(item.avientek_eta, first_po_eta_history) if first_po_eta_history else [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
-			po_eta_history_text = set_history(po_eta_history)
+			po_eta_history = append_to_eta_list(eta, first_po_eta_history, eta_date)
 
 			frappe.db.set_value("Purchase Order Item", so_child_doc.purchase_order_item, {
-				"avientek_eta": item.avientek_eta,
+				**_eta_values(eta, eta_date),
 				"eta_history": json.dumps(po_eta_history),
-				"eta_history_text": po_eta_history_text
+				"eta_history_text": set_history(po_eta_history)
 			}, update_modified=False)
 
 	# Update ETA history in the current Purchase Order line item
-	po_eta_history = append_to_eta_list(item.avientek_eta, item.eta_history) if item.eta_history else [{"eta": item.avientek_eta, "date": frappe.utils.nowdate()}]
-	frappe.db.set_value("Purchase Order Item",item.name,"avientek_eta",eta)
-	frappe.db.set_value("Purchase Order Item",item.name,"eta_history",json.dumps(po_eta_history))
-	frappe.db.set_value("Purchase Order Item",item.name,"eta_history_text",set_history(po_eta_history))
+	po_eta_history = append_to_eta_list(eta, item.eta_history, eta_date)
+	po_values = {
+		"avientek_eta": eta,
+		"eta_history": json.dumps(po_eta_history),
+		"eta_history_text": set_history(po_eta_history),
+	}
+	frappe.db.set_value("Purchase Order Item", item.name, po_values)
+	# po_validate passes the live row of a document that is about to be
+	# saved — keep it in step, or the save writes the old history back.
+	item.update(po_values)
 
 def po_validate(doc, method):
 	"""Detect ETA changes per row and fire update_eta on changed rows.
@@ -535,7 +554,9 @@ def po_validate(doc, method):
 	before_by_name = {row.name: row for row in (doc_before_save.items or []) if row.name}
 
 	for item in doc.items:
-		if not item.avientek_eta:
+		# Rahul 2026-10-13: a change to the ETA Date alone also syncs to
+		# the Sales Order and is recorded in the ETA History.
+		if not (item.avientek_eta or item.eta):
 			continue
 		before_item = before_by_name.get(item.name)
 		if not before_item:
@@ -544,29 +565,58 @@ def po_validate(doc, method):
 			# append-or-seed branch.
 			update_eta(item)
 			continue
-		if item.avientek_eta != before_item.avientek_eta:
+		if (item.avientek_eta != before_item.avientek_eta
+				or cstr(item.eta) != cstr(before_item.eta)):
 			update_eta(item)
 
 
-def append_to_eta_list(avientek_eta, eta_history):
-	eta_history = json.loads(eta_history)
-	if eta_history:
-		eta_history += [{'eta': avientek_eta, 'date': frappe.utils.nowdate()}]
-	return eta_history
+def append_to_eta_list(avientek_eta, eta_history, eta_date=None):
+	"""Add one ETA History entry: changed on, ETA Date, ETA Note, changed by.
+
+	Rahul 2026-10-13 (point 10): entries now also carry the ETA Date and the
+	user. Entries written before this only have `eta` (the note) and `date`
+	(changed on) and still render, with ETA Date / Changed By blank. An
+	unchanged ETA (Set SO ETA pressed again) adds no duplicate entry. Before
+	this, an empty "[]" history also silently dropped the new entry."""
+	try:
+		history = json.loads(eta_history) if eta_history else []
+	except ValueError:
+		history = []
+	if not isinstance(history, list):
+		history = []
+	entry = {
+		"eta": avientek_eta or "",
+		"eta_date": cstr(eta_date),
+		"date": nowdate(),
+		"by": frappe.session.user,
+	}
+	last = history[-1] if history else None
+	if (last and (last.get("eta") or "") == entry["eta"]
+			and (last.get("eta_date") or "") == entry["eta_date"]):
+		return history
+	history.append(entry)
+	return history
 
 
 def set_history(po_eta_history):
-	item_details_html = '''<table border="1px grey"  bordercolor="grey" style="width: 100%; height:100">
-	<tr style="height: 15px;">
-	<td style="text-align: center; color:#687178; width:10%">No.</td>
-	<td style="text-align: center; color:#687178; width:40%">Date</td>
-	<td style="text-align: center; color:#687178; width:55%">ETA</td>
-	</tr>'''
-	for i, eta in enumerate(po_eta_history):
+	# No., the dates and Changed By never wrap (they split mid-word in the
+	# narrow row panel); ETA Note takes the remaining width and wraps.
+	head = '<td style="text-align: center; color:#687178; font-size: 12px; padding: 2px 4px; white-space: nowrap;">{0}</td>'
+	cell = '<td style="text-align: center; vertical-align: middle; background-color:#FFFF; font-size: 12px; padding: 2px 4px; white-space: nowrap;">{0}</td>'
+	note_cell = '<td style="text-align: left; vertical-align: middle; background-color:#FFFF; font-size: 12px; padding: 2px 4px; width: 100%;">{0}</td>'
+	item_details_html = '<table border="1px grey"  bordercolor="grey" style="width: 100%; border-collapse: collapse;">'
+	item_details_html += '<tr style="height: 15px;">' + "".join(
+		head.format(h) for h in ("No.", "Changed On", "ETA Date", "ETA Note", "Changed By")) + "</tr>"
+	for i, eta in enumerate(po_eta_history or []):
 		item_details_html += "<tbody><tr>"
-		item_details_html += '<td style="text-align: center; background-color:#FFFF; font-size: 12px;">' + str(i+1) + '</td>'
-		item_details_html += '<td style="text-align: center; background-color:#FFFF; font-size: 12px;">' + eta.get('date') + '</td>'
-		item_details_html += '<td style="text-align: center; background-color:#FFFF; font-size: 12px;">' + eta.get('eta') + '</td>'
+		item_details_html += cell.format(i + 1)
+		item_details_html += cell.format(
+			frappe.utils.formatdate(eta.get("date")) if eta.get("date") else "")
+		item_details_html += cell.format(
+			frappe.utils.formatdate(eta.get("eta_date")) if eta.get("eta_date") else "")
+		item_details_html += note_cell.format(frappe.utils.escape_html(cstr(eta.get("eta"))))
+		item_details_html += cell.format(
+			frappe.utils.escape_html(get_fullname(eta.get("by"))) if eta.get("by") else "")
 		item_details_html += "</tr></tbody>"
 	return item_details_html
 
@@ -657,7 +707,7 @@ def _refresh_po_line_from_so_item(item_name, sales_order, sales_order_item):
 
 
 @frappe.whitelist()
-def set_sales_order(sales_order, item_name, eta):
+def set_sales_order(sales_order, item_name, eta, eta_date=None):
 	print("\n..........................")
 	print("\nsales order item eta",sales_order,item_name, eta)
 	# SUP-2026-00052: do not let the Swap Sales Order dialog strip/re-point the
@@ -702,17 +752,12 @@ def set_sales_order(sales_order, item_name, eta):
 		
 		# #0549: linking a line that has no ETA yet must not push a blank ETA
 		# entry into the Sales Order's ETA history.
-		if eta:
-			if so_child_eta_history:
-				so_eta_history = append_to_eta_list(eta, so_child_eta_history)
-			else:
-				so_eta_history = [{"eta": eta, "date": frappe.utils.nowdate()}]
-			eta_history_text = set_history(so_eta_history)
-			eta_history = json.dumps(so_eta_history)
+		if eta or eta_date:
+			so_eta_history = append_to_eta_list(eta, so_child_eta_history, eta_date)
 			frappe.db.set_value("Sales Order Item", sales_order_item, {
-				"avientek_eta": eta,
-				"eta_history_text": eta_history_text,
-				"eta_history" : eta_history
+				**_eta_values(eta, eta_date),
+				"eta_history_text": set_history(so_eta_history),
+				"eta_history" : json.dumps(so_eta_history)
 				})
 		if frappe.db.exists("Sales Order Item", {"name": sales_order_item}):
 			_refresh_po_line_from_so_item(item_name, sales_order_name, sales_order_item)
