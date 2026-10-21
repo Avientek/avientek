@@ -813,8 +813,12 @@ doc_events = {
         # Sammish 2026-09-24: Expected Closing Date edit rules on a
         # submitted Quotation (free below 75%; at >=75% a blank date may be
         # set once, an existing date needs approval).
-        "before_update_after_submit":
+        "before_update_after_submit": [
             "avientek.events.quotation.validate_expected_closing_date_change",
+            # #0572: drop float noise on totals so a recomputed-but-equal
+            # value doesn't trip "Cannot Update After Submit".
+            "avientek.events.quotation.snap_float_noise_to_stored",
+        ],
         "on_update_after_submit": [
             "avientek.api.quotation_high_probability.on_update_after_submit",
             # Sridhar 2026-05-29: validate also fires from on_update_after_submit
