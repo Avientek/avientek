@@ -2509,11 +2509,18 @@ function update_custom_service_totals(frm) {
         total_amount += flt(row.amount);
     });
 
-    frm.set_value('custom_total_qty', total_qty);
-    frm.set_value('custom_total', total_amount);
-
     let conversion_rate = flt(frm.doc.conversion_rate || 1);
-    frm.set_value('custom_total_company_currency', total_amount * conversion_rate);
+
+    // #0572: this runs on every refresh. Raw float sums (21542.998112999998
+    // vs stored 21542.998113) marked submitted quotes "Not Saved", which
+    // hides the workflow Approve buttons. Compare at the DB's 9 decimals
+    // and only write when the value really changed.
+    const set_if_changed = (field, value) => {
+        if (flt(frm.doc[field], 9) !== flt(value, 9)) frm.set_value(field, flt(value, 9));
+    };
+    set_if_changed('custom_total_qty', total_qty);
+    set_if_changed('custom_total', total_amount);
+    set_if_changed('custom_total_company_currency', total_amount * conversion_rate);
 }
 
 

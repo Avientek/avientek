@@ -2549,6 +2549,39 @@ def validate_probability_change_approval(doc, method=None):
         )
 
 
+_NUMERIC_FIELDTYPES = ("Float", "Currency", "Percent")
+
+
+def snap_float_noise_to_stored(doc, method=None):
+    """#0572 (QN-FZCO-26-00732-1): L1 approver could not Approve or Update a
+    submitted quote - "Not allowed to change Total (Company Currency) after
+    submission from 21542.998113 to 21542.998112999998". Same number; the
+    second is float noise from re-adding line amounts. Before Frappe's
+    after-submit check runs, put the stored value back on any number field
+    (parent and rows) that equals it at the database's 9-decimal storage.
+    Real changes are left alone, so the check still blocks them."""
+    if doc.is_new():
+        return
+    stored = frappe.get_doc(doc.doctype, doc.name)
+    stored_rows = {(d.doctype, d.name): d for d in stored.get_all_children()}
+
+    def _snap(current, saved):
+        for df in current.meta.fields:
+            if df.fieldtype not in _NUMERIC_FIELDTYPES or df.allow_on_submit:
+                continue
+            new, old = current.get(df.fieldname), saved.get(df.fieldname)
+            if new == old or not isinstance(new, (int, float)) or not isinstance(old, (int, float)):
+                continue
+            if flt(new, 9) == flt(old, 9) or abs(new - old) <= max(1e-9, 1e-12 * max(abs(new), abs(old))):
+                current.set(df.fieldname, old)
+
+    _snap(doc, stored)
+    for row in doc.get_all_children():
+        saved_row = stored_rows.get((row.doctype, row.name))
+        if saved_row:
+            _snap(row, saved_row)
+
+
 def validate_expected_closing_date_change(doc, method=None):
     """Sammish 2026-09-24: Expected Closing Date on a submitted Quotation.
 
