@@ -145,15 +145,40 @@ def _user_sees_suppliers(user):
 
 # ── Shared SQL fragment generator ──
 
+# #0576: Lead / Prospect links are scoped by the linked record's own
+# visibility (Frappe's User Permission rule for that doctype), so a sales
+# user only sees contacts/addresses of Leads they can open.
+_RECORD_SCOPED_DOCTYPES = ("Lead", "Prospect")
+
+
+def _visible_record_conditions(user):
+	"""{doctype: WHERE fragment on `tab<doctype>`} for the record-scoped
+	doctypes the user can read. A doctype the user can't read is left out,
+	so its contacts stay hidden."""
+	from frappe.model.db_query import DatabaseQuery
+
+	out = {}
+	for dt in _RECORD_SCOPED_DOCTYPES:
+		if not frappe.has_permission(dt, "read", user=user):
+			continue
+		out[dt] = DatabaseQuery(dt, user=user).build_match_conditions() or "1=1"
+	return out
+
+
 def _build_link_scoped_query(user, parenttype):
 	"""Generate the permission_query_conditions WHERE fragment for
 	`tabContact` or `tabAddress`. Returns "" when no restriction
 	applies (Administrator, no relevant User Permissions).
 
-	The fragment is a 3-way OR:
+	The fragment is an OR of:
 	  (A) at least one Customer Dynamic Link points to a permitted Customer
-	  (B) no Customer Dynamic Link at all (out of scope of this restriction)
-	  (C) creator floor — owner == session.user
+	  (L) at least one Lead / Prospect link points to a record the user can
+	      see (#0576 — these used to pass as "out of scope")
+	  (B) linked, but only to other doctypes (Company, Employee, ...)
+	  (C) creator floor — owner == session.user, only while the doc is not
+	      linked to a Customer / Lead / Prospect (#0576: once linked, that
+	      record's owner decides, not whoever typed the contact in)
+	A doc with no links at all is visible to its creator only.
 	"""
 	if user == "Administrator":
 		return ""
@@ -219,6 +244,20 @@ def _build_link_scoped_query(user, parenttype):
 	# it as `c` would break those references. The subquery
 	# (`dl.link_name IN (SELECT name FROM tabCustomer WHERE <frag>)`)
 	# keeps the fragment in its natural top-level context.
+	lead_branch = "".join(
+		" OR EXISTS ("
+		"SELECT 1 FROM `tabDynamic Link` dl "
+		"WHERE dl.parent = {parent}.name "
+		"AND dl.parenttype = {parenttype_esc} "
+		"AND dl.link_doctype = {dt_esc} "
+		"AND dl.link_name IN (SELECT name FROM `tab{dt}` WHERE {cond})"
+		")".format(parent=parent_table, parenttype_esc=parenttype_esc,
+			dt=dt, dt_esc=frappe.db.escape(dt), cond=cond)
+		for dt, cond in _visible_record_conditions(user).items()
+	)
+	scoped_types = ", ".join(frappe.db.escape(dt) for dt in ("Customer", "Supplier") + _RECORD_SCOPED_DOCTYPES)
+	owned_types = ", ".join(frappe.db.escape(dt) for dt in ("Customer",) + _RECORD_SCOPED_DOCTYPES)
+
 	return (
 		"("
 		# (A) At least one Customer link is permitted
@@ -233,20 +272,26 @@ def _build_link_scoped_query(user, parenttype):
 		")"
 		# (A2) At least one Supplier link is permitted (by Supplier Group)
 		"{supplier_branch}"
-		# (B) No Customer AND no Supplier link → out of scope (Lead/Employee/orphan)
-		" OR (NOT EXISTS ("
+		# (L) At least one Lead / Prospect link the user can see
+		"{lead_branch}"
+		# (B) Linked, but only to doctypes outside this scheme (Company, ...)
+		" OR (EXISTS ("
 		"SELECT 1 FROM `tabDynamic Link` dl "
 		"WHERE dl.parent = {parent}.name "
-		"AND dl.parenttype = {parenttype_esc} "
-		"AND dl.link_doctype = 'Customer'"
+		"AND dl.parenttype = {parenttype_esc}"
 		") AND NOT EXISTS ("
 		"SELECT 1 FROM `tabDynamic Link` dl "
 		"WHERE dl.parent = {parent}.name "
 		"AND dl.parenttype = {parenttype_esc} "
-		"AND dl.link_doctype = 'Supplier'"
+		"AND dl.link_doctype IN ({scoped_types})"
 		"))"
-		# (C) Creator floor — always visible to the user who created it
-		" OR {parent}.owner = {user_esc}"
+		# (C) Creator floor — only while not linked to a Customer/Lead/Prospect
+		" OR ({parent}.owner = {user_esc} AND NOT EXISTS ("
+		"SELECT 1 FROM `tabDynamic Link` dl "
+		"WHERE dl.parent = {parent}.name "
+		"AND dl.parenttype = {parenttype_esc} "
+		"AND dl.link_doctype IN ({owned_types})"
+		"))"
 		")"
 	).format(
 		parent=parent_table,
@@ -254,6 +299,9 @@ def _build_link_scoped_query(user, parenttype):
 		cust_frag=cust_frag,
 		user_esc=user_esc,
 		supplier_branch=supplier_branch,
+		lead_branch=lead_branch,
+		scoped_types=scoped_types,
+		owned_types=owned_types,
 	)
 
 
@@ -293,15 +341,34 @@ def _has_permission_link_scoped(doc, ptype, user):
 	if not _user_has_customer_restriction(user):
 		return None  # No relevant restriction → defer to Frappe
 
-	# Creator floor — always allow user's own docs (Q4)
-	if doc.get("owner") == user:
-		return None
-
 	# Collect Customer + Supplier Dynamic Links from the doc
 	links = doc.get("links") or []
 
 	def _field(l, attr):
 		return l.get(attr) if isinstance(l, dict) else getattr(l, attr, None)
+
+	record_links = [
+		(_field(l, "link_doctype"), _field(l, "link_name")) for l in links
+		if _field(l, "link_doctype") in _RECORD_SCOPED_DOCTYPES and _field(l, "link_name")
+	]
+
+	# Creator floor (Q4) — only while not linked to a Customer/Lead/Prospect
+	# (#0576), same as the list query.
+	if doc.get("owner") == user and not record_links and not any(
+		_field(l, "link_doctype") == "Customer" for l in links
+	):
+		return None
+
+	if not links:
+		return False  # orphan: creator only (#0576)
+
+	# (L) Lead / Prospect OR semantics — the linked record's own permission.
+	for dt, name in record_links:
+		try:
+			if frappe.has_permission(dt, doc=name, user=user, ptype="read"):
+				return None
+		except Exception:
+			continue
 
 	customer_link_names = [
 		_field(l, "link_name") for l in links
@@ -313,7 +380,9 @@ def _has_permission_link_scoped(doc, ptype, user):
 	]
 
 	if not customer_link_names and not supplier_link_names:
-		return None  # No Customer or Supplier link → out of scope (Q2: Lead/Employee/orphan)
+		# Only Company/Employee/... links → out of scope (Q2). Lead/Prospect
+		# links that the user can't see were handled above → hide.
+		return False if record_links else None
 
 	# (A) Customer OR semantics — if user can see AT LEAST ONE linked
 	# Customer, allow. Delegating to frappe.has_permission keeps a single
