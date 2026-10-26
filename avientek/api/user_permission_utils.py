@@ -15,6 +15,34 @@ reports and indirectly by `apply_global_user_permission_filter`.
 import frappe
 
 
+def get_user_permission_for_values(user, doctype):
+	"""Raw User Permission values for `doctype`, with a Sales Person team
+	expanded to everyone under it (#0575). Frappe's own match conditions
+	already treat a group Sales Person UP as "this team" unless Hide
+	Descendants is ticked; our custom queries read the raw values, so a
+	team UP (e.g. TEAM-6) matched nothing. Direct SQL: restricted users
+	can't always read their own User Permissions or the Sales Person tree."""
+	rows = frappe.db.sql(
+		"SELECT for_value, hide_descendants FROM `tabUser Permission` WHERE user=%s AND allow=%s",
+		(user, doctype),
+		as_dict=True,
+	)
+	values = [r.for_value for r in rows]
+	if doctype != "Sales Person":
+		return values
+	groups = [r.for_value for r in rows if not r.hide_descendants]
+	if groups:
+		descendants = frappe.db.sql(
+			"""SELECT DISTINCT child.name FROM `tabSales Person` child
+			JOIN `tabSales Person` grp ON child.lft > grp.lft AND child.rgt < grp.rgt
+			WHERE grp.name IN %s""",
+			(tuple(groups),),
+			pluck="name",
+		)
+		values += [d for d in descendants if d not in values]
+	return values
+
+
 # ────────────────────────────────────────────────────────────────────────
 # CUSTOM-REPORT helpers — call these from Script Reports / Server Scripts
 # in either the avientek or avientek_reports app to make raw SQL respect
@@ -39,11 +67,7 @@ def get_user_permission_values(user, doctype):
 	roles = set(frappe.get_roles(user))
 	if "System Manager" in roles:
 		return []
-	return frappe.db.get_all(
-		"User Permission",
-		filters={"user": user, "allow": doctype},
-		pluck="for_value",
-	) or []
+	return get_user_permission_for_values(user, doctype)
 
 
 def build_permission_where_sql(alias_map, user=None, prefix="up"):
@@ -88,11 +112,7 @@ def build_permission_where_sql(alias_map, user=None, prefix="up"):
 	params = {}
 	idx = 0
 	for doctype, sql_expr in (alias_map or {}).items():
-		values = frappe.db.get_all(
-			"User Permission",
-			filters={"user": user, "allow": doctype},
-			pluck="for_value",
-		) or []
+		values = get_user_permission_for_values(user, doctype)
 		if not values:
 			# No User Permission row → user has unrestricted view on this
 			# DocType (Frappe core behaviour). Skip this dimension.
@@ -134,11 +154,7 @@ def filter_rows_by_user_permissions(rows, field_map, user=None):
 
 	allow_sets = {}
 	for doctype in (field_map or {}).keys():
-		vals = frappe.db.get_all(
-			"User Permission",
-			filters={"user": user, "allow": doctype},
-			pluck="for_value",
-		) or []
+		vals = get_user_permission_for_values(user, doctype)
 		if vals:
 			allow_sets[doctype] = set(vals)
 	if not allow_sets:

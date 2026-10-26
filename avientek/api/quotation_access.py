@@ -71,11 +71,8 @@ def _get_user_perms(user, allow_type):
 	on the User Permission doctype itself (restricted users can't always read their own perms)."""
 	if not user or user == "Administrator":
 		return []
-	return frappe.db.sql(
-		"SELECT for_value FROM `tabUser Permission` WHERE user=%s AND allow=%s",
-		(user, allow_type),
-		pluck="for_value",
-	) or []
+	from avientek.api.user_permission_utils import get_user_permission_for_values
+	return get_user_permission_for_values(user, allow_type)
 
 
 def _get_user_brands(user=None):
@@ -1864,6 +1861,8 @@ def export_my_data(doctype, file_type="CSV", docnames=None, parent_fields_json=N
 	perm_map = {}
 	for p in all_perms:
 		perm_map.setdefault(p["allow"], []).append(p["for_value"])
+	if "Sales Person" in perm_map:
+		perm_map["Sales Person"] = _get_user_perms(user, "Sales Person")
 
 	meta = frappe.get_meta(doctype)
 
