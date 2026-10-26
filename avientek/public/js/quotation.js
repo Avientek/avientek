@@ -505,6 +505,24 @@ frappe.ui.form.on('Quotation', {
         );
     },
 
+    project(frm) {
+        if (frm.doc.docstatus !== 1) return;
+        if ((frm.doc.workflow_state || "") !== "Approved for Update") return;
+        frappe.call({
+            method: "avientek.events.quotation.apply_project_on_submitted",
+            args: {quotation_name: frm.doc.name, project: frm.doc.project || ""},
+            freeze: true,
+            freeze_message: __("Linking Project..."),
+            callback(r) {
+                frm.reload_doc();
+                if (r.message) {
+                    frappe.show_alert({message: __("Project updated"), indicator: "green"});
+                }
+            },
+            error() { frm.reload_doc(); },
+        });
+    },
+
     // ── Customer credit / outstanding lookup (UI only) ──────
     party_name(frm) {
         if (!frm.doc.party_name) return;
@@ -1126,6 +1144,7 @@ frappe.ui.form.on('Quotation', {
         _unlock_discount_incentive_for_update(frm);
         _unlock_shipping_for_update(frm);
         _unlock_payment_terms_for_update(frm);
+        _unlock_project_for_update(frm);
 
         // Toggle discount fields based on type selection
         toggle_discount_fields(frm);
@@ -2716,6 +2735,22 @@ function _unlock_shipping_for_update(frm) {
     if (frm.fields_dict.custom_shipping_mode) {
         frm.set_df_property("custom_shipping_mode", "allow_on_submit", 1);
         frm.set_df_property("custom_shipping_mode", "read_only", 0);
+    }
+}
+
+/**
+ * Manu 2026-10-24: link a Project from a submitted quote's edit mode
+ * ("Approved for Update"). Client-only unlock; saved by the project(frm)
+ * handler via apply_project_on_submitted.
+ */
+function _unlock_project_for_update(frm) {
+    if (frm.is_new()) return;
+    if (frm.doc.docstatus !== 1) return;
+    if ((frm.doc.workflow_state || "") !== "Approved for Update") return;
+
+    if (frm.fields_dict.project) {
+        frm.set_df_property("project", "allow_on_submit", 1);
+        frm.set_df_property("project", "read_only", 0);
     }
 }
 

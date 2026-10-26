@@ -3777,6 +3777,41 @@ def apply_payment_terms_on_submitted(quotation_name, payment_terms_template):
     return {"message": "Payment terms applied successfully"}
 
 
+@frappe.whitelist()
+def apply_project_on_submitted(quotation_name, project=None):
+    """Link (or clear) the Project on a submitted Quotation while it is in
+    "Approved for Update" (Manu, 2026-10-24) — same path as
+    apply_payment_terms_on_submitted(). Project is not allow_on_submit, and
+    an empty read-only field is hidden, so there was no way to link one
+    after submit. Informational link only: no pricing change."""
+    doc = frappe.get_doc("Quotation", quotation_name)
+    _guard_quotation_editable_for_update(doc)
+
+    project = project or None
+    if project:
+        if not frappe.db.exists("Project", project):
+            frappe.throw(_("Please select a valid Project."))
+        if not frappe.has_permission("Project", "read", doc=project):
+            frappe.throw(_("You do not have access to Project {0}.").format(project))
+
+    old = doc.project
+    if old == project:
+        return {"message": "No change"}
+
+    doc.project = project
+    doc.project_name = frappe.db.get_value("Project", project, "project_name") if project else None
+    doc.flags.ignore_validate_update_after_submit = True
+    doc.save()
+
+    doc.add_comment(
+        "Info",
+        _("Project changed from {0} to {1}").format(
+            frappe.bold(old or _("(none)")), frappe.bold(project or _("(none)"))
+        ),
+    )
+    return {"message": "Project linked"}
+
+
 # Venkatesh/Rahul 2026-06-11 ERP-TKT-31: Quote print should be gated
 # on Approval — users keep generating PDFs of draft/pending quotes and
 # share them with customers, then the price changes on L2 approval and
