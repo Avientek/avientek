@@ -1363,7 +1363,8 @@ frappe.ui.form.on('Payment Request Form', {
             "Purchase Invoice": {
                 fields: ["bill_no", "bill_date", "posting_date", "due_date", "currency",
                          "conversion_rate", "grand_total", "base_grand_total",
-                         "outstanding_amount", "base_outstanding_amount", "is_return"],
+                         "outstanding_amount", "base_outstanding_amount", "is_return",
+                         "party_account_currency"],
                 mapper: function (v) {
                     // Sridhar 2026-06-04: PI.outstanding_amount is stored
                     // in TRANSACTION currency (EUR) and PI.base_outstanding_amount
@@ -1395,6 +1396,19 @@ frappe.ui.form.on('Payment Request Form', {
                         || (out.outstanding_amount * out.exchange_rate)
                     );
                     out.is_return = parseInt(v.is_return || 0) || 0;
+                    // #0577: outstanding_amount is in the party account's
+                    // currency (company currency for an AED/SAR payable
+                    // account). Billing Amount = what is still due, so a
+                    // balance PRF after an advance doesn't pay the full bill.
+                    const os = parseFloat(v.outstanding_amount || 0) || 0;
+                    const same_ccy = v.party_account_currency === v.currency;
+                    out.outstanding_amount = same_ccy ? os : os / out.exchange_rate;
+                    out.base_outstanding_amount = same_ccy ? os * out.exchange_rate : os;
+                    if (!out.is_return && flt(out.outstanding_amount, 2) > 0
+                        && flt(out.outstanding_amount, 2) < flt(out.grand_total, 2)) {
+                        out.grand_total = flt(out.outstanding_amount, 2);
+                        out.base_grand_total = flt(out.base_outstanding_amount, 2);
+                    }
                     return out;
                 },
             },
