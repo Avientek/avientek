@@ -2039,6 +2039,27 @@ def _get_outstanding_purchase_orders(args):
     return rows
 
 
+def _apply_pi_balance_due(row, invoice, outstanding):
+    """#0577 (AVKSA-00491): a balance PRF for a Purchase Invoice that already
+    had an advance allocated picked up the FULL bill as Billing Amount — the
+    amount this PRF pays and prints. Default it to what is still due.
+
+    PI.outstanding_amount is in the party account's currency: the invoice
+    currency for a USD payable account, the company currency for an AED/SAR
+    one. The old code always divided by the rate (right only for the
+    second case)."""
+    rate = flt(row.get("exchange_rate")) or 1
+    if invoice.get("party_account_currency") == invoice.get("currency"):
+        os_fc, os_base = flt(outstanding), flt(outstanding) * rate
+    else:
+        os_fc, os_base = flt(outstanding) / rate, flt(outstanding)
+    row["outstanding"] = os_fc
+    row["base_outstanding"] = os_base
+    if 0 < flt(os_fc, 2) < flt(row.get("grand_total"), 2):
+        row["grand_total"] = flt(os_fc, 2)
+        row["base_grand_total"] = flt(os_base, 2)
+
+
 @frappe.whitelist()
 def get_outstanding_reference_documents(args):
 
@@ -2219,6 +2240,9 @@ def get_outstanding_reference_documents(args):
             # Company currency equivalents
             row["base_grand_total"] = (row["grand_total"] or 0) * row["exchange_rate"]
             row["base_outstanding"] = os_company
+
+            if voucher_type == "Purchase Invoice":
+                _apply_pi_balance_due(row, invoice, os_company)
 
             # Jithin 2026-06-02: document_reference must point to the
             # target doc itself — that's the canonical link the View
