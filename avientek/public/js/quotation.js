@@ -1815,7 +1815,40 @@ function compute_row_preview(frm, cdt, cdn) {
  */
 function calculate_all_preview(frm, cdt, cdn) {
     compute_row_preview(frm, cdt, cdn);
-    frm.refresh_field("items");
+    schedule_quote_redraw(frm, "items");
+}
+
+
+// Manu 2026-10-28: quotes got slower with every line (2.6 s per line at 30
+// lines). Picking one item sets ~7 fields, each firing a handler that redrew
+// the whole items grid and every form field — 23 grid + 22 form redraws per
+// line, each O(rows). The calculations stay synchronous (frm.doc is always
+// current, so save sees the right values); only the redraw is coalesced to
+// one per tick.
+const QUOTE_TOTAL_FIELDS = [
+    "custom_total_margin_new", "custom_total_margin_percent_new",
+    "custom_total_selling_new", "custom_total_cost_new", "custom_total_buying_price",
+    "custom_total_shipping_new", "custom_total_finance_new", "custom_total_transport_new",
+    "custom_total_reward_new", "custom_total_incentive_new",
+    "custom_total_incentive_percent_new", "custom_total_customs_new",
+];
+
+function schedule_quote_redraw(frm, what) {
+    frm.__pending_redraw = frm.__pending_redraw || {};
+    frm.__pending_redraw[what] = true;
+    if (frm.__redraw_timer) return;
+    frm.__redraw_timer = setTimeout(() => {
+        const pending = frm.__pending_redraw || {};
+        frm.__pending_redraw = {};
+        frm.__redraw_timer = null;
+        if (pending.all) {
+            frm.refresh_fields();  // includes the items grid
+            // Force-refresh key total fields that may not update with refresh_fields()
+            QUOTE_TOTAL_FIELDS.forEach(fn => frm.refresh_field(fn));
+        } else if (pending.items) {
+            frm.refresh_field("items");
+        }
+    }, 0);
 }
 
 
@@ -1967,15 +2000,7 @@ function update_doc_totals_preview(frm) {
         frm.doc.custom_total_margin_percent_new = flt(bs_margin_pct_sum, 4);
     }
 
-    frm.refresh_fields();
-
-    // Force-refresh key total fields that may not update with refresh_fields()
-    ["custom_total_margin_new", "custom_total_margin_percent_new",
-     "custom_total_selling_new", "custom_total_cost_new", "custom_total_buying_price",
-     "custom_total_shipping_new", "custom_total_finance_new", "custom_total_transport_new",
-     "custom_total_reward_new", "custom_total_incentive_new",
-     "custom_total_incentive_percent_new", "custom_total_customs_new"
-    ].forEach(fn => frm.refresh_field(fn));
+    schedule_quote_redraw(frm, "all");
 }
 
 
@@ -2460,8 +2485,8 @@ function run_full_calculation_preview(frm) {
         );
     }
 
-    // 4) Update totals (like server recalc_doc_totals)
-    frm.refresh_field("items");  // ERP-TKT-42: single grid refresh for the whole pipeline
+    // 4) Update totals (like server recalc_doc_totals); the grid redraw is
+    // part of update_doc_totals_preview's coalesced full redraw.
     update_doc_totals_preview(frm);
 }
 
