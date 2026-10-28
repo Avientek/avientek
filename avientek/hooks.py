@@ -526,10 +526,16 @@ doc_events = {
     # Rahul 2026-09-08: convert the budget to USD at a frozen rate.
     # Sridhar 2026-09-11: Customer-style Contacts section (list + New Contact
     # button) — load the linked contacts, and unlink them on delete.
+    # Rahul 2026-10-13 (point 13): Approved / Closed projects closing within 6
+    # months are locked; edits need an L2 approver. Runs first in validate.
     "Project": {
-        "onload": "avientek.events.project.load_contacts",
+        "onload": [
+            "avientek.events.project.load_contacts",
+            "avientek.events.project.load_edit_lock",
+        ],
         "before_insert": "avientek.events.project.set_created_by",
         "validate": [
+            "avientek.events.project.enforce_edit_lock",
             "avientek.events.project.set_parent_sales_person",
             "avientek.events.project.prevent_duplicate_project_name",
             "avientek.events.project.enforce_l2_approval",

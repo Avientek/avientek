@@ -33,7 +33,9 @@
   "enable_quotation_notifications",
   "enable_workflow_state_notifications",
   "enable_probability_change_emails",
-  "restrict_notifications_to_workflow_participants"
+  "restrict_notifications_to_workflow_participants",
+  "project_edit_lock_section",
+  "project_lock_months"
  ],
  "fields": [
   {
@@ -223,13 +225,26 @@
    "fieldname": "restrict_notifications_to_workflow_participants",
    "fieldtype": "Check",
    "label": "Restrict to Workflow Participants"
+  },
+  {
+   "fieldname": "project_edit_lock_section",
+   "fieldtype": "Section Break",
+   "label": "Project Edit Lock"
+  },
+  {
+   "default": "6",
+   "description": "An Approved or Closed project is locked when its Expected Closing Date is within this many months before or after today. Only Project L2 Approvers and System Managers can edit it; other users send an edit request. Blank or 0 uses 6.",
+   "fieldname": "project_lock_months",
+   "fieldtype": "Int",
+   "label": "Lock Window (months)",
+   "non_negative": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-23 16:30:00.000000",
+ "modified": "2026-10-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Avientek",
  "name": "Avientek Settings",
