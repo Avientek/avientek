@@ -21,7 +21,12 @@ The custom fields themselves are created in migrate.py
 """
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
+from frappe.model import no_value_fields, table_fields
+from frappe.utils import (
+    add_months, add_to_date, cint, cstr, escape_html, flt, format_datetime,
+    formatdate, get_datetime, get_fullname, getdate, now_datetime, nowdate,
+)
 
 PROJECT_L2_ROLE = "Project L2 Approver"
 _APPROVED = "Approved"
@@ -172,6 +177,9 @@ def enforce_l2_approval(doc, method=None):
         return
     if (before.get("custom_project_status") or "") != _APPROVED:
         return
+    # An L2 approver allowed this user's edit request (enforce_edit_lock).
+    if doc.flags.project_edit_unlocked:
+        return
 
     user = frappe.session.user
     if user == "Administrator":
@@ -196,6 +204,299 @@ def enforce_l2_approval(doc, method=None):
               "approval (the <b>{0}</b> role).").format(PROJECT_L2_ROLE),
             title=_("Level 2 Approval Required"),
         )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Rahul 2026-10-13 (point 13) — edit lock on Approved / Closed projects
+# ══════════════════════════════════════════════════════════════════════
+# An Approved or Closed project whose Expected Closing Date is within N months
+# before or after today (Avientek Settings > Lock Window, default 6) is
+# read-only. Project L2 Approvers and System Managers still edit it directly.
+# Anyone else clicks "Request Edit"; once an approver clicks "Allow Edit" the
+# requester gets ONE save within 24 hours. Approved -> Closed needs no approval.
+_LOCKED_STATUSES = (_APPROVED, "Closed")
+_DEFAULT_LOCK_MONTHS = 6
+_UNLOCK_HOURS = 24
+# Request / unlock state. Written only by the whitelisted methods below, never
+# from the form, so validate always takes these from the database.
+_LOCK_STATE_FIELDS = (
+    "custom_edit_requested_by",
+    "custom_edit_request_reason",
+    "custom_edit_unlocked_for",
+    "custom_edit_unlocked_until",
+)
+_IGNORED_CHANGE_FIELDS = {"modified", "modified_by", *_LOCK_STATE_FIELDS}
+_REQUEST_TODO_PREFIX = "Edit request for Project"
+
+
+def _lock_months():
+    months = 0
+    if frappe.get_meta("Avientek Settings").has_field("project_lock_months"):
+        months = frappe.db.get_single_value("Avientek Settings", "project_lock_months")
+    return cint(months) or _DEFAULT_LOCK_MONTHS
+
+
+def _is_locked(d):
+    """True when project data `d` (its SAVED state) falls under the lock. A
+    project with no Expected Closing Date is not locked."""
+    if (d.get("custom_project_status") or "") not in _LOCKED_STATUSES:
+        return False
+    closing = d.get("custom_expected_closing_date")
+    if not closing:
+        return False
+    months = _lock_months()
+    today = getdate(nowdate())
+    return add_months(today, -months) <= getdate(closing) <= add_months(today, months)
+
+
+def _is_lock_approver(user):
+    if user == "Administrator":
+        return True
+    roles = set(frappe.get_roles(user))
+    return "System Manager" in roles or PROJECT_L2_ROLE in roles
+
+
+def _unlocked_for(d, user):
+    until = d.get("custom_edit_unlocked_until")
+    return bool(d.get("custom_edit_unlocked_for") == user and until
+                and get_datetime(until) > now_datetime())
+
+
+def _norm(fieldtype, value):
+    """One comparable form per value, so a date string from the form equals
+    the date object from the database and 0 equals blank."""
+    if value in (None, ""):
+        return None
+    if fieldtype in ("Int", "Check"):
+        return cint(value) or None
+    if fieldtype in ("Float", "Currency", "Percent"):
+        return flt(value) or None
+    if fieldtype == "Date":
+        return str(getdate(value))
+    if fieldtype == "Datetime":
+        return str(get_datetime(value))
+    return cstr(value)
+
+
+def _editable_columns(meta):
+    return [df for df in meta.fields
+            if df.fieldtype not in no_value_fields and df.fieldtype not in table_fields
+            and not df.read_only and not df.hidden
+            and df.fieldname not in _IGNORED_CHANGE_FIELDS]
+
+
+def _editable_values(doc):
+    """What a user can change on the form: every field except read-only,
+    hidden and layout ones; child tables reduced to their editable columns.
+    A recomputed total (ERPNext update_costing) or a server stamp therefore
+    never counts as a user edit."""
+    out = {df.fieldname: _norm(df.fieldtype, doc.get(df.fieldname))
+           for df in _editable_columns(doc.meta)}
+    for df in doc.meta.get_table_fields():
+        if df.read_only or df.hidden:
+            continue
+        cols = _editable_columns(frappe.get_meta(df.options))
+        out[df.fieldname] = [
+            tuple(_norm(c.fieldtype, row.get(c.fieldname)) for c in cols)
+            for row in (doc.get(df.fieldname) or [])
+        ]
+    return out
+
+
+def enforce_edit_lock(doc, method=None):
+    """validate: block edits to a locked project unless the user is an
+    approver or holds an unused approval. Runs first in validate, before any
+    hook that stamps values on the doc."""
+    if doc.is_new() or doc.flags.ignore_project_edit_lock:
+        return
+    if frappe.flags.in_migrate or frappe.flags.in_patch or frappe.flags.in_install:
+        return
+    before = doc.get_doc_before_save()
+    if not before:
+        return
+    for f in _LOCK_STATE_FIELDS:
+        if doc.meta.has_field(f):
+            doc.set(f, before.get(f))
+    if not _is_locked(before):
+        return
+
+    user = frappe.session.user
+    if _is_lock_approver(user):
+        return
+    if _unlocked_for(before, user):
+        # One save per approval: use it up now. Also lets enforce_l2_approval
+        # through for the status / closing-date change.
+        doc.flags.project_edit_unlocked = True
+        doc.custom_edit_unlocked_for = None
+        doc.custom_edit_unlocked_until = None
+        doc.add_comment("Comment", _("Edited with L2 approval."))
+        return
+
+    old, new = _editable_values(before), _editable_values(doc)
+    changed = [f for f in new if old.get(f) != new[f]]
+    if not changed:
+        return
+    if (changed == ["custom_project_status"]
+            and before.get("custom_project_status") == _APPROVED
+            and doc.get("custom_project_status") == "Closed"):
+        return
+
+    frappe.throw(
+        _("This project is <b>{0}</b> with Expected Closing Date {1}, so it is "
+          "locked for editing.<br>Changed: {2}.<br>Click <b>Request Edit</b> "
+          "to ask a Project L2 Approver.").format(
+            before.get("custom_project_status"),
+            formatdate(before.get("custom_expected_closing_date")),
+            ", ".join(_(doc.meta.get_label(f)) for f in changed[:6])
+            + (" …" if len(changed) > 6 else "")),
+        title=_("Project Locked"),
+    )
+
+
+def load_edit_lock(doc, method=None):
+    """onload: lock state for the form buttons and banner (project.js)."""
+    if doc.is_new() or not _is_locked(doc):
+        doc.set_onload("edit_lock", {"locked": False})
+        return
+    user = frappe.session.user
+    requester = doc.get("custom_edit_requested_by")
+    doc.set_onload("edit_lock", {
+        "locked": True,
+        "months": _lock_months(),
+        "is_approver": _is_lock_approver(user),
+        "unlocked_for_me": _unlocked_for(doc, user),
+        "unlocked_until": doc.get("custom_edit_unlocked_until"),
+        "requested_by": requester,
+        "requested_by_name": get_fullname(requester) if requester else "",
+        "request_reason": doc.get("custom_edit_request_reason"),
+    })
+
+
+def _approver_users():
+    return frappe.db.sql_list(
+        """SELECT DISTINCT u.name FROM `tabHas Role` hr
+           JOIN `tabUser` u ON u.name = hr.parent
+           WHERE hr.parenttype = 'User' AND hr.role = %s AND u.enabled = 1
+             AND u.name NOT IN ('Administrator', 'Guest')""",
+        PROJECT_L2_ROLE,
+    )
+
+
+def _notify(users, project, subject):
+    enqueue_create_notification(users, {
+        "type": "Alert",
+        "document_type": "Project",
+        "document_name": project,
+        "subject": subject,
+        "from_user": frappe.session.user,
+    })
+
+
+def _close_request_todos(project, requester, status):
+    for name in frappe.get_all("ToDo", pluck="name", filters={
+        "reference_type": "Project", "reference_name": project,
+        "status": "Open", "assigned_by": requester,
+        "description": ["like", f"{_REQUEST_TODO_PREFIX}%"],
+    }):
+        todo = frappe.get_doc("ToDo", name)
+        todo.status = status
+        todo.save(ignore_permissions=True)
+
+
+@frappe.whitelist()
+def request_project_edit(project, reason):
+    doc = frappe.get_doc("Project", project)
+    doc.check_permission("write")
+    user = frappe.session.user
+    reason = (reason or "").strip()
+    if not reason:
+        frappe.throw(_("Please enter the reason for the edit."))
+    if not _is_locked(doc) or _is_lock_approver(user):
+        frappe.throw(_("You can edit this project directly. Please reload the page."))
+    pending = doc.get("custom_edit_requested_by")
+    if pending and pending != user:
+        frappe.throw(_("{0} already has an edit request waiting on this project.")
+                     .format(get_fullname(pending)))
+    approvers = _approver_users()
+    if not approvers:
+        frappe.throw(_("No user has the <b>{0}</b> role yet. Please ask your "
+                       "System Manager to assign it.").format(PROJECT_L2_ROLE))
+
+    frappe.db.set_value("Project", project, {
+        "custom_edit_requested_by": user,
+        "custom_edit_request_reason": reason,
+        "custom_edit_unlocked_for": None,
+        "custom_edit_unlocked_until": None,
+    }, update_modified=False)
+
+    description = "{0} {1} ({2}) from {3}: {4}".format(
+        _REQUEST_TODO_PREFIX, project, doc.project_name, get_fullname(user),
+        escape_html(reason))
+    for approver in approvers:
+        if frappe.db.exists("ToDo", {
+            "allocated_to": approver, "reference_type": "Project",
+            "reference_name": project, "status": "Open", "assigned_by": user,
+        }):
+            continue
+        frappe.get_doc({
+            "doctype": "ToDo",
+            "allocated_to": approver,
+            "assigned_by": user,
+            "reference_type": "Project",
+            "reference_name": project,
+            "description": description,
+            "priority": "Medium",
+        }).insert(ignore_permissions=True)
+    _notify(approvers, project, _("{0} requested approval to edit Project {1}")
+            .format(get_fullname(user), project))
+    doc.add_comment("Comment", _("Requested approval to edit: {0}").format(escape_html(reason)))
+    return approvers
+
+
+def _pending_request(project):
+    if not _is_lock_approver(frappe.session.user):
+        frappe.throw(_("Only a {0} can do this.").format(PROJECT_L2_ROLE),
+                     frappe.PermissionError)
+    doc = frappe.get_doc("Project", project)
+    requester = doc.get("custom_edit_requested_by")
+    if not requester:
+        frappe.throw(_("There is no edit request waiting on this project."))
+    return doc, requester
+
+
+@frappe.whitelist()
+def allow_project_edit(project):
+    doc, requester = _pending_request(project)
+    until = add_to_date(now_datetime(), hours=_UNLOCK_HOURS)
+    frappe.db.set_value("Project", project, {
+        "custom_edit_requested_by": None,
+        "custom_edit_request_reason": None,
+        "custom_edit_unlocked_for": requester,
+        "custom_edit_unlocked_until": until,
+    }, update_modified=False)
+    _close_request_todos(project, requester, "Closed")
+    msg = _("Allowed {0} to edit this project once, until {1}.").format(
+        get_fullname(requester), format_datetime(until))
+    doc.add_comment("Comment", msg)
+    _notify([requester], project, _("Your edit request for Project {0} was approved. "
+                                    "You can save it once, until {1}.")
+            .format(project, format_datetime(until)))
+    return until
+
+
+@frappe.whitelist()
+def decline_project_edit(project, reason=None):
+    doc, requester = _pending_request(project)
+    frappe.db.set_value("Project", project, {
+        "custom_edit_requested_by": None,
+        "custom_edit_request_reason": None,
+    }, update_modified=False)
+    _close_request_todos(project, requester, "Cancelled")
+    reason = escape_html((reason or "").strip())
+    doc.add_comment("Comment", _("Declined the edit request from {0}.{1}").format(
+        get_fullname(requester), f" {reason}" if reason else ""))
+    _notify([requester], project, _("Your edit request for Project {0} was declined.")
+            .format(project))
 
 
 # ══════════════════════════════════════════════════════════════════════

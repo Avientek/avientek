@@ -44,6 +44,7 @@ def after_migrate():
 		# Must precede create_project_enhancement_fields, which pins the
 		# Project field order — see _create_project_contact_fields.
 		("project_contact_fields", _create_project_contact_fields),
+		("project_edit_lock_fields", _create_project_edit_lock_fields),
 		("create_project_enhancement_fields", _create_project_enhancement_fields),
 		("deactivate_old_quotation_workflows", _deactivate_old_quotation_workflows),
 		("fix_quotation_item_calc_layout", _fix_quotation_item_calc_layout),
@@ -1602,6 +1603,38 @@ _OLD_PROJECT_CONTACT_FIELDS = (
 	"custom_contact_cb", "custom_contact_mobile", "custom_contact_designation",
 	"custom_contacts_sb",
 )
+
+
+def _create_project_edit_lock_fields():
+	"""Rahul 2026-10-13 (point 13): hidden state for the Project edit lock —
+	who asked to edit a locked project and why, and whose one-save approval
+	is open until when. Written only by avientek.events.project
+	(request / allow / decline), never from the form. Idempotent."""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+	common = {"hidden": 1, "read_only": 1, "no_copy": 1, "print_hide": 1,
+	          "report_hide": 1}
+	fields = [
+		{"fieldname": "custom_edit_requested_by", "fieldtype": "Link",
+		 "label": "Edit Requested By", "options": "User",
+		 "ignore_user_permissions": 1, "insert_after": "custom_focused_brands"},
+		{"fieldname": "custom_edit_request_reason", "fieldtype": "Small Text",
+		 "label": "Edit Request Reason", "insert_after": "custom_edit_requested_by"},
+		{"fieldname": "custom_edit_unlocked_for", "fieldtype": "Link",
+		 "label": "Edit Allowed For", "options": "User",
+		 "ignore_user_permissions": 1, "insert_after": "custom_edit_request_reason"},
+		{"fieldname": "custom_edit_unlocked_until", "fieldtype": "Datetime",
+		 "label": "Edit Allowed Until", "insert_after": "custom_edit_unlocked_for"},
+	]
+	for f in fields:
+		f.update(common)
+		cf_name = "Project-" + f["fieldname"]
+		if not frappe.db.exists("Custom Field", cf_name):
+			create_custom_field("Project", f)
+		else:
+			frappe.db.set_value("Custom Field", cf_name,
+			                    {k: v for k, v in f.items() if k != "fieldname"})
+	frappe.clear_cache(doctype="Project")
 
 
 def _create_project_contact_fields():

@@ -10,6 +10,9 @@
 //      the figure is keyed in. (2026-09-10)
 //   3. A Contacts section that works like Customer's: linked contacts listed,
 //      plus a "New Contact" button. (2026-09-11)
+//   4. Edit lock on Approved / Closed projects closing within 6 months:
+//      read-only form, Request Edit / Allow Edit / Decline buttons.
+//      (Rahul 2026-10-13, point 13; rules in avientek.events.project)
 //
 // There is deliberately NO brand logic here: the Focused Brands table is keyed
 // in by hand like the Lead's, after the client cancelled the auto-fetch.
@@ -23,6 +26,7 @@ frappe.ui.form.on("Project", {
 		avientek_project_rate_hint(frm);
 		avientek_project_currency_labels(frm);
 		avientek_project_contacts(frm);
+		avientek_project_edit_lock(frm);
 	},
 
 	company(frm) {
@@ -164,4 +168,91 @@ function avientek_project_contacts(frm) {
 	} else {
 		frappe.contacts.render_address_and_contact(frm);
 	}
+}
+
+// Edit lock (point 13). The server decides and enforces; `__onload.edit_lock`
+// (avientek.events.project.load_edit_lock) only drives the banner, buttons and
+// read-only fields here.
+function avientek_project_edit_lock(frm) {
+	// set_df_property sticks to this project across reloads, so undo the
+	// previous run first (e.g. right after an approval unlocks the form).
+	const undo_all = (frm._avientek_lock_undo = frm._avientek_lock_undo || {});
+	(undo_all[frm.doc.name] || []).forEach(([fieldname, prop, value]) =>
+		frm.set_df_property(fieldname, prop, value));
+	const undo = (undo_all[frm.doc.name] = []);
+
+	const lock = (frm.doc.__onload || {}).edit_lock;
+	if (!lock || !lock.locked) return;
+
+	const what = __("This project is {0} and closes within {1} months, so it is locked.",
+		[frm.doc.custom_project_status, lock.months]);
+	const call = (method, args, done) => frappe.call({
+		method: `avientek.events.project.${method}`,
+		args: Object.assign({ project: frm.doc.name }, args),
+		freeze: true,
+		callback: (r) => {
+			if (r.exc) return;
+			done && done(r.message);
+			frm.reload_doc();
+		},
+	});
+
+	if (lock.is_approver) {
+		if (lock.requested_by) {
+			frm.set_intro(__("{0} {1} asked to edit it: {2}", [what,
+				frappe.utils.escape_html(lock.requested_by_name).bold(),
+				frappe.utils.escape_html(lock.request_reason || "")]), "yellow");
+			frm.add_custom_button(__("Allow Edit"), () => call("allow_project_edit", {},
+				() => frappe.show_alert({ message: __("Edit allowed"), indicator: "green" })),
+				__("Edit Request"));
+			frm.add_custom_button(__("Decline"), () => frappe.prompt(
+				{ fieldname: "reason", fieldtype: "Small Text", label: __("Reason (optional)") },
+				(v) => call("decline_project_edit", { reason: v.reason }),
+				__("Decline Edit Request"), __("Decline")), __("Edit Request"));
+		} else {
+			frm.set_intro(__("{0} You can edit it as a Project L2 Approver.", [what]), "blue");
+		}
+		return;
+	}
+
+	if (lock.unlocked_for_me) {
+		frm.set_intro(__("Edit approved. You can save this project once, until {0}.",
+			[frappe.datetime.str_to_user(lock.unlocked_until)]), "green");
+		return;
+	}
+
+	// Locked for this user: every field read-only, except that an Approved
+	// project may still be moved to Closed without approval.
+	const can_close = frm.doc.custom_project_status === "Approved";
+	const lock_prop = (fieldname, prop, value) => {
+		const df = frappe.meta.get_docfield(frm.doctype, fieldname, frm.doc.name);
+		undo.push([fieldname, prop, df[prop]]);
+		frm.set_df_property(fieldname, prop, value);
+	};
+	frm.fields.forEach((field) => {
+		const df = field.df;
+		if (!df || !df.fieldname || df.read_only) return;
+		if (frappe.model.no_value_type.includes(df.fieldtype)
+			&& !frappe.model.table_fields.includes(df.fieldtype)) return;
+		if (can_close && df.fieldname === "custom_project_status") return;
+		lock_prop(df.fieldname, "read_only", 1);
+	});
+	if (can_close) {
+		lock_prop("custom_project_status", "options", "Approved\nClosed");
+	}
+
+	if (lock.requested_by) {
+		frm.set_intro(lock.requested_by === frappe.session.user
+			? __("{0} Your edit request is waiting for a Project L2 Approver.", [what])
+			: __("{0} {1} has an edit request waiting.",
+				[what, frappe.utils.escape_html(lock.requested_by_name).bold()]), "orange");
+		return;
+	}
+	frm.set_intro(__("{0} Click Request Edit to ask a Project L2 Approver.", [what]), "orange");
+	frm.add_custom_button(__("Request Edit"), () => frappe.prompt(
+		{ fieldname: "reason", fieldtype: "Small Text", reqd: 1,
+			label: __("What do you need to change, and why?") },
+		(v) => call("request_project_edit", { reason: v.reason },
+			() => frappe.show_alert({ message: __("Edit request sent"), indicator: "green" })),
+		__("Request Edit"), __("Send")));
 }
