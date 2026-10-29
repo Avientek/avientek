@@ -15,11 +15,8 @@ QUOTATION_PQ_LINKFIELD = "custom_quote_project"
 
 def _user_allowed_sales_persons(user: str) -> list[str]:
     """Return Sales Person names that the user has access to."""
-    return frappe.get_all(
-        "User Permission",
-        filters={"user": user, "allow": "Sales Person"},
-        pluck="for_value",
-    )
+    from avientek.api.user_permission_utils import get_user_permission_for_values
+    return get_user_permission_for_values(user, "Sales Person")
 
 
 # -------------------------------
@@ -77,11 +74,7 @@ def get_project_quotation_for_user(doctype, txt, searchfield, start, page_len, f
         return [[p.name, p.project_name or ""] for p in projects]
 
     # Get allowed Sales Persons from User Permissions
-    sps = frappe.get_all(
-        "User Permission",
-        filters={"user": user, "allow": "Sales Person"},
-        pluck="for_value",
-    )
+    sps = _user_allowed_sales_persons(user)
 
     if not sps:
         return []
