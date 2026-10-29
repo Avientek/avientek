@@ -84,6 +84,7 @@ def after_migrate():
 		("quote_finance_processing_editable", _make_quote_finance_processing_editable),
 		("label_eta_date_and_note_fields", _label_eta_date_and_note_fields),
 		("free_stock_report_sales_manager_roles", _free_stock_report_sales_manager_roles),
+		("disable_prepared_reports", _disable_prepared_reports),
 		("backfill_asset_owner_company", _backfill_asset_owner_company),
 		# #0556 (accounts.ksa, AS-0926-00001): saving an asset with depreciation
 		# inserts an Asset Depreciation Schedule whose `company` is fetched from
@@ -478,6 +479,20 @@ def _make_quote_finance_processing_editable():
 	if changed:
 		for dt in ("Quotation Item", "Optional Item", "Quotation"):
 			frappe.clear_cache(doctype=dt)
+
+
+def _disable_prepared_reports():
+	"""#0579 (Jithin): no report runs as a background "Prepared Report" — users
+	get the result directly. Frappe switches a script report back to prepared
+	once it runs for 15 s unless Disable Prepared Report Automation is set, so
+	both are set; re-applied on every migrate because standard reports are
+	re-synced from their JSON. Idempotent."""
+	frappe.db.sql(
+		"""UPDATE `tabReport`
+		   SET prepared_report = 0, disable_prepared_report_automation = 1
+		   WHERE prepared_report = 1 OR IFNULL(disable_prepared_report_automation, 0) = 0"""
+	)
+	frappe.clear_cache(doctype="Report")
 
 
 def _free_stock_report_sales_manager_roles():

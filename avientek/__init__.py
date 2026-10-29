@@ -1845,3 +1845,32 @@ try:
 	_patch_stock_reports_ignore_item_group_brand()
 except Exception:
 	pass
+
+
+def _patch_report_match_filters_skip_doctype():
+	"""#0579 (accounts.ksa@, General Ledger): ERPNext changed the GL "Voucher
+	Type" column to a Link to DocType (upstream cf0aa72ca, 2026-10-15).
+	Frappe's report runner then builds User Permission match filters for
+	DocType, and build_match_conditions throws "No permission to read DocType"
+	for every user who can't read DocType — the report failed for all of them.
+	DocType records carry no User Permissions, so the column never restricts
+	rows: leave it out. Wraps whatever is installed (the stock-report scope
+	patch above). Idempotent."""
+	import frappe.desk.query_report as qr
+
+	if getattr(qr.get_user_match_filters, "__name__", "") == "_get_user_match_filters_skip_doctype":
+		return
+	inner = qr.get_user_match_filters
+
+	def _get_user_match_filters_skip_doctype(doctypes, user):
+		if "DocType" in doctypes:
+			doctypes = {dt: v for dt, v in doctypes.items() if dt != "DocType"}
+		return inner(doctypes, user)
+
+	qr.get_user_match_filters = _get_user_match_filters_skip_doctype
+
+
+try:
+	_patch_report_match_filters_skip_doctype()
+except Exception:
+	pass
