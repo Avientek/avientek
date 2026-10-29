@@ -227,6 +227,8 @@ fixtures = [
 					"Purchase Order Item-sales_order-read_only",
 					"Purchase Invoice-represents_company-ignore_user_permissions",
 					"Quotation-main-field_order",
+					# Rahul 13-Oct (point 3): Avientek Header on every quotation.
+					"Quotation-letter_head-reqd",
 					"Item-gst_hsn_code-mandatory_depends_on",
 					"Asset Capitalization-capitalization_method-default",
 					"Asset Capitalization-capitalization_method-read_only",
