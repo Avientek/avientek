@@ -83,6 +83,7 @@ def after_migrate():
 		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
 		("quote_finance_processing_editable", _make_quote_finance_processing_editable),
 		("label_eta_date_and_note_fields", _label_eta_date_and_note_fields),
+		("free_stock_report_sales_manager_roles", _free_stock_report_sales_manager_roles),
 		("backfill_asset_owner_company", _backfill_asset_owner_company),
 		# #0556 (accounts.ksa, AS-0926-00001): saving an asset with depreciation
 		# inserts an Asset Depreciation Schedule whose `company` is fetched from
@@ -477,6 +478,32 @@ def _make_quote_finance_processing_editable():
 	if changed:
 		for dt in ("Quotation Item", "Optional Item", "Quotation"):
 			frappe.clear_cache(doctype=dt)
+
+
+def _free_stock_report_sales_manager_roles():
+	"""#0578: dr@ (CSM / GM-CS / Sales Support L2) could not open the
+	Avientek Free Stock report — none of his roles were on it. Added through
+	a Custom Role, which survives avientek_reports' report sync. A Custom
+	Role REPLACES the report's own roles, so the existing ones are kept in
+	it. Idempotent."""
+	report = "Avientek Free Stock"
+	if not frappe.db.exists("Report", report):
+		return
+	extra = [r for r in ("CSM", "GM-CS", "Sales Support L2") if frappe.db.exists("Role", r)]
+	name = frappe.db.get_value("Custom Role", {"report": report}, "name")
+	if name:
+		doc = frappe.get_doc("Custom Role", name)
+	else:
+		doc = frappe.new_doc("Custom Role")
+		doc.report = report
+		doc.ref_doctype = frappe.db.get_value("Report", report, "ref_doctype")
+		for role in frappe.get_all("Has Role", filters={"parent": report, "parenttype": "Report"}, pluck="role"):
+			doc.append("roles", {"role": role})
+	have = {d.role for d in doc.roles}
+	for role in extra:
+		if role not in have:
+			doc.append("roles", {"role": role})
+	doc.save(ignore_permissions=True) if name else doc.insert(ignore_permissions=True)
 
 
 def _label_eta_date_and_note_fields():

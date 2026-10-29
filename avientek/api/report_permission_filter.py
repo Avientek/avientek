@@ -79,6 +79,30 @@ DEFAULT_FILTERED_DOCTYPES = {
 }
 
 
+# #0578 (Orders.Mea): stock levels are shown to every user whatever their
+# Item Group / Brand User Permission (vp@ is limited to ProAudio and saw no
+# stock for other items). Company / Warehouse permissions still apply, and
+# non-stock reports (sales, prices) stay restricted. Custom Reports built on
+# one of these (Stock_Balance_VM, ...) count through reference_report.
+STOCK_REPORTS = frozenset({
+    "Stock Balance", "Stock Ledger", "Stock Projected Qty", "Stock Ageing",
+    "Stock Analytics", "Warehouse wise Item Balance Age and Value",
+    "Warehouse Wise Stock Balance", "Batch-Wise Balance History",
+    "Total Stock Summary", "Avientek Free Stock",
+    "Avientek Free Stock - Landing Cost", "Batch-Wise Free Stock Ageing Report",
+    "Batch-Wise Ageing Custom Report",
+})
+STOCK_UNRESTRICTED_DOCTYPES = frozenset({"Item Group", "Brand"})
+
+
+def is_stock_report(report_name):
+    if not report_name:
+        return False
+    if report_name in STOCK_REPORTS:
+        return True
+    return frappe.db.get_value("Report", report_name, "reference_report") in STOCK_REPORTS
+
+
 @frappe.whitelist()
 def run(report_name, filters=None, user=None, custom_columns=None,
         is_tree=False, parent_field=None, are_default_filters=True,
@@ -148,6 +172,8 @@ def apply_global_user_permission_filter(result, user=None, report_name=None,
         return result
 
     target_dts = set(filtered_doctypes or DEFAULT_FILTERED_DOCTYPES)
+    if is_stock_report(report_name):
+        target_dts -= STOCK_UNRESTRICTED_DOCTYPES
 
     # Map each Link column to (DocType, list-or-dict-key, allowed-set).
     # Skip any DocType for which the user has zero User Permission rows.
