@@ -412,6 +412,12 @@ frappe.ui.form.on('Quotation', {
 
     // ── Save lifecycle ──────────────────────────────────────
     before_save(frm) {
+        // Rahul 13-Oct (point 3): Letter Head is mandatory; fill a blank one
+        // with Avientek Header before the mandatory check. The server
+        // (default_quotation_letter_head) also swaps the company default.
+        if (!frm.doc.letter_head) {
+            frm.doc.letter_head = "Avientek Header";
+        }
         run_full_calculation_preview(frm);
     },
 
