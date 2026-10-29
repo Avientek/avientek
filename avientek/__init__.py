@@ -1794,3 +1794,54 @@ try:
 	_patch_quotation_expiry_skips_100()
 except Exception:
 	pass
+
+
+def _patch_stock_reports_ignore_item_group_brand():
+	"""#0578: Frappe's generate_report_result drops report rows whose Link
+	columns fall outside the user's User Permissions (get_filtered_data). On
+	stock reports, Item Group / Brand permissions must not hide stock — vp@
+	(Item Group = ProAudio) saw no stock for other items. Company / Warehouse
+	permissions still apply. Covers prepared reports too (same function runs
+	in the background job). Idempotent."""
+	import frappe.desk.query_report as qr
+
+	if getattr(qr.generate_report_result, "__name__", "") == "_generate_report_result_stock_scope":
+		return
+	orig_generate = qr.generate_report_result
+	orig_match_filters = qr.get_user_match_filters
+
+	def _generate_report_result_stock_scope(report, *args, **kwargs):
+		import frappe
+		from avientek.api.report_permission_filter import is_stock_report
+
+		previous = frappe.flags.get("avtk_stock_report")
+		frappe.flags.avtk_stock_report = is_stock_report(report.name)
+		try:
+			return orig_generate(report, *args, **kwargs)
+		finally:
+			frappe.flags.avtk_stock_report = previous
+
+	def _get_user_match_filters_stock_scope(doctypes, user):
+		import frappe
+		from avientek.api.report_permission_filter import STOCK_UNRESTRICTED_DOCTYPES
+
+		if not frappe.flags.get("avtk_stock_report"):
+			return orig_match_filters(doctypes, user)
+		doctypes = {dt: v for dt, v in doctypes.items() if dt not in STOCK_UNRESTRICTED_DOCTYPES}
+		out = {}
+		for dt, filter_list in orig_match_filters(doctypes, user).items():
+			# e.g. the Item column carries Item Group / Brand keys too
+			cleaned = [{k: v for k, v in f.items() if k not in STOCK_UNRESTRICTED_DOCTYPES} for f in filter_list]
+			if all(cleaned):
+				out[dt] = cleaned
+			# a filter set left empty means unrestricted for that doctype
+		return out
+
+	qr.generate_report_result = _generate_report_result_stock_scope
+	qr.get_user_match_filters = _get_user_match_filters_stock_scope
+
+
+try:
+	_patch_stock_reports_ignore_item_group_brand()
+except Exception:
+	pass

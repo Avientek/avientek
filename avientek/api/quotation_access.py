@@ -1769,9 +1769,12 @@ def restricted_query_report_run(
 	if not filters:
 		filters = {}
 
-	# Inject brand filter for restricted users
+	# Inject brand filter for restricted users. Not on stock reports: stock
+	# is visible whatever the Brand / Item Group permission (#0578).
+	from avientek.api.report_permission_filter import is_stock_report
+	inject = report_name in BRAND_FILTER_REPORTS and not is_stock_report(report_name)
 	brand_perms = _get_user_brands(current_user)
-	if brand_perms and report_name in BRAND_FILTER_REPORTS:
+	if brand_perms and inject:
 		if not filters.get("brand"):
 			if len(brand_perms) == 1:
 				filters["brand"] = brand_perms[0]
@@ -1782,7 +1785,7 @@ def restricted_query_report_run(
 
 	# Inject item_group filter
 	ig_perms = _get_user_item_groups(current_user)
-	if ig_perms and report_name in BRAND_FILTER_REPORTS:
+	if ig_perms and inject:
 		if not filters.get("item_group"):
 			if len(ig_perms) == 1:
 				filters["item_group"] = ig_perms[0]
