@@ -478,6 +478,10 @@ def calc_item_totals(it):
     # submitted-quote "Update Items" flow) routes through here.
     if it.custom_shipping_mode in ("EXW", "DDP"):
         it.shipping_per = 0
+    # Orders.Mea: EXW also carries no customs duty — the customer clears the
+    # goods themselves. DDP (Delivered Duty Paid) keeps its customs.
+    if it.custom_shipping_mode == "EXW":
+        it.custom_customs_ = 0
 
     std_price = _to_flt(it.custom_standard_price_)
     sp        = _to_flt(it.custom_special_price)
@@ -3694,6 +3698,9 @@ def apply_shipping_on_submitted(quotation_name, shipping_mode):
             )
             if not defaults.get("no_price_for_company"):
                 it.shipping_per = _default_shipping_per_for_mode(shipping_mode, defaults)
+                # Leaving EXW: bring back the Item Price customs it zeroed.
+                if not _to_flt(it.custom_customs_):
+                    it.custom_customs_ = flt(defaults.get("custom_customs_"))
         calc_item_totals(it)
 
     _finalize_submitted_quotation_save(doc, notify_discount_incentive_reapply=True)

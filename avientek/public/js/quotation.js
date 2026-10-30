@@ -1541,6 +1541,8 @@ function validate_and_apply_row_shipping_per(frm, cdt, cdn) {
 function apply_row_shipping_mode(frm, cdt, cdn) {
     const item = frappe.get_doc(cdt, cdn);
 
+    apply_row_customs_for_mode(frm, item);
+
     // EXW / DDP: always zero, unconditionally — customer collects/pays
     // for their own shipping, so no Item Price lookup is needed at all.
     if (["EXW", "DDP"].includes(item.custom_shipping_mode)) {
@@ -1562,6 +1564,45 @@ function apply_row_shipping_mode(frm, cdt, cdn) {
     else if (item.custom_shipping_mode === "DDU") shipping_percent = flt(item.__min_ship_ddu) || 0;
 
     frappe.model.set_value(item.doctype, item.name, "shipping_per", shipping_percent);
+}
+
+// Orders.Mea: EXW carries no customs duty (customer clears the goods), so
+// Customs (%) is 0 — same as Shipping (%). Any other mode brings back this
+// item's Item Price customs if EXW had zeroed it. DDP keeps its customs.
+// Server enforces the same in calc_item_totals.
+function apply_row_customs_for_mode(frm, item) {
+    if (item.custom_shipping_mode === "EXW") {
+        if (flt(item.custom_customs_)) {
+            frappe.model.set_value(item.doctype, item.name, "custom_customs_", 0);
+        }
+        return;
+    }
+    if (flt(item.custom_customs_) || !item.item_code) return;
+    if (item.__default_customs !== undefined) {
+        if (item.__default_customs) {
+            frappe.model.set_value(item.doctype, item.name, "custom_customs_", item.__default_customs);
+        }
+        return;
+    }
+    if (!frm.doc.selling_price_list) return;
+    frappe.call({
+        method: "avientek.events.quotation.get_item_defaults",
+        args: {
+            item_code: item.item_code,
+            price_list: frm.doc.selling_price_list,
+            currency: frm.doc.currency,
+            price_list_currency: frm.doc.price_list_currency,
+            plc_conversion_rate: frm.doc.plc_conversion_rate || 1,
+            company: frm.doc.company,
+        },
+        callback(r) {
+            const d = (r && r.message) || {};
+            item.__default_customs = flt(d.custom_customs_);
+            if (item.__default_customs && item.custom_shipping_mode !== "EXW" && !flt(item.custom_customs_)) {
+                frappe.model.set_value(item.doctype, item.name, "custom_customs_", item.__default_customs);
+            }
+        },
+    });
 }
 
 // #0566: Finance (%) and Processing (%) work like Shipping (%) — editable,
@@ -2187,6 +2228,12 @@ function load_item_defaults(frm, cdt, cdn) {
             row.__min_processing = flt(d.custom_transport_);
             row.__min_ship_sea = flt(d.shipping_per_sea);
             row.__min_ship_ddu = flt(d.shipping_per_ddu);
+            row.__default_customs = flt(d.custom_customs_);
+            // A row that already has its mode set doesn't re-fire the mode
+            // handler below, so zero customs for EXW here directly.
+            if (row.custom_shipping_mode === "EXW") {
+                frappe.model.set_value(cdt, cdn, "custom_customs_", 0);
+            }
 
             // A newly added row has no Shipping Mode of its own yet — inherit
             // the quotation's current mode immediately instead of leaving it
@@ -2266,10 +2313,12 @@ function apply_item_defaults_to_row_silent(frm, cdt, cdn, d) {
     if (!row.custom_finance_)   row.custom_finance_ = d.custom_finance_ || 0;
     if (!row.std_margin_per)    row.std_margin_per = d.std_margin_per || 0;
     if (!row.custom_customs_)   row.custom_customs_ = d.custom_customs_ || 0;
+    if (row.custom_shipping_mode === "EXW") row.custom_customs_ = 0;
     if (!row.custom_markup_)    row.custom_markup_ = d.custom_markup_ || 0;
 
     // Per-item shipping minimums (parity with load_item_defaults) so the
     // shipping_per validation uses this row's own Item Price values.
+    row.__default_customs = flt(d.custom_customs_);
     row.__min_ship_air = flt(d.shipping_per_air);
     row.__min_finance = flt(d.custom_finance_);
     row.__min_processing = flt(d.custom_transport_);
