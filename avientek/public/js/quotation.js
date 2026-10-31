@@ -357,8 +357,11 @@ function _apply_high_probability_lock(frm) {
     }
     // Lock every field except `probability` itself.
     const meta = frappe.get_meta(frm.doctype) || {};
+    // #0583: Valid Till stays editable; Date too at 100% (server enforces).
+    const keep = ["probability", "valid_till"];
+    if ((frm.doc.probabilities || "") === "100%") keep.push("transaction_date");
     (meta.fields || []).forEach(function (f) {
-        if (!f.fieldname || f.fieldname === "probability") { return; }
+        if (!f.fieldname || keep.includes(f.fieldname)) { return; }
         frm.set_df_property(f.fieldname, "read_only", 1);
     });
     frm.dashboard.set_headline(

@@ -320,6 +320,9 @@ def on_update_after_submit(doc, method=None):
             return
         if _changed_only_special_prices(doc):
             return
+        # #0583: Valid Till / Date / Expected Closing Date have their own rules.
+        if _only_expected_closing_date_changed(doc):
+            return
         frappe.throw(
             _("Submitted Quotation: only the Probability field can be "
               "updated inline. To change other fields, scroll to the "
@@ -739,9 +742,14 @@ def _changed_only_special_prices(doc):
     return True
 
 
+_DATE_ONLY_FIELDS = {"expected_closing_dates", "valid_till", "transaction_date"}
+
+
 def _only_expected_closing_date_changed(doc):
-    """True when, versus the pre-save copy, the only top-level field that
-    changed is expected_closing_dates (bookkeeping fields ignored)."""
+    """True when, versus the pre-save copy, the only top-level fields that
+    changed are date fields that have their own rules: Expected Closing Date
+    (validate_expected_closing_date_change) and, #0583, Valid Till / Date
+    (validate_quotation_dates_after_submit). Bookkeeping fields ignored."""
     try:
         before = doc.get_doc_before_save()
     except Exception:
@@ -760,7 +768,7 @@ def _only_expected_closing_date_changed(doc):
             continue
         if str(doc.get(df.fieldname) or "") != str(before.get(df.fieldname) or ""):
             changed.add(df.fieldname)
-    return changed == {"expected_closing_dates"}
+    return bool(changed) and changed <= _DATE_ONLY_FIELDS
 
 
 def _changed_fields(doc, exclude=None):

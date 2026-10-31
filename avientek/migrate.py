@@ -81,6 +81,7 @@ def after_migrate():
 			"Print Format", "report", "ignore_user_permissions", 1, "Check")),
 		("quotation_valuation_allow_on_submit", _allow_quotation_cost_fields_after_submit),
 		("quotation_expected_closing_date_allow_on_submit", _allow_quotation_expected_closing_date_after_submit),
+		("quotation_valid_till_date_allow_on_submit", _allow_quotation_valid_till_and_date_after_submit),
 		("quote_finance_processing_editable", _make_quote_finance_processing_editable),
 		("label_eta_date_and_note_fields", _label_eta_date_and_note_fields),
 		("free_stock_report_sales_manager_roles", _free_stock_report_sales_manager_roles),
@@ -545,6 +546,22 @@ def _label_eta_date_and_note_fields():
 	if changed:
 		for dt in ("Purchase Order", "Purchase Order Item", "Sales Order", "Sales Order Item"):
 			frappe.clear_cache(doctype=dt)
+
+def _allow_quotation_valid_till_and_date_after_submit():
+	"""#0583 (Orders.Mea): Valid Till is editable on a submitted Quotation, and
+	Date too when the probability is 100% - no workflow step. The 100% rule is
+	enforced by avientek.events.quotation.validate_quotation_dates_after_submit;
+	read_only_depends_on keeps Date locked on the form otherwise. Idempotent."""
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+	for fieldname in ("valid_till", "transaction_date"):
+		make_property_setter("Quotation", fieldname, "allow_on_submit", 1, "Check")
+	make_property_setter(
+		"Quotation", "transaction_date", "read_only_depends_on",
+		"eval:doc.docstatus==1 && doc.probabilities!='100%'", "Code",
+	)
+	frappe.clear_cache(doctype="Quotation")
+
 
 def _allow_quotation_expected_closing_date_after_submit():
 	"""Sammish 2026-09-24: Expected Closing Date must be editable on a submitted
