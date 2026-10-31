@@ -823,12 +823,16 @@ doc_events = {
         # set once, an existing date needs approval).
         "before_update_after_submit": [
             "avientek.events.quotation.validate_expected_closing_date_change",
+            # #0583: Valid Till any time, Date only at 100%.
+            "avientek.events.quotation.validate_quotation_dates_after_submit",
             # #0572: drop float noise on totals so a recomputed-but-equal
             # value doesn't trip "Cannot Update After Submit".
             "avientek.events.quotation.snap_float_noise_to_stored",
         ],
         "on_update_after_submit": [
             "avientek.api.quotation_high_probability.on_update_after_submit",
+            # #0583: extending Valid Till reopens an Expired quote.
+            "avientek.events.quotation.reopen_expired_quotation_on_extension",
             # Sridhar 2026-05-29: validate also fires from on_update_after_submit
             # so probability downgrades via post-submit edits (which may not
             # always reach the standard validate hook on workflow action paths)

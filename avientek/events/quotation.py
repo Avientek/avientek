@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import flt, cint
+from frappe.utils import flt, cint, formatdate, getdate, nowdate
 from frappe.model.workflow import apply_workflow
 import json
 from decimal import Decimal, ROUND_HALF_UP
@@ -2584,6 +2584,39 @@ def snap_float_noise_to_stored(doc, method=None):
         saved_row = stored_rows.get((row.doctype, row.name))
         if saved_row:
             _snap(row, saved_row)
+
+
+def validate_quotation_dates_after_submit(doc, method=None):
+    """#0583 (Orders.Mea): on a submitted Quotation, Valid Till may be changed
+    any time and Date only when the probability is 100% - no workflow step.
+    Valid Till may not fall before Date. Quotation has track_changes off, so
+    the change is noted on the timeline."""
+    before = doc.get_doc_before_save()
+    if not before:
+        return
+    date_changed = str(doc.transaction_date or "") != str(before.transaction_date or "")
+    till_changed = str(doc.valid_till or "") != str(before.valid_till or "")
+    if not (date_changed or till_changed):
+        return
+    if date_changed and (doc.probabilities or "") != "100%":
+        frappe.throw(
+            _("Date can be changed after submission only when Probability is 100%."),
+            title=_("Date Locked"),
+        )
+    if doc.valid_till and doc.transaction_date and getdate(doc.valid_till) < getdate(doc.transaction_date):
+        frappe.throw(_("Valid Till cannot be before the quotation Date."), title=_("Invalid Valid Till"))
+    for label, field, changed in ((_("Date"), "transaction_date", date_changed), (_("Valid Till"), "valid_till", till_changed)):
+        if changed:
+            doc.add_comment("Info", _("{0} changed from {1} to {2}").format(
+                label, frappe.bold(formatdate(before.get(field)) or _("(blank)")),
+                frappe.bold(formatdate(doc.get(field)) or _("(blank)"))))
+
+
+def reopen_expired_quotation_on_extension(doc, method=None):
+    """#0583: an Expired quotation whose Valid Till is moved to today or later
+    is Open again (the daily expiry job only ever moves quotes to Expired)."""
+    if doc.status == "Expired" and doc.valid_till and getdate(doc.valid_till) >= getdate(nowdate()):
+        doc.db_set("status", "Open", update_modified=False)
 
 
 def validate_expected_closing_date_change(doc, method=None):
