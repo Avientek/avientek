@@ -40,7 +40,10 @@ function avientek_make_po_direct(frm) {
 		// Pending = ordered short of stock qty (mirrors ERPNext's own check).
 		const pending_qty = flt(d.stock_qty) - flt(d.ordered_qty);
 		if (pending_qty > 0) {
-			selected_items.push({ item_code: d.item_code, sales_order_item: d.name });
+			// #0585: `name` is the Sales Order row. ERPNext >= 15.124 maps
+			// selected items by row name and only falls back to item_code,
+			// which fails when the same item is on two rows.
+			selected_items.push({ name: d.name, item_code: d.item_code, sales_order_item: d.name });
 		}
 	});
 
