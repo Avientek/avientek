@@ -48,6 +48,17 @@ def after_insert(doc, method=None):
 	_link_contacts_from_lead(doc, lead_name)
 	_copy_contact_details_from_lead(doc, lead_name)
 	_link_historical_quotations_from_lead(doc, lead_name)
+	_link_projects_from_lead(doc, lead_name)
+
+
+def _link_projects_from_lead(doc, lead_name):
+	"""Manu 2026-10-31: projects raised for the Lead (Project.custom_lead) get
+	the new Customer, so they show on the Customer's Connections panel too.
+	Only fills projects with no Customer yet. Written directly so an older
+	project that would fail today's mandatory checks still gets linked."""
+	for name in frappe.get_all("Project", filters={"custom_lead": lead_name,
+	                                               "customer": ["is", "not set"]}, pluck="name"):
+		frappe.db.set_value("Project", name, "customer", doc.name, update_modified=False)
 
 
 def _link_historical_quotations_from_lead(doc, lead_name):

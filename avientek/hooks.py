@@ -530,6 +530,8 @@ doc_events = {
     # button) — load the linked contacts, and unlink them on delete.
     # Rahul 2026-10-13 (point 13): Approved / Closed projects closing within 6
     # months are locked; edits need an L2 approver. Runs first in validate.
+    # Manu 2026-10-31: at least one Focused Brand (with a Value) is required,
+    # and Budget Value is the sum of the brand values.
     "Project": {
         "onload": [
             "avientek.events.project.load_contacts",
@@ -541,6 +543,8 @@ doc_events = {
             "avientek.events.project.set_parent_sales_person",
             "avientek.events.project.prevent_duplicate_project_name",
             "avientek.events.project.enforce_l2_approval",
+            "avientek.events.project.validate_focused_brands",
+            "avientek.events.project.set_budget_value_from_brands",
             "avientek.events.project.set_budget_usd",
         ],
         "on_trash": "avientek.events.project.unlink_contacts",
