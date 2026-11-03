@@ -1,0 +1,22 @@
+{
+ "color": "#E24C4C",
+ "creation": "2026-11-03 10:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Number Card",
+ "document_type": "Quotation",
+ "filters_json": "[[\"Quotation\",\"docstatus\",\"=\",1,false],[\"Quotation\",\"pending_probability_status\",\"=\",\"Pending\",false]]",
+ "function": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "label": "Probability Change Requests",
+ "modified": "2026-11-03 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Avientek",
+ "name": "Probability Change Requests",
+ "owner": "Administrator",
+ "show_full_number": 0,
+ "show_percentage_stats": 1,
+ "stats_time_interval": "Daily",
+ "type": "Document Type"
+}

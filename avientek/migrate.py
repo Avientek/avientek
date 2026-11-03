@@ -174,8 +174,9 @@ def _create_project_enhancement_fields():
 		 # fills it as a convenience when the user leaves it blank.
 		 "label": "Parent Sales Person", "options": "Sales Person", "read_only": 0,
 		 "insert_after": "custom_sales_person", "ignore_user_permissions": 1},
+		# Manu 2026-10-31: Territory is mandatory.
 		{"fieldname": "custom_territory", "fieldtype": "Link",
-		 "label": "Territory", "options": "Territory",
+		 "label": "Territory", "options": "Territory", "reqd": 1,
 		 "insert_after": "custom_parent_sales_person", "ignore_user_permissions": 1},
 		# ── Budget block (Rahul 2026-09-08) ──
 		# Amount and Value sit together, each immediately followed by its
@@ -190,8 +191,11 @@ def _create_project_enhancement_fields():
 		 "label": "Budget Amount (USD)", "options": "USD", "read_only": 1,
 		 "insert_after": "custom_budget_amount",
 		 "description": _RATE_REFRESH_HINT},
+		# Manu 2026-10-31: Budget Value is the sum of the Focused Brands
+		# values (avientek.events.project.set_budget_value_from_brands).
 		{"fieldname": "custom_budget_value", "fieldtype": "Currency",
 		 "label": "Budget Value", "options": "custom_company_currency",
+		 "read_only": 1, "description": "Sum of the Focused Brands values.",
 		 "insert_after": "custom_budget_amount_usd"},
 		{"fieldname": "custom_budget_value_usd", "fieldtype": "Currency",
 		 "label": "Budget Value (USD)", "options": "USD", "read_only": 1,
@@ -230,6 +234,13 @@ def _create_project_enhancement_fields():
 		 "label": "Focused Brands", "options": "Focused Brands", "read_only": 0,
 		 "insert_after": "custom_project_by", "allow_on_submit": 0,
 		 "description": ""},
+		# Manu 2026-10-31: a project can be for a Lead that is not a Customer
+		# yet. Shown next to Customer; the Lead's Connections panel lists the
+		# project, and converting the Lead fills in the Customer
+		# (avientek.events.customer._link_projects_from_lead).
+		{"fieldname": "custom_lead", "fieldtype": "Link",
+		 "label": "Lead", "options": "Lead", "insert_after": "customer",
+		 "depends_on": "eval:!doc.customer || doc.custom_lead"},
 	]
 
 	for f in fields:
@@ -241,10 +252,16 @@ def _create_project_enhancement_fields():
 			upd = {k: f[k] for k in
 			       ("fieldtype", "label", "options", "insert_after", "read_only",
 			        "ignore_user_permissions", "description", "precision", "hidden",
-			        "reqd", "default")
+			        "reqd", "default", "depends_on")
 			       if k in f}
 			if upd:
 				frappe.db.set_value("Custom Field", cf_name, upd)
+
+	# Manu 2026-10-31: Customer / Lead were hidden in the collapsed
+	# "Customer Details" section, so the project never looked linked.
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+	make_property_setter("Project", "customer_details", "collapsible", 0, "Check",
+	                     validate_fields_for_doctype=False)
 
 	# Item 2 (Rahul 2026-08-25): remove the Probabilities field added on
 	# 2026-08-22. Idempotent — only deletes if it still exists.

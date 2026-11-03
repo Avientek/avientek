@@ -21,21 +21,26 @@ from frappe import _
 
 
 def get_data(data):
-    data.setdefault("non_standard_fieldnames", {})["Customer"] = "lead_name"
+    fieldnames = data.setdefault("non_standard_fieldnames", {})
+    fieldnames["Customer"] = "lead_name"
+    # Manu 2026-10-31: projects raised for this Lead (Project.custom_lead).
+    fieldnames["Project"] = "custom_lead"
 
     data.setdefault("transactions", [])
+    for doctype in ("Customer", "Project"):
+        _add_item(data["transactions"], doctype)
+    return data
+
+
+def _add_item(transactions, doctype):
     # Sit alongside Opportunity / Quotation / Prospect in ERPNext's own group
     # rather than adding a second header. Guarded so a reload cannot list
-    # Customer twice.
-    for group in data["transactions"]:
-        items = group.setdefault("items", [])
-        if "Customer" in items:
-            return data
-    for group in data["transactions"]:
+    # the doctype twice.
+    for group in transactions:
+        if doctype in group.setdefault("items", []):
+            return
+    for group in transactions:
         if not group.get("label"):
-            group.setdefault("items", []).append("Customer")
-            break
-    else:
-        data["transactions"].append({"label": _("Converted"), "items": ["Customer"]})
-
-    return data
+            group["items"].append(doctype)
+            return
+    transactions.append({"label": _("Converted"), "items": [doctype]})

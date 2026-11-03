@@ -547,6 +547,38 @@ def _brand_values(d):
     )
 
 
+def validate_focused_brands(doc, method=None):
+    """Manu 2026-10-31: a project needs at least one Focused Brand, and every
+    brand row needs a Value, because Budget Value is now the sum of those
+    values (set_budget_value_from_brands). The same brand twice would be
+    counted twice, so duplicates are refused as well."""
+    rows = doc.get("custom_focused_brands") or []
+    if not any(r.get("brand") for r in rows):
+        frappe.throw(_("Please add at least one Focused Brand."),
+                     title=_("Focused Brands"))
+    seen = set()
+    for r in rows:
+        if not r.get("brand"):
+            frappe.throw(_("Focused Brands row {0}: please select a Brand.").format(r.idx),
+                         title=_("Focused Brands"))
+        if r.brand in seen:
+            frappe.throw(_("Focused Brands row {0}: {1} is already in the list.")
+                         .format(r.idx, frappe.bold(r.brand)), title=_("Focused Brands"))
+        seen.add(r.brand)
+        if flt(r.get("value")) <= 0:
+            frappe.throw(_("Focused Brands row {0}: please enter the Value for {1}.")
+                         .format(r.idx, frappe.bold(r.brand)), title=_("Focused Brands"))
+
+
+def set_budget_value_from_brands(doc, method=None):
+    """Manu 2026-10-31: Budget Value = sum of the Focused Brands values (in
+    company currency). Runs before set_budget_usd, so Budget Value (USD) is
+    the same sum converted at the frozen rate."""
+    doc.custom_budget_value = flt(
+        sum(flt(r.get("value")) for r in (doc.get("custom_focused_brands") or [])),
+        doc.precision("custom_budget_value"))
+
+
 def _budget_inputs_changed(doc):
     """True when the frozen rate must be re-fetched.
 

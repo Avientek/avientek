@@ -13,9 +13,8 @@
 //   4. Edit lock on Approved / Closed projects closing within 6 months:
 //      read-only form, Request Edit / Allow Edit / Decline buttons.
 //      (Rahul 2026-10-13, point 13; rules in avientek.events.project)
-//
-// There is deliberately NO brand logic here: the Focused Brands table is keyed
-// in by hand like the Lead's, after the client cancelled the auto-fetch.
+//   5. Budget Value is the sum of the Focused Brands values, refreshed as
+//      rows change. (Manu 2026-10-31; set_budget_value_from_brands)
 //
 // The arithmetic lives in Python (avientek.events.project) and is re-applied
 // on validate; this file only calls it so the user sees the numbers before
@@ -40,22 +39,29 @@ frappe.ui.form.on("Project", {
 		avientek_project_convert_budget(frm);
 	},
 
-	custom_budget_value(frm) {
-		avientek_project_convert_budget(frm);
-	},
-
-	custom_focused_brands_remove(frm) {
-		avientek_project_convert_budget(frm);
-	},
 });
 
 // 2026-09-24: Focused Brands row Value -> Value (USD) at the same frozen rate
 // as the Budget USD columns.
+// The grid fires `<table>_remove` on the CHILD doctype, so the remove handler
+// lives here, not on Project.
 frappe.ui.form.on("Focused Brands", {
 	value(frm) {
-		if (frm.doctype === "Project") avientek_project_convert_budget(frm);
+		if (frm.doctype === "Project") avientek_project_sum_brands(frm);
+	},
+	custom_focused_brands_remove(frm) {
+		if (frm.doctype === "Project") avientek_project_sum_brands(frm);
 	},
 });
+
+// Budget Value = sum of the brand values (the server recomputes it on save),
+// then re-rate so both USD columns and the row USD values follow.
+function avientek_project_sum_brands(frm) {
+	const total = (frm.doc.custom_focused_brands || [])
+		.reduce((sum, row) => sum + flt(row.value), 0);
+	frm.set_value("custom_budget_value", total)
+		.then(() => avientek_project_convert_budget(frm));
+}
 
 // Re-fetch the exchange rate and recompute both USD columns. Called ONLY from
 // the budget/company handlers — that is what makes the rate "frozen" for every
