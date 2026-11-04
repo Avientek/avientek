@@ -805,22 +805,41 @@ def _ensure_prf_connection_links():
 
 	Customize Form stores its links as custom rows (custom=1, parenttype
 	"Customize Form"). Reloads leave those alone and Meta adds them back to the
-	DocType, so recreate the same links that way here, on every migrate."""
+	DocType, so recreate the link that way here, on every migrate.
+
+	Only ONE field per doctype can drive the Connections count (Meta keeps a
+	single non_standard_fieldnames entry; the last link row wins). The patch
+	added both reference_name and document_reference, so whichever row came
+	last decided, and PO-LLC-26-00752's PRF (document_reference only) showed 0.
+	document_reference is the real document pointer on every line (reference_name
+	holds the supplier bill no. for invoices), so keep that link alone and fill
+	document_reference on the few older lines that only carry reference_name."""
 	from avientek.patches.add_prf_dashboard_links import (
-		CHILD_TABLE_FIELDNAME, GROUP_LABEL, LINK_FIELDNAMES, PRF_DOCTYPE, SOURCE_DOCTYPES,
+		CHILD_DOCTYPE, CHILD_TABLE_FIELDNAME, GROUP_LABEL, PRF_DOCTYPE, SOURCE_DOCTYPES,
 	)
 	if not frappe.db.exists("DocType", PRF_DOCTYPE):
 		return
 	for source in SOURCE_DOCTYPES:
 		if not frappe.db.exists("DocType", source):
 			continue
-		changed = False
-		for fieldname in LINK_FIELDNAMES:
-			if frappe.db.exists("DocType Link", {
-				"parent": source, "custom": 1, "link_doctype": PRF_DOCTYPE,
-				"link_fieldname": fieldname, "table_fieldname": CHILD_TABLE_FIELDNAME,
-			}):
-				continue
+		# document_reference only, so filling it backs the count.
+		frappe.db.sql(
+			f"""UPDATE `tab{CHILD_DOCTYPE}` r JOIN `tab{source}` d ON d.name = r.reference_name
+			    SET r.document_reference = r.reference_name
+			    WHERE r.reference_doctype = %s AND IFNULL(r.document_reference, '') = ''""",
+			source,
+		)
+		competing = frappe.get_all("DocType Link", filters={
+			"parent": source, "link_doctype": PRF_DOCTYPE,
+			"link_fieldname": ["!=", "document_reference"],
+		}, pluck="name")
+		changed = bool(competing)
+		for name in competing:
+			frappe.db.delete("DocType Link", name)
+		if not frappe.db.exists("DocType Link", {
+			"parent": source, "custom": 1, "link_doctype": PRF_DOCTYPE,
+			"link_fieldname": "document_reference",
+		}):
 			frappe.get_doc({
 				"doctype": "DocType Link",
 				"parent": source,
@@ -828,7 +847,7 @@ def _ensure_prf_connection_links():
 				"parentfield": "links",
 				"custom": 1,
 				"link_doctype": PRF_DOCTYPE,
-				"link_fieldname": fieldname,
+				"link_fieldname": "document_reference",
 				"parent_doctype": PRF_DOCTYPE,
 				"table_fieldname": CHILD_TABLE_FIELDNAME,
 				"group": GROUP_LABEL,
