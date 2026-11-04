@@ -32,8 +32,10 @@ rounding, totals stay authoritative). Zero-net (free) rows are never
 touched, and their business representation is preserved as-is.
 """
 
+import re
+
 import frappe
-from frappe.utils import flt
+from frappe.utils import flt, strip_html
 
 # Residue beyond this is NOT rounding drift — something is genuinely
 # wrong with the tax setup, and hiding it would falsify the invoice.
@@ -135,6 +137,13 @@ def patch_ksa_einvoice_tax_reconciliation():
                 title="KSA e-invoice tax reconciliation skipped",
                 message=frappe.get_traceback(),
             )
+        try:
+            _describe_numeric_item_names(item_lines, doc)
+        except Exception:
+            frappe.log_error(
+                title="KSA e-invoice item name fix skipped",
+                message=frappe.get_traceback(),
+            )
 
     _m.Einvoice._append_sales_invoice_items = _patched
 
@@ -179,3 +188,31 @@ def _reconcile_item_lines_to_header(item_lines, doc):
     # rounding_amount = tax_amount + amount (see the builder); keep consistent
     if "rounding_amount" in target:
         target.rounding_amount = flt(flt(target.get("amount")) + flt(target.tax_amount), 2)
+
+
+# #0586 (INV-AT-26-00588): ZATCA warns BR-KSA-F-C-01 "Please recheck Item
+# Description (BT-153)" when the item name is digits only — the SDK test is
+# matches(cac:Item/cbc:Name, '^\d+$'). Many Avientek items are named by part
+# number or barcode (I024049 = "6512880"), and "Block invoice on invalid XML"
+# blocks on warnings too, so those invoices cannot be submitted. Only the
+# ZATCA XML name changes: "6512880 - Crestron Table Dock for TST-1080".
+_DIGITS_ONLY = re.compile(r"^\d+$")
+
+
+def _describe_numeric_item_names(item_lines, doc):
+    if getattr(doc, "doctype", None) != "Sales Invoice":
+        return
+    rows = {row.idx: row for row in doc.get("items") or []}
+    for il in item_lines:
+        name = il.get("item_name") or ""
+        row = rows.get(il.get("idx"))
+        if row is None or not _DIGITS_ONLY.match(name):
+            continue
+        text = " ".join(strip_html(row.get("description") or "").split())
+        if text and text != name and not _DIGITS_ONLY.match(text):
+            il.item_name = f"{name} - {text[:300]}"
+        elif row.get("brand"):
+            il.item_name = f"{row.brand} {name}"
+        elif row.get("item_group"):
+            il.item_name = f"{row.item_group} {name}"
+
