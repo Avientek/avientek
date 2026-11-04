@@ -53,6 +53,7 @@ def after_migrate():
 		("enforce_export_permissions", _enforce_export_permissions),
 		("sync_payment_voucher_formats", _sync_payment_voucher_formats),
 		("sync_sales_team_workspace", _sync_sales_team_workspace),
+		("prf_connection_links", _ensure_prf_connection_links),
 		("unblock_avientek_module", _unblock_avientek_module),
 		# saudi.sales 2026-07-15 (TSK-00519): non-admin users with a Report
 		# User Permission (apply_to_all_doctypes) got a fully BLANK workspace
@@ -793,6 +794,48 @@ def _block_prf_workflow_self_approval():
 			title="after_migrate: PRF self-approval block failed",
 			message=frappe.get_traceback(),
 		)
+
+
+def _ensure_prf_connection_links():
+	"""#0587 (Jithin 2026-11-03): PRFs stopped showing under the Connections of
+	the Purchase Order they pay. patches.add_prf_dashboard_links had appended
+	the links to the STANDARD DocType records (parenttype "DocType"), and every
+	ERPNext update that reloads purchase_order.json etc. deletes and re-inserts
+	the DocType, wiping those rows.
+
+	Customize Form stores its links as custom rows (custom=1, parenttype
+	"Customize Form"). Reloads leave those alone and Meta adds them back to the
+	DocType, so recreate the same links that way here, on every migrate."""
+	from avientek.patches.add_prf_dashboard_links import (
+		CHILD_TABLE_FIELDNAME, GROUP_LABEL, LINK_FIELDNAMES, PRF_DOCTYPE, SOURCE_DOCTYPES,
+	)
+	if not frappe.db.exists("DocType", PRF_DOCTYPE):
+		return
+	for source in SOURCE_DOCTYPES:
+		if not frappe.db.exists("DocType", source):
+			continue
+		changed = False
+		for fieldname in LINK_FIELDNAMES:
+			if frappe.db.exists("DocType Link", {
+				"parent": source, "custom": 1, "link_doctype": PRF_DOCTYPE,
+				"link_fieldname": fieldname, "table_fieldname": CHILD_TABLE_FIELDNAME,
+			}):
+				continue
+			frappe.get_doc({
+				"doctype": "DocType Link",
+				"parent": source,
+				"parenttype": "Customize Form",
+				"parentfield": "links",
+				"custom": 1,
+				"link_doctype": PRF_DOCTYPE,
+				"link_fieldname": fieldname,
+				"parent_doctype": PRF_DOCTYPE,
+				"table_fieldname": CHILD_TABLE_FIELDNAME,
+				"group": GROUP_LABEL,
+			}).db_insert()
+			changed = True
+		if changed:
+			frappe.clear_cache(doctype=source)
 
 
 def _sync_sales_team_workspace():
