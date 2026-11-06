@@ -132,6 +132,8 @@ def apply_discount(doc, discount_amount):
 @frappe.whitelist()
 def get_item_all_details(item_code, customer, price_list, company=None):
     return {
+        # Shown as the Stock Availability header so users know which part it is
+        "part_number": frappe.db.get_value("Item", item_code, "part_number") or item_code,
         "history": get_last_5_transactions(item_code, customer),
         "stock": get_company_stock(item_code, company),
         "shipment_margin": get_shipment_and_margin(item_code, price_list, company)

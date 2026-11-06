@@ -3027,12 +3027,20 @@ function render_item_info_html(data, item_code) {
         shippingHtml = '<span class="text-muted">No data</span>';
     }
 
+    // 06-Nov (Avientek): show which part number the stock belongs to, so the
+    // user can be sure the panel matches the BoQ line they clicked.
+    const part_no = frappe.utils.escape_html(data.part_number || item_code || "");
+    const part_label = part_no
+        ? `<div style="font-size: 13px; color: #1f272e; margin-top: 2px;">${__("Part No")}: <b>${part_no}</b></div>`
+        : "";
+
     // Combine into 3-column layout
     let html = `
         <div class="row" style="margin: 0 0 15px 0; padding: 10px; background: #f8f9fa; border-radius: 8px;">
             <div class="col-md-4">
                 <div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
                     STOCK AVAILABILITY
+                    ${part_label}
                 </div>
                 ${stockHtml}
             </div>
@@ -3082,6 +3090,12 @@ function set_free_stock_company(frm, item_code, stock) {
 function refresh_item_info_html(frm, item_code, populate_tables = false) {
     if (!item_code || !frm.doc.party_name) return;
 
+    // Remember what the panel shows (per quote), and number each request so
+    // a slow reply for an earlier click can't overwrite a later one.
+    frm._current_item_info = frm.doc.name + "::" + item_code;
+    const req_id = (frm._item_info_req_id || 0) + 1;
+    frm._item_info_req_id = req_id;
+
     frappe.call({
         method: "avientek.events.quotation.get_item_all_details",
         args: {
@@ -3091,6 +3105,7 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
             company: frm.doc.company,
         },
         callback(r) {
+            if (req_id !== frm._item_info_req_id) return;  // a newer click won
             if (!r.message) {
                 frm.set_df_property("custom_item_info_html", "options",
                     '<div class="text-muted">No item data available</div>');
@@ -3152,26 +3167,34 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
  * Setup click handler on items grid to refresh item info when a row is clicked.
  */
 function setup_items_grid_click_handler(frm) {
-    // Remove existing handler to avoid duplicates
+    const wrapper = frm.fields_dict.items.grid.wrapper.get(0);
+    if (!wrapper) return;
+
+    // Remove the old jQuery handler and any earlier capture listener
     frm.fields_dict.items.grid.wrapper.off('click.item_info');
+    if (frm._item_info_click_listener) {
+        wrapper.removeEventListener('click', frm._item_info_click_listener, true);
+    }
 
-    // Add click handler on grid rows
-    frm.fields_dict.items.grid.wrapper.on('click.item_info', '.grid-row', function() {
-        let $row = $(this);
-        let idx = $row.data('idx');
+    // 06-Nov (Avientek): listen in the CAPTURE phase. Frappe's grid cell click
+    // handler returns false when it opens a row for inline editing
+    // (grid_row.js toggle_editable_row), which stops the click bubbling — so
+    // a normal (bubbling) handler never saw a click on the Part Number of a
+    // row that wasn't already open, and Stock Availability did not refresh.
+    frm._item_info_click_listener = function (e) {
+        const row_el = e.target.closest && e.target.closest('.grid-row[data-name]');
+        if (!row_el || !wrapper.contains(row_el)) return;
 
-        if (!idx) return;
+        // Look the row up by name; data-idx can be stale after a delete/reorder
+        const item = (frm.doc.items || []).find(d => d.name === row_el.getAttribute('data-name'));
+        if (!item || !item.item_code) return;
 
-        // Get the item from the row index (idx is 1-based)
-        let item = frm.doc.items[idx - 1];
-        if (item && item.item_code) {
-            // Only refresh if it's a different item than currently displayed
-            if (frm._current_item_info !== item.item_code) {
-                frm._current_item_info = item.item_code;
-                refresh_item_info_html(frm, item.item_code);
-            }
+        // Skip only if the panel already shows this item for this quote
+        if (frm._current_item_info !== frm.doc.name + "::" + item.item_code) {
+            refresh_item_info_html(frm, item.item_code);
         }
-    });
+    };
+    wrapper.addEventListener('click', frm._item_info_click_listener, true);
 }
 
 
