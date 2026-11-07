@@ -3105,11 +3105,15 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
             company: frm.doc.company,
         },
         callback(r) {
-            if (req_id !== frm._item_info_req_id) return;  // a newer click won
+            // A newer click owns the panel; this reply must still fill its own
+            // row (Free Stock, history/stock tables) below, just not the panel.
+            const is_latest = req_id === frm._item_info_req_id;
             if (!r.message) {
-                frm.set_df_property("custom_item_info_html", "options",
-                    '<div class="text-muted">No item data available</div>');
-                frm.refresh_field("custom_item_info_html");
+                if (is_latest) {
+                    frm.set_df_property("custom_item_info_html", "options",
+                        '<div class="text-muted">No item data available</div>');
+                    frm.refresh_field("custom_item_info_html");
+                }
                 return;
             }
 
@@ -3153,6 +3157,8 @@ function refresh_item_info_html(frm, item_code, populate_tables = false) {
                     sm.std_margin = r.message.shipment_margin.std_margin;
                 }
             }
+
+            if (!is_latest) return;  // a newer click won the panel
 
             // Render HTML section
             let html = render_item_info_html(r.message, item_code);
