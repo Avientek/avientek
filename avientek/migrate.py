@@ -55,6 +55,7 @@ def after_migrate():
 		("sync_sales_team_workspace", _sync_sales_team_workspace),
 		("prf_connection_links", _ensure_prf_connection_links),
 		("unblock_avientek_module", _unblock_avientek_module),
+		("unblock_projects_module", _unblock_projects_module_for_project_users),
 		# saudi.sales 2026-07-15 (TSK-00519): non-admin users with a Report
 		# User Permission (apply_to_all_doctypes) got a fully BLANK workspace
 		# dashboard. With System Settings "Apply Strict User Permissions" ON,
@@ -647,6 +648,52 @@ def _backfill_ksa_vat_from_tax_id():
 		   WHERE IFNULL(custom_vat_registration_number, '') = ''
 		     AND TRIM(IFNULL(tax_id, '')) REGEXP '^3[0-9]{13}3$'"""
 	)
+
+
+def _unblock_projects_module_for_project_users():
+	"""#0589 (Rahul 2026-11-07): the Projects workspace was missing from the
+	sidebar for many users who can open projects, e.g. sa@ (Projects User,
+	Sales Support L2) on Module Profile "CSM", which blocks the Projects module.
+	30 such users on prod (CSM, Accounts L2, Procurement 2, Sales Team 1-L1).
+
+	Unlike Avientek, Projects stays blocked for users who cannot read Project:
+	only Module Profiles used by such a user, and those users' own block rows,
+	are cleaned. Same caches cleared as _unblock_avientek_module."""
+	roles = {
+		p.role for p in frappe.get_meta("Project").permissions
+		if p.read and not p.permlevel and p.role not in ("All", "Guest")
+	}
+	if not roles:
+		return
+	users = set(frappe.get_all("Has Role", filters={
+		"role": ["in", list(roles)], "parenttype": "User",
+	}, pluck="parent"))
+	users &= set(frappe.get_all("User", filters={"enabled": 1, "user_type": "System User"}, pluck="name"))
+	if not users:
+		return
+	profiles = {p for p in frappe.get_all("User", filters={"name": ["in", list(users)]},
+	                                      pluck="module_profile") if p}
+	blocked = frappe.get_all("Block Module", filters={"module": "Projects"},
+	                         fields=["name", "parent", "parenttype"])
+	to_delete = [b.name for b in blocked
+	             if (b.parenttype == "User" and b.parent in users)
+	             or (b.parenttype == "Module Profile" and b.parent in profiles)]
+	if not to_delete:
+		return
+	frappe.db.delete("Block Module", {"name": ["in", to_delete]})
+	cleaned_profiles = {b.parent for b in blocked
+	                    if b.parenttype == "Module Profile" and b.name in to_delete}
+	touched = {b.parent for b in blocked if b.parenttype == "User" and b.name in to_delete}
+	if cleaned_profiles:
+		touched |= set(frappe.get_all("User", filters={
+			"module_profile": ["in", list(cleaned_profiles)], "enabled": 1}, pluck="name"))
+	frappe.db.commit()
+	for u in touched:
+		frappe.clear_cache(user=u)
+		# The sidebar reads the block list from the CACHED User doc, which
+		# clear_cache(user=) leaves in place.
+		frappe.clear_document_cache("User", u)
+	frappe.cache.delete_value("workspace_sidebar_items")
 
 
 def _unblock_avientek_module():
