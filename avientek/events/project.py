@@ -72,6 +72,18 @@ def _project_sales_persons(user):
     return get_user_permission_values(user, "Sales Person")
 
 
+def _project_teams(sales_persons):
+    """#0589 (Rahul 2026-11-07): the team (parent group) of each permitted
+    individual Sales Person. Projects whose Parent Sales Person is that team
+    are visible to its members, e.g. sa@ (5 of TEAM-2's 15 members) sees every
+    TEAM-2 project, not only those assigned to her 5."""
+    if not sales_persons:
+        return []
+    return [t for t in frappe.get_all("Sales Person", filters={
+        "name": ["in", list(sales_persons)], "is_group": 0,
+    }, pluck="parent_sales_person", distinct=True) if t]
+
+
 def _project_visibility_bypass(user):
     if user == "Administrator":
         return True
@@ -81,7 +93,8 @@ def _project_visibility_bypass(user):
 def project_permission_query(user=None):
     """List-view scope (item 6): a restricted sales user sees a Project only
     when its Assigned Sales Person / Parent Sales Person / Project by is one of
-    their permitted Sales Persons, OR they created it. Bypassed for Admin /
+    their permitted Sales Persons, its Parent Sales Person is the team of one
+    of them (#0589), OR they created it. Bypassed for Admin /
     System Manager / Projects Manager / users with no Sales Person restriction.
     """
     user = user or frappe.session.user
@@ -91,13 +104,14 @@ def project_permission_query(user=None):
     if not sps:
         return ""  # no Sales Person restriction → full visibility
     sp_list = ", ".join(frappe.db.escape(s) for s in sps)
+    parents = ", ".join(frappe.db.escape(s) for s in {*sps, *_project_teams(sps)})
     esc_user = frappe.db.escape(user)
     return (
         "(`tabProject`.`custom_sales_person` in ({sp})"
-        " or `tabProject`.`custom_parent_sales_person` in ({sp})"
+        " or `tabProject`.`custom_parent_sales_person` in ({parents})"
         " or `tabProject`.`custom_project_by` in ({sp})"
         " or `tabProject`.`custom_created_by` = {u})"
-    ).format(sp=sp_list, u=esc_user)
+    ).format(sp=sp_list, parents=parents, u=esc_user)
 
 
 def has_project_permission(doc, ptype=None, user=None):
@@ -118,7 +132,8 @@ def has_project_permission(doc, ptype=None, user=None):
         val = doc.get(fn)
         if val and val in sps:
             return True
-    return False
+    parent = doc.get("custom_parent_sales_person")
+    return bool(parent and parent in _project_teams(sps))
 
 
 # ── Rahul 2026-10-13: no duplicate project names ──────────────────────
