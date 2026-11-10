@@ -955,6 +955,7 @@ frappe.ui.form.on('Quotation', {
         // frm.cscript.make_sales_order is the exact method ERPNext's own
         // button would have called (same pattern as the
         // calculate_taxes_and_totals override elsewhere in this file).
+        _install_so_nothing_to_order_guard(frm);
         if (!frm.is_new()) {
             frm.add_custom_button(__("Sales Order"), () => frm.cscript.make_sales_order(), __("Create"));
         }
@@ -4062,4 +4063,31 @@ function _render_pending_probability_ui(frm) {
             rd.show();
         }, __('Probability'));
     });
+}
+
+
+// SUP: Create -> Sales Order opened a blank Sales Order when every quote line
+// was already ordered (ERPNext maps only lines with stock_qty > ordered_qty).
+// Explain it instead of opening an empty form. Wraps frm.cscript.make_sales_order
+// so both ERPNext's own button and ours go through it.
+function _install_so_nothing_to_order_guard(frm) {
+    const cs = frm.cscript;
+    if (!cs || cs.__avk_nothing_to_order_guard || typeof cs.make_sales_order !== "function") return;
+    const orig = cs.make_sales_order;
+    cs.make_sales_order = function () {
+        const doc = frm.doc;
+        const pending = (doc.items || []).filter(r =>
+            flt(r.stock_qty) > flt(r.ordered_qty)
+            || (cint(doc.has_unit_price_items) && !flt(r.qty)));
+        if (doc.docstatus === 1 && (doc.items || []).length && !pending.length) {
+            frappe.msgprint({
+                title: __("Nothing left to order"),
+                indicator: "orange",
+                message: __("Every item on {0} is already marked as ordered, so a Sales Order would have no items. Check the Sales Orders under Connections; if none is live, ask Support to reset the ordered quantity.", [doc.name]),
+            });
+            return;
+        }
+        return orig.apply(this, arguments);
+    };
+    cs.__avk_nothing_to_order_guard = true;
 }

@@ -748,6 +748,8 @@ doc_events = {
         "before_cancel": "avientek.events.sales_order.block_cancel_if_linked_to_purchase_order",
     },
     "Quotation": {
+        # SUP: new quotes must not inherit ordered_qty (blank Sales Order).
+        "before_insert": "avientek.events.quotation.reset_ordered_qty_on_new_quotation",
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
             # Sridhar/Jithin 2026-06-12: see Sales Order block above —

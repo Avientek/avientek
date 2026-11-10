@@ -666,3 +666,5 @@ avientek.patches.quotation_avientek_header_reopened_100
 # project editing, and backfill the now-mandatory Project Status (blank /
 # retired "Discussion" -> Open). Idempotent.
 avientek.patches.project_status_mandatory
+# SUP: blank Sales Order from quotes whose lines carried a copied ordered_qty.
+avientek.patches.reset_stale_quotation_ordered_qty
