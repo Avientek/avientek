@@ -3929,3 +3929,13 @@ def default_quotation_letter_head(doc, method=None):
     )
     if not doc.letter_head or doc.letter_head == company_default:
         doc.letter_head = QUOTATION_LETTER_HEAD
+
+
+def reset_ordered_qty_on_new_quotation(doc, method=None):
+    """SUP: blank Sales Order from an approved quote. ERPNext copies only quote
+    lines whose stock_qty is above ordered_qty into the new Sales Order. A quote
+    created as a copy/revision of an already-ordered quote could arrive with
+    the source's ordered_qty, so every line looked ordered and Create -> Sales
+    Order opened empty. A brand-new quotation has no Sales Order yet."""
+    for row in doc.get("items") or []:
+        row.ordered_qty = 0
