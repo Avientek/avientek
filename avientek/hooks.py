@@ -570,6 +570,8 @@ doc_events = {
     },
     "Payment Entry": {
         "before_save": "avientek.events.utils.validate_date_sanity",
+        # #0594: employee must belong to the Payment Entry's company.
+        "validate": "avientek.events.employee_company.validate_employee_company",
         "on_submit": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
         "on_cancel": "avientek.events.payment_entry.update_prf_status_on_pe_submit",
     },
@@ -599,7 +601,11 @@ doc_events = {
         # Finance Manager / GM / Finance Controller transitions above
         # stay gated by their existing roles — chain ADDs a narrower
         # check on top.
-        "validate": "avientek.events.payment_request_form.validate_workflow_actor",
+        "validate": [
+            "avientek.events.payment_request_form.validate_workflow_actor",
+            # #0594: employee party must belong to the PRF's company.
+            "avientek.events.employee_company.validate_employee_company",
+        ],
         # Sridhar/Rahul 2026-06-10: when the PRF workflow has
         # custom_enable_confirmation=1, the JS custom Revise dialog
         # auto-skips itself so the user only sees the generic
@@ -999,7 +1005,12 @@ doc_events = {
         # posting_date / due_date / cheque_date / reference_date before
         # the JV hits the GL.
         "before_save": "avientek.events.utils.validate_date_sanity",
+        "validate": "avientek.events.employee_company.validate_employee_company",
     },
+    # #0594: an employee only on transactions of their own company (unless
+    # transferred) — see avientek.events.employee_company.
+    "Expense Claim": {"validate": "avientek.events.employee_company.validate_employee_company"},
+    "Employee Advance": {"validate": "avientek.events.employee_company.validate_employee_company"},
     "Delivery Note": {
         "before_validate": [
             "avientek.events.utils.fill_missing_item_defaults",
