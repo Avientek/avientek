@@ -206,12 +206,20 @@ var add_so_dialog = function (frm, cdt, cdn) {
 		freeze: true,
 		callback: (r) => {
 			if (!r || !r.message || !r.message.length) {
-				frappe.msgprint(__('No open Sales Order lines found for item {0} (qty {1} or less) in {2}.',
-					[row.item_code, row.qty, frm.doc.company]));
+				frappe.msgprint(__('No open Sales Order lines with quantity still to order were found for item {0} in {1}.',
+					[row.item_code, frm.doc.company]));
 				return;
 			}
+			// Jithin 2026-11-13: a stock PO line can serve several Sales Orders.
+			// Linking less than the whole line splits it: the linked quantity
+			// moves to a new line, the rest stays free for other Sales Orders.
+			const not_received = Math.max(flt(row.qty) - flt(row.received_qty), 0);
+			const pending_for = (value) => {
+				const opt = r.message.find((o) => o.value === value);
+				return opt ? flt(opt.pending_stock_qty) / (flt(row.conversion_factor) || 1) : 0;
+			};
 			let d = new frappe.ui.Dialog({
-				title: row.sales_order ? __('Swap Sales Order') : __('Link Sales Order'),
+				title: row.sales_order ? __('Link Another Sales Order') : __('Link Sales Order'),
 				fields: [
 					{
 						label: __('Sales Order'),
@@ -219,11 +227,28 @@ var add_so_dialog = function (frm, cdt, cdn) {
 						fieldtype: 'Select',
 						options: r.message,
 						reqd: 1,
+						onchange() {
+							const pending = pending_for(d.get_value('sales_order'));
+							if (pending) d.set_value('qty', Math.min(not_received || flt(row.qty), pending));
+						},
+					},
+					{
+						label: __('Quantity to Link'),
+						fieldname: 'qty',
+						fieldtype: 'Float',
+						reqd: 1,
+						default: flt(row.qty),
+						description: __('This line has {0} (not yet received: {1}). Linking less than the full line splits it; the rest stays free for other Sales Orders.',
+							[flt(row.qty), not_received]),
 					}
 				],
-				primary_action_label: row.sales_order ? __('Swap') : __('Link'),
+				primary_action_label: __('Link'),
 				primary_action(values) {
 					if (!values || !values.sales_order) return;
+					if (flt(values.qty) <= 0 || flt(values.qty) > flt(row.qty)) {
+						frappe.msgprint(__('Quantity to link must be between 0 and {0}.', [flt(row.qty)]));
+						return;
+					}
 					frappe.call({
 						'method': 'avientek.events.purchase_order.set_sales_order',
 						'args': {
@@ -231,6 +256,7 @@ var add_so_dialog = function (frm, cdt, cdn) {
 							'item_name': row.name,
 							'eta': row.avientek_eta || '',
 							'eta_date': row.eta || '',
+							'qty': values.qty,
 						},
 						freeze: true,
 						callback: (res) => {

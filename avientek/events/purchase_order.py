@@ -630,9 +630,13 @@ def get_sales_orders(item, qty, sales_order=None, company=None):
 	required arg made the dialog fail. `company` keeps the list to the PO's
 	own company.
 	"""
+	# Jithin 2026-11-13: a stock PO line can serve several Sales Orders (the
+	# line is split on link, see _split_po_line), so list every line that
+	# still has quantity to order instead of only lines no larger than the
+	# PO line.
 	conditions = [
 		"soi.item_code = %(item)s",
-		"soi.qty <= %(qty)s",
+		"soi.stock_qty > IFNULL(soi.ordered_qty, 0)",
 		"so.is_internal_customer = 0",
 		"so.status = 'To Deliver and Bill'",
 		"so.docstatus = 1",
@@ -645,7 +649,8 @@ def get_sales_orders(item, qty, sales_order=None, company=None):
 		conditions.append("so.company = %(company)s")
 		params["company"] = company
 	sales_orders = frappe.db.sql(
-		"""SELECT soi.name AS child, so.name AS so, so.customer AS customer, soi.qty AS qty
+		"""SELECT soi.name AS child, so.name AS so, so.customer AS customer, soi.qty AS qty,
+		          soi.stock_qty - IFNULL(soi.ordered_qty, 0) AS pending_stock_qty
 		   FROM `tabSales Order Item` soi
 		   JOIN `tabSales Order` so ON soi.parent = so.name
 		   WHERE """ + " AND ".join(conditions) + """
@@ -654,11 +659,99 @@ def get_sales_orders(item, qty, sales_order=None, company=None):
 	)
 	return [
 		{
-			"label": "{0} - {1} - {2}".format(r.so, r.customer, r.qty),
+			"label": "{0} - {1} - pending {2} of {3}".format(
+				r.so, r.customer, flt(r.pending_stock_qty, 3), flt(r.qty, 3)),
 			"value": "{0} | {1}".format(r.so, r.child),
+			"pending_stock_qty": flt(r.pending_stock_qty),
 		}
 		for r in sales_orders
 	]
+
+
+def _split_po_line(item_name, link_qty):
+	"""Split `link_qty` off a PO line into a new line and return the new line's
+	name (Jithin 2026-11-13, SUP-2026-00062).
+
+	A PO line holds ONE Sales Order link, so linking a 5-unit Sales Order to a
+	30-unit stock line marked all 30. The line is split instead: 5 on a new
+	line (to be linked) and 25 left on the original, free for other Sales
+	Orders. Only quantity not yet received or billed can be split off — the
+	original line keeps its receipts and bills.
+
+	The new line is inserted as an exact copy at qty 0 (so tax template,
+	description and custom fields match), then ERPNext's own Update Items
+	moves the quantity and recomputes totals, taxes, ordered qty and status.
+	"""
+	from erpnext.controllers.accounts_controller import update_child_qty_rate
+
+	row = frappe.get_doc("Purchase Order Item", item_name)
+	po = frappe.get_doc("Purchase Order", row.parent)
+	po.check_permission("write")
+
+	link_qty = flt(link_qty, row.precision("qty"))
+	billed_qty = flt(row.billed_amt) / flt(row.rate) if flt(row.rate) else 0
+	free_qty = flt(flt(row.qty) - max(flt(row.received_qty), billed_qty), row.precision("qty"))
+	if link_qty <= 0 or link_qty >= flt(row.qty):
+		frappe.throw(_("Quantity to link must be more than 0 and less than the line quantity {0}.")
+		             .format(row.qty))
+	if link_qty > free_qty:
+		frappe.throw(
+			_("Row {0}: only {1} of {2} is not yet received or billed, so at most {1} can be "
+			  "linked to another Sales Order.").format(row.idx, free_qty, row.qty),
+			title=_("Quantity Already Received"),
+		)
+
+	# ignore_no_copy=False drops the no_copy fields (SO / MR links, received,
+	# billed) — the new line starts unlinked and unreceived. Keep the ETA and
+	# Avientek fields, which describe the same goods.
+	new = frappe.copy_doc(row, ignore_no_copy=False)
+	for f in ("eta", "avientek_eta", "eta_history", "eta_history_text", "avientek_rate",
+	          "avientek_exchange_rate", "custom_shipping_per_unit"):
+		new.set(f, row.get(f))
+	# Cleared explicitly as well: the no_copy flag on these is not reliable
+	# here (the Sales Order link came through on a copied line).
+	for f in ("sales_order", "sales_order_item", "sales_order_packed_item", "material_request",
+	          "material_request_item", "supplier_quotation", "supplier_quotation_item",
+	          "production_plan", "production_plan_item", "production_plan_sub_assembly_item",
+	          "custom_special_price", "custom_special_price_note"):
+		new.set(f, None)
+	new.update({"received_qty": 0, "returned_qty": 0, "billed_amt": 0})
+	new.update({
+		"parent": row.parent, "parenttype": row.parenttype, "parentfield": row.parentfield,
+		"docstatus": 1, "idx": row.idx + 1,
+		"qty": 0, "stock_qty": 0, "amount": 0, "base_amount": 0, "net_amount": 0,
+		"base_net_amount": 0, "avientek_amount": 0, "total_weight": 0,
+	})
+	frappe.db.sql(
+		"UPDATE `tabPurchase Order Item` SET idx = idx + 1 WHERE parent = %s AND idx > %s",
+		(row.parent, row.idx),
+	)
+	new.db_insert()
+
+	po.reload()
+	items = []
+	for d in po.items:
+		qty = flt(d.qty)
+		if d.name == row.name:
+			qty = flt(row.qty) - link_qty
+		elif d.name == new.name:
+			qty = link_qty
+		items.append({
+			"docname": d.name, "item_code": d.item_code, "qty": qty, "rate": d.rate,
+			"uom": d.uom, "conversion_factor": d.conversion_factor,
+			"schedule_date": cstr(d.schedule_date),
+			"fg_item": d.get("fg_item"), "fg_item_qty": d.get("fg_item_qty"),
+		})
+	update_child_qty_rate("Purchase Order", json.dumps(items), po.name)
+
+	# avientek_amount is a client-side total (rate x qty in the Avientek
+	# currency) — keep it in proportion on both lines.
+	if flt(row.avientek_amount) and flt(row.qty):
+		per_unit = flt(row.avientek_amount) / flt(row.qty)
+		for name, qty in ((row.name, flt(row.qty) - link_qty), (new.name, link_qty)):
+			frappe.db.set_value("Purchase Order Item", name, "avientek_amount",
+			                    flt(per_unit * qty, 2), update_modified=False)
+	return new.name
 
 
 def _refresh_po_line_from_so_item(item_name, sales_order, sales_order_item):
@@ -707,34 +800,60 @@ def _refresh_po_line_from_so_item(item_name, sales_order, sales_order_item):
 
 
 @frappe.whitelist()
-def set_sales_order(sales_order, item_name, eta, eta_date=None):
-	print("\n..........................")
-	print("\nsales order item eta",sales_order,item_name, eta)
+def set_sales_order(sales_order, item_name, eta, eta_date=None, qty=None):
 	# SUP-2026-00052: do not let the Swap Sales Order dialog strip/re-point the
 	# forward link off a SUBMITTED PO line whose current Sales Order is still
 	# open (not cancelled). Removing that link is exactly how SO-FZCO-26-01980
 	# was made cancellable and its references lost. Re-linking is allowed when
 	# the line has no SO yet, or its current SO is already cancelled.
 	_cur = frappe.db.get_value(
-		"Purchase Order Item", item_name, ["sales_order", "parent"], as_dict=True
+		"Purchase Order Item", item_name,
+		["sales_order", "sales_order_item", "parent", "qty", "conversion_factor"], as_dict=True
 	)
+	_force_split = False
 	if _cur and _cur.sales_order:
 		_po_ds = frappe.db.get_value("Purchase Order", _cur.parent, "docstatus")
 		_so_ds = frappe.db.get_value("Sales Order", _cur.sales_order, "docstatus")
 		if _po_ds == 1 and _so_ds is not None and _so_ds < 2:
-			frappe.throw(
-				frappe._("This Purchase Order line is already linked to Sales Order "
-				  "{0}, which is not cancelled. Re-linking would remove that forward "
-				  "link. Cancel Sales Order {0} first if this link must change.").format(
-					_cur.sales_order),
-				title=frappe._("Sales Order Link Locked"),
-			)
+			# Jithin 2026-11-13: a stock line larger than the Sales Order line
+			# it is linked to (30 on the PO, 5 on the SO) keeps that link, but
+			# the quantity beyond it can be split off for another Sales Order.
+			_so_stock = flt(frappe.db.get_value(
+				"Sales Order Item", _cur.sales_order_item, "stock_qty")) if _cur.sales_order_item else 0
+			_excess = flt(flt(_cur.qty) - _so_stock / (flt(_cur.conversion_factor) or 1), 6)
+			if qty and _so_stock and 0 < flt(qty) <= _excess:
+				_force_split = True
+			elif _so_stock and _excess > 0:
+				frappe.throw(
+					frappe._("This Purchase Order line is linked to Sales Order {0}. Only the "
+					  "{1} beyond that Sales Order's quantity can be linked to another "
+					  "Sales Order.").format(_cur.sales_order, flt(_excess, 3)),
+					title=frappe._("Sales Order Link Locked"),
+				)
+			else:
+				frappe.throw(
+					frappe._("This Purchase Order line is already linked to Sales Order "
+					  "{0}, which is not cancelled. Re-linking would remove that forward "
+					  "link. Cancel Sales Order {0} first if this link must change.").format(
+						_cur.sales_order),
+					title=frappe._("Sales Order Link Locked"),
+				)
 	if sales_order and sales_order.split("| ")[1]:
 		sales_order_name = sales_order.split("| ")[0].strip()
 		sales_order_item = sales_order.split("| ")[1]
-		print("\n...sales order",sales_order_name,sales_order_item)
+		# Jithin 2026-11-13: linking less than the whole line splits it, so the
+		# rest of a stock PO line stays free for other Sales Orders.
+		if _force_split:
+			# Free everything beyond the linked Sales Order first: the original
+			# line drops to that Sales Order's quantity (ERPNext refuses to save
+			# a PO whose line orders more than its Sales Order line), then the
+			# requested part of the freed line goes to the new Sales Order.
+			item_name = _split_po_line(item_name, _excess)
+			if flt(qty) < _excess:
+				item_name = _split_po_line(item_name, qty)
+		elif qty and flt(qty) < flt(_cur.qty if _cur else 0):
+			item_name = _split_po_line(item_name, qty)
 		if frappe.db.exists("Sales Order",{"name": sales_order_name}):
-			print("sales order exists... lets update the po eta",item_name)
 			frappe.db.set_value('Purchase Order Item', item_name, {
 				'sales_order': sales_order_name,
 				'avientek_eta':eta
