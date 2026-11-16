@@ -414,16 +414,20 @@ var set_rate_from_avientek_rate = function(frm, cdt, cdn) {
 }
 
 // ── Client Script: "Terms Company Filter" ──
+// #0595: only templates ticked "Buying". ERPNext 15.125 refuses a buying
+// document whose Terms template is not applicable to Buying ("Terms and
+// Conditions Sales Order FZCO is not applicable to Buying"), so the picker
+// must not offer one.
 function _set_tc_name_query(frm) {
 	if (frm.doc.company) {
 		frm.set_query('tc_name', function() {
 			return {
-				filters: { custom_company: frm.doc.company }
+				filters: { custom_company: frm.doc.company, buying: 1, disabled: 0 }
 			};
 		});
 	} else {
 		frm.set_query('tc_name', function() {
-			return {};
+			return { filters: { buying: 1, disabled: 0 } };
 		});
 	}
 }
