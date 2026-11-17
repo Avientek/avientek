@@ -3279,11 +3279,14 @@ def _build_combined_pdf_bytes(docname, progress_cb=None):
     return data
 
 
-def _build_and_attach_combined_pdf(docname, user):
+def _build_and_attach_combined_pdf(docname, user, notify=True):
     """Background-job target. Builds the combined PDF, deletes any
     previous "<docname>_combined.pdf" attached to the same PRF, attaches
     the fresh one, and pushes a realtime event so the UI can refresh
-    and surface a download button."""
+    and surface a download button.
+
+    notify=False (#0597, automatic build on approval): no "PDF is ready"
+    pop-up — the approver did not ask for it."""
     import traceback
 
     # Impersonate the requesting user so print formats render with the
@@ -3386,11 +3389,12 @@ def _build_and_attach_combined_pdf(docname, user):
 
         # System notification (also surfaces in the bell icon)
         try:
-            frappe.publish_realtime(
-                "msgprint",
-                _("Combined PDF for {0} is ready. Refresh the form to see it under Attachments.").format(docname),
-                user=user,
-            )
+            if notify:
+                frappe.publish_realtime(
+                    "msgprint",
+                    _("Combined PDF for {0} is ready. Refresh the form to see it under Attachments.").format(docname),
+                    user=user,
+                )
         except Exception:
             pass
     except Exception as e:
@@ -3403,6 +3407,37 @@ def _build_and_attach_combined_pdf(docname, user):
             "prf_combined_pdf_failed",
             {"docname": docname, "error": str(e)[:800]},
             user=user,
+        )
+
+
+COMBINED_PDF_PAYMENT_TYPES = ("Pay", "Advance Pay", "Internal Transfer")
+
+
+def auto_build_combined_pdf(doc, method=None):
+    """#0597 (Jithin 2026-11-17): build the Combined PDF automatically when the
+    PRF is approved, so Accounts find it under Attachments instead of opening
+    every PRF and clicking Download Combined PDF.
+
+    Hooked on on_submit: the PRF is submitted by "Approve Level 2" (or the
+    Finance Controller's direct "Release Payment"). Before that the button
+    still builds it on demand. Queued after commit — the worker must see the
+    approved PRF — and never blocks the approval if queueing fails."""
+    if doc.get("payment_type") not in COMBINED_PDF_PAYMENT_TYPES:
+        return
+    try:
+        frappe.enqueue(
+            "avientek.avientek.doctype.payment_request_form.payment_request_form._build_and_attach_combined_pdf",
+            queue="long",
+            timeout=900,
+            enqueue_after_commit=True,
+            docname=doc.name,
+            user=frappe.session.user,
+            notify=False,
+        )
+    except Exception:
+        frappe.log_error(
+            title="PRF Combined PDF",
+            message=f"auto build on approval could not be queued for {doc.name}\n{frappe.get_traceback()}",
         )
 
 

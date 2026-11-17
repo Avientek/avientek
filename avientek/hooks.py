@@ -590,6 +590,8 @@ doc_events = {
         # charge — zero breakage). Workflow gating on the resolved
         # chain runs at validate (Phase 3) — see validate hook below.
         "before_save": "avientek.events.payment_request_form.resolve_approval_chain",
+        # #0597: Combined PDF is built and attached automatically on approval.
+        "on_submit": "avientek.avientek.doctype.payment_request_form.payment_request_form.auto_build_combined_pdf",
         # Phase 3: gate workflow state transitions on the resolved
         # chain. Skipped when no rule matched (Fall Through) or when
         # the state isn't changing on this save. Throws
