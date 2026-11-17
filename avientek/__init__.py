@@ -1874,3 +1874,35 @@ try:
 	_patch_report_match_filters_skip_doctype()
 except Exception:
 	pass
+
+
+def _patch_supplier_keeps_existing_group():
+	"""#0598 (Orders.Mea 2026-11-17): ERPNext 15.125 (upstream fa76a05a9f)
+	refuses a Supplier whose Supplier Group is a group node ("Cannot select a
+	Group type Supplier Group"). On this site every Supplier Group was a group
+	node, so no supplier could be saved; the leaf groups were corrected on the
+	site, but 151 suppliers still sit on the root "All Supplier Groups".
+
+	An existing supplier keeps the group it already has — only setting or
+	changing the group goes through core's leaf check. Wraps whatever is
+	installed; a no-op on ERPNext versions without the check. Idempotent."""
+	try:
+		from erpnext.buying.doctype.supplier.supplier import Supplier
+	except Exception:
+		return
+	inner = getattr(Supplier, "validate_supplier_group", None)
+	if inner is None or getattr(inner, "__name__", "") == "_validate_supplier_group_keep_existing":
+		return
+
+	def _validate_supplier_group_keep_existing(self):
+		if not self.is_new() and not self.has_value_changed("supplier_group"):
+			return
+		return inner(self)
+
+	Supplier.validate_supplier_group = _validate_supplier_group_keep_existing
+
+
+try:
+	_patch_supplier_keeps_existing_group()
+except Exception:
+	pass
