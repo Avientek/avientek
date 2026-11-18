@@ -37,6 +37,7 @@ def after_migrate():
 			"Payment Voucher Fast", "Data", for_doctype="Doctype")),
 		("create_asset_dam_fields", _create_asset_dam_fields),
 		("create_so_po_special_price_fields", _create_so_po_special_price_fields),
+		("create_po_stock_availability_field", _create_po_stock_availability_field),
 		("create_margin_markup_carry_fields", _create_margin_markup_carry_fields),
 		("prf_bank_fields_allow_on_submit", _prf_bank_fields_allow_on_submit),
 		("so_po_item_derived_fields_allow_on_submit", _so_po_item_derived_fields_allow_on_submit),
@@ -1015,6 +1016,20 @@ def _create_asset_dam_fields():
 				update_vals["options"] = f["options"]
 			if update_vals:
 				frappe.db.set_value("Custom Field", cf_name, update_vals)
+
+
+def _create_po_stock_availability_field():
+	"""#0600 (Orders.Mea): Stock Availability panel on the Purchase Order,
+	above the Items table — same panel as on the Quotation. An HTML field
+	holds no data; purchase_order.js fills it when a line is picked."""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+	create_custom_field("Purchase Order", {
+		"fieldname": "custom_item_info_html",
+		"fieldtype": "HTML",
+		"label": "Stock Availability",
+		"insert_after": "items_section",
+	})
 
 
 def _create_so_po_special_price_fields():

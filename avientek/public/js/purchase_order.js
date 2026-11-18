@@ -11,6 +11,8 @@ frappe.ui.form.on('Purchase Order',{
 
 	refresh:function(frm){
 		_set_tc_name_query(frm);
+		// #0600: Stock Availability panel above the Items table
+		setup_po_stock_panel(frm);
 		// ── Client Script: "PO update item button hide" ──
 		setTimeout(function() { _control_po_buttons(frm); }, 200);
 		if (!frm.doc.__islocal && frm.doc.docstatus === 1) {
@@ -460,3 +462,106 @@ function _control_po_buttons(frm) {
 // This was a more elaborate version with MutationObserver.
 // The simpler _control_po_buttons above (from "PO update item button hide") is active.
 // See server_client_scripts_backup.json for the full disabled version.
+
+
+// ── #0600 (Orders.Mea): Stock Availability on the Purchase Order ──────────
+// Same panel as on the Quotation: stock of the picked item in every company
+// (Available / Free / Projected), shown above the Items table. It refreshes
+// when an item is selected on a line and when a line is clicked.
+function render_po_stock_panel(data, item_code) {
+	const esc = frappe.utils.escape_html;
+	const pill = function(v) {
+		const ok = flt(v) > 0;
+		return `<span style="background:${ok ? '#d4edda' : '#f8d7da'}; color:${ok ? '#28a745' : '#dc3545'}; padding: 2px 8px; border-radius: 4px; font-weight: bold;">${flt(v)}</span>`;
+	};
+	let body;
+	if (data.stock && data.stock.length) {
+		body = `
+			<table class="table table-sm table-borderless" style="margin: 0; font-size: 12px;">
+				<thead>
+					<tr style="color: #888; font-size: 11px; border-bottom: 1px solid #dee2e6;">
+						<th style="font-weight: 600;">${__("Company")}</th>
+						<th style="text-align: right; font-weight: 600;">${__("Available")}</th>
+						<th style="text-align: right; font-weight: 600;">${__("Free")}</th>
+						<th style="text-align: right; font-weight: 600;">${__("Projected")}</th>
+					</tr>
+				</thead>
+				<tbody>
+					${data.stock.map(s => `
+						<tr>
+							<td>${esc(s.company || "")}</td>
+							<td style="text-align: right;">${flt(s.actual_stock)}</td>
+							<td style="text-align: right;">${pill(s.free_stock)}</td>
+							<td style="text-align: right;">${pill(s.projected_stock)}</td>
+						</tr>`).join("")}
+				</tbody>
+			</table>`;
+	} else {
+		body = `<span class="text-muted">${__("No stock in any company")}</span>`;
+	}
+	const part_no = esc(data.part_number || item_code || "");
+	return `
+		<div class="row" style="margin: 0 0 15px 0; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+			<div class="col-md-6">
+				<div style="font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
+					${__("STOCK AVAILABILITY")}
+					<div style="font-size: 13px; color: #1f272e; margin-top: 2px;">${__("Part No")}: <b>${part_no}</b></div>
+				</div>
+				${body}
+			</div>
+		</div>`;
+}
+
+function refresh_po_stock_panel(frm, item_code) {
+	if (!item_code || !frm.fields_dict.custom_item_info_html) return;
+	frm._po_stock_item = frm.doc.name + "::" + item_code;
+	// Number each request so a slow reply for an earlier line cannot
+	// overwrite the panel of a later one.
+	const req_id = (frm._po_stock_req_id || 0) + 1;
+	frm._po_stock_req_id = req_id;
+	frappe.call({
+		method: "avientek.events.purchase_order.get_item_stock_availability",
+		args: { item_code: item_code, company: frm.doc.company },
+		callback: function(r) {
+			if (req_id !== frm._po_stock_req_id || !r.message) return;
+			frm.fields_dict.custom_item_info_html.$wrapper.html(
+				render_po_stock_panel(r.message, item_code));
+		}
+	});
+}
+
+function setup_po_stock_panel(frm) {
+	if (!frm.fields_dict.custom_item_info_html || !frm.fields_dict.items) return;
+	const wrapper = frm.fields_dict.items.grid.wrapper.get(0);
+	if (!wrapper) return;
+
+	// A different PO in the same form: start with an empty panel.
+	if (frm._po_stock_doc !== frm.doc.name) {
+		frm._po_stock_doc = frm.doc.name;
+		frm._po_stock_item = null;
+		frm.fields_dict.custom_item_info_html.$wrapper.empty();
+	}
+
+	if (frm._po_stock_click_listener) {
+		wrapper.removeEventListener("click", frm._po_stock_click_listener, true);
+	}
+	// Capture phase: the grid's own cell handler stops the click bubbling
+	// when it opens a row for editing (same as on the Quotation).
+	frm._po_stock_click_listener = function(e) {
+		const row_el = e.target.closest && e.target.closest(".grid-row[data-name]");
+		if (!row_el || !wrapper.contains(row_el)) return;
+		const item = (frm.doc.items || []).find(d => d.name === row_el.getAttribute("data-name"));
+		if (!item || !item.item_code) return;
+		if (frm._po_stock_item !== frm.doc.name + "::" + item.item_code) {
+			refresh_po_stock_panel(frm, item.item_code);
+		}
+	};
+	wrapper.addEventListener("click", frm._po_stock_click_listener, true);
+}
+
+frappe.ui.form.on("Purchase Order Item", {
+	item_code: function(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (row && row.item_code) refresh_po_stock_panel(frm, row.item_code);
+	}
+});
