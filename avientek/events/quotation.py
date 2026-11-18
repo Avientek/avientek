@@ -3382,7 +3382,7 @@ def _propagate_special_price_to_so_po(quotation_name, quotation_item_names):
     are not touched.
     """
     from frappe.utils import escape_html
-    from avientek.events.purchase_order import _convert_txn_amount
+    from avientek.events.purchase_order import _convert_txn_amount, _po_lines_fed_by_so_item
 
     qi_names = [n for n in (quotation_item_names or []) if n]
     if not qi_names:
@@ -3425,11 +3425,11 @@ def _propagate_special_price_to_so_po(quotation_name, quotation_item_names):
                 "Sales Order", soi.parent, ["currency", "conversion_rate"], as_dict=True
             ) or frappe._dict()
         so_hdr = so_hdr_cache[soi.parent]
-        for poi in frappe.db.get_all(
-            "Purchase Order Item",
-            filters={"sales_order_item": soi.name, "docstatus": ["<", 2]},
-            fields=["name", "parent", "item_code", "custom_special_price", "custom_special_price_note",
-                    "custom_shipping_per_unit"],
+        # #0599: includes supplier POs one inter-company hop further down.
+        for poi in _po_lines_fed_by_so_item(
+            soi.name,
+            ["name", "parent", "item_code", "custom_special_price", "custom_special_price_note",
+             "custom_shipping_per_unit"],
         ):
             po_hdr = frappe.db.get_value(
                 "Purchase Order", poi.parent, ["currency", "conversion_rate"], as_dict=True
