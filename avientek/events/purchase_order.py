@@ -337,6 +337,22 @@ def sync_special_price_from_sales_order(doc, method=None):
 
 
 @frappe.whitelist()
+def get_item_stock_availability(item_code, company=None):
+	"""#0600 (Orders.Mea): Stock Availability for the Purchase Order panel —
+	the same figures as the Quotation panel (every company, the PO's company
+	first, RMA / Demo "Freezed Items" warehouses left out)."""
+	from avientek.events.quotation import get_company_stock
+
+	if not item_code:
+		return {}
+	frappe.has_permission("Purchase Order", "read", throw=True)
+	return {
+		"part_number": frappe.db.get_value("Item", item_code, "part_number") or item_code,
+		"stock": get_company_stock(item_code, company),
+	}
+
+
+@frappe.whitelist()
 def get_special_prices_for_currency(sales_order_items, currency=None, conversion_rate=None):
 	"""Return {sales_order_item: Special Price expressed in `currency`}.
 
