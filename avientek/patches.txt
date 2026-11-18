@@ -672,3 +672,5 @@ avientek.patches.reset_stale_quotation_ordered_qty
 avientek.patches.singapore_gst_9_percent_0601
 # #0599: Special Price on PO lines of inter-company / older orders.
 avientek.patches.backfill_po_special_price_0599
+# #0601: zero-rated Sales tax template for the Singapore company.
+avientek.patches.singapore_gst_zero_rated_template_0601
