@@ -1377,16 +1377,81 @@ def get_prf_apply_data(prf_names):
 			})
 			total += amt
 
+	# #0602 (Accounts.Ksa): the Payment Entry form fills these four fields
+	# through its own field handlers (paid_from / paid_to / paid_amount). The
+	# PRF apply writes the header straight onto the form WITHOUT those
+	# handlers (see payment_entry.js _apply_prfs_via_server), so they stayed
+	# empty and Save stopped with "Missing Fields: Source Exchange Rate, Paid
+	# Amount (Company Currency), Target Exchange Rate, Received Amount
+	# (Company Currency)". Work them out here, the same way the form does.
+	# The exchange rate follows the ACCOUNT's own currency. The currency
+	# fields saved on the PRF can be stale (AVKSA-00509: Trade Payable - KSA
+	# is a SAR account but the PRF carried AED), so read it from the account.
+	for acct_key, cur_key in (("paid_from", "paid_from_account_currency"),
+	                          ("paid_to", "paid_to_account_currency")):
+		if header.get(acct_key):
+			acct_currency = frappe.db.get_value("Account", header[acct_key], "account_currency")
+			if acct_currency:
+				header[cur_key] = acct_currency
+	amounts = _prf_payment_amounts(first.company, header, total)
+	header.update({
+		"source_exchange_rate": amounts["source_exchange_rate"],
+		"target_exchange_rate": amounts["target_exchange_rate"],
+	})
+
 	return {
 		"valid": True,
 		"header": header,
 		"references": references,
 		"total_allocated": total,
+		**{k: amounts[k] for k in ("paid_amount", "received_amount",
+		                           "base_paid_amount", "base_received_amount")},
 		"first_prf": first.name,
 		"prf_count": len(docs),
 		"prf_names": prf_names,
 		"skipped_rows": skipped,
 		"currency": first.currency,
+	}
+
+
+def _prf_payment_amounts(company, header, total_allocated):
+	"""Exchange rates and amounts for a Payment Entry built from a PRF.
+
+	`total_allocated` is the sum of the reference rows, which are in the
+	PARTY account's currency: paid_to for Pay, paid_from for Receive. The
+	other side is converted through the company currency. Same-currency
+	payments (the usual case) come out 1 : 1.
+	"""
+	from erpnext import get_company_currency
+	from erpnext.setup.utils import get_exchange_rate
+
+	company_currency = get_company_currency(company)
+
+	def _rate(currency):
+		if not currency or currency == company_currency:
+			return 1.0
+		return flt(get_exchange_rate(currency, company_currency, nowdate(), "for_buying")) or 1.0
+
+	src = _rate(header.get("paid_from_account_currency"))
+	tgt = _rate(header.get("paid_to_account_currency"))
+	total = flt(total_allocated)
+	same = (header.get("paid_from_account_currency") or company_currency) == (
+		header.get("paid_to_account_currency") or company_currency)
+
+	if header.get("payment_type") == "Pay":
+		received = total
+		paid = total if same else flt(total * tgt / src, 2)
+	else:  # Receive / Internal Transfer: the amount leaves paid_from
+		paid = total
+		received = total if same else flt(total * src / tgt, 2)
+
+	return {
+		"source_exchange_rate": src,
+		"target_exchange_rate": tgt,
+		"paid_amount": paid,
+		"received_amount": received,
+		"base_paid_amount": flt(paid * src, 2),
+		"base_received_amount": flt(received * tgt, 2),
 	}
 
 
