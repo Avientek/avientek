@@ -336,8 +336,23 @@ function _apply_prfs_via_server(frm, prf_names) {
             frm.refresh_field("references");
 
             // Paid + received amount = sum of allocations.
-            _set("paid_amount", data.total_allocated);
-            _set("received_amount", data.total_allocated);
+            // #0602: the exchange rates (in data.header) and the company-
+            // currency amounts are normally filled by ERPNext's paid_from /
+            // paid_amount handlers, which this apply deliberately skips —
+            // so Save stopped with "Missing Fields". The server now sends
+            // them; older payloads fall back to 1 : 1.
+            _set("paid_amount", data.paid_amount || data.total_allocated);
+            _set("received_amount", data.received_amount || data.total_allocated);
+            if (!frm.doc.source_exchange_rate) _set("source_exchange_rate", 1);
+            if (!frm.doc.target_exchange_rate) _set("target_exchange_rate", 1);
+            _set("base_paid_amount", data.base_paid_amount
+                || flt(frm.doc.paid_amount) * flt(frm.doc.source_exchange_rate));
+            _set("base_received_amount", data.base_received_amount
+                || flt(frm.doc.received_amount) * flt(frm.doc.target_exchange_rate));
+            // Allocated / unallocated / difference totals (no server call).
+            try {
+                if (frm.events.set_total_allocated_amount) frm.events.set_total_allocated_amount(frm);
+            } catch (e) { /* totals are recomputed on save */ }
 
             // Mark the form dirty so the Save button activates.
             frm.dirty();
