@@ -240,6 +240,137 @@ def _convert_txn_amount(value, from_currency, from_rate, to_currency, to_rate):
 	return flt(value * from_rate / to_rate, 4)
 
 
+def _special_price_sources(so_item_names, _depth=0):
+	"""{sales_order_item: {value, note, currency, rate}} — where the Special
+	Price shown on a PO line comes from, with the currency it is held in.
+
+	#0599 (Orders.Mea, PO-FZCO-26-01603 / QN-LLC-26-01158): the PO read the
+	Special Price only from the Sales Order line it is linked to. Two kinds of
+	order have nothing there even though the Quotation has a Special Price:
+
+	* an inter-company order. The quote and the customer order are in one
+	  company (LLC); that company raises an internal PO on another company
+	  (FZCO), whose internal Sales Order has no Quotation behind it. The
+	  supplier PO is raised from that internal Sales Order, so the price was
+	  lost on the hop. Follow internal SO line -> the internal PO line it was
+	  made from -> the customer SO line.
+	* a Sales Order made before Special Price was carried to Sales Orders
+	  (18-Aug-2026): take it from the Quotation line directly.
+
+	The hop is followed only through a real inter-company order (the PO line
+	must belong to the Sales Order's inter_company_order_reference): on an
+	ordinary order SO Item.purchase_order_item points DOWN to its own supplier
+	PO and following it would loop.
+	"""
+	names = list({n for n in (so_item_names or []) if n})
+	out = {}
+	if not names:
+		return out
+
+	rows = frappe.db.get_all(
+		"Sales Order Item", filters={"name": ["in", names]},
+		fields=["name", "parent", "custom_special_price", "custom_special_price_note",
+				"quotation_item", "purchase_order_item"],
+	)
+	so_hdr = {}
+	parents = list({r.parent for r in rows if r.parent})
+	if parents:
+		so_hdr = {h.name: h for h in frappe.db.get_all(
+			"Sales Order", filters={"name": ["in", parents]},
+			fields=["name", "currency", "conversion_rate", "inter_company_order_reference"],
+		)}
+
+	qi_map, q_hdr = {}, {}
+	qi_names = list({r.quotation_item for r in rows
+	                 if r.quotation_item and not flt(r.custom_special_price)})
+	if qi_names:
+		qi_map = {q.name: q for q in frappe.db.get_all(
+			"Quotation Item", filters={"name": ["in", qi_names]},
+			fields=["name", "parent", "custom_special_price", "custom_special_price_note"],
+		)}
+		q_parents = list({q.parent for q in qi_map.values() if q.parent})
+		if q_parents:
+			q_hdr = {h.name: h for h in frappe.db.get_all(
+				"Quotation", filters={"name": ["in", q_parents]},
+				fields=["name", "currency", "conversion_rate"],
+			)}
+
+	hops = {}
+	for r in rows:
+		h = so_hdr.get(r.parent) or frappe._dict()
+		out[r.name] = frappe._dict(
+			value=flt(r.custom_special_price), note=r.custom_special_price_note,
+			currency=h.currency, rate=h.conversion_rate,
+		)
+		if flt(r.custom_special_price):
+			continue
+		qi = qi_map.get(r.quotation_item)
+		if qi and flt(qi.custom_special_price):
+			qh = q_hdr.get(qi.parent) or frappe._dict()
+			out[r.name] = frappe._dict(
+				value=flt(qi.custom_special_price), note=qi.custom_special_price_note,
+				currency=qh.currency, rate=qh.conversion_rate,
+			)
+		elif _depth < 3 and h.inter_company_order_reference and r.purchase_order_item:
+			hops[r.name] = (r.purchase_order_item, h.inter_company_order_reference)
+
+	if hops:
+		po_items = {p.name: p for p in frappe.db.get_all(
+			"Purchase Order Item",
+			filters={"name": ["in", list({v[0] for v in hops.values()})]},
+			fields=["name", "parent", "sales_order_item"],
+		)}
+		upstream = {}
+		for so_item, (po_item, internal_po) in hops.items():
+			p = po_items.get(po_item)
+			if p and p.parent == internal_po and p.sales_order_item and p.sales_order_item != so_item:
+				upstream[so_item] = p.sales_order_item
+		if upstream:
+			found = _special_price_sources(list(upstream.values()), _depth + 1)
+			for so_item, src_item in upstream.items():
+				src = found.get(src_item)
+				if src and flt(src.value):
+					out[so_item] = src
+	return out
+
+
+def _po_lines_fed_by_so_item(so_item_name, fields=None):
+	"""Purchase Order lines (not cancelled) that take their Special Price from
+	this Sales Order line: the POs raised against it, and — #0599 — the
+	supplier POs raised one inter-company hop further down (this SO line ->
+	internal PO line -> the other company's internal SO line -> its PO)."""
+	fields = list(fields or ["name", "parent"])
+	for f in ("name", "parent"):
+		if f not in fields:
+			fields.append(f)
+	direct = frappe.db.get_all(
+		"Purchase Order Item",
+		filters={"sales_order_item": so_item_name, "docstatus": ["<", 2]}, fields=fields,
+	)
+	out = list(direct)
+	if not direct:
+		return out
+	by_name = {d.name: d for d in direct}
+	internal_so_items = []
+	for soi in frappe.db.get_all(
+		"Sales Order Item",
+		filters={"purchase_order_item": ["in", list(by_name)], "docstatus": ["<", 2]},
+		fields=["name", "parent", "purchase_order_item", "quotation_item", "custom_special_price"],
+	):
+		if soi.name == so_item_name or soi.quotation_item or flt(soi.custom_special_price):
+			continue
+		ref = frappe.db.get_value("Sales Order", soi.parent, "inter_company_order_reference")
+		if ref and ref == by_name[soi.purchase_order_item].parent:
+			internal_so_items.append(soi.name)
+	if internal_so_items:
+		out += frappe.db.get_all(
+			"Purchase Order Item",
+			filters={"sales_order_item": ["in", internal_so_items], "docstatus": ["<", 2]},
+			fields=fields,
+		)
+	return out
+
+
 def sync_special_price_from_sales_order(doc, method=None):
 	"""Refresh read-only Special Price / Special Price Note on each PO Item
 	that's linked to a Sales Order Item (via sales_order_item).
@@ -317,17 +448,21 @@ def sync_special_price_from_sales_order(doc, method=None):
 			)
 		}
 
+	# #0599: Special Price may sit one inter-company hop up, or only on the
+	# Quotation (older orders) — see _special_price_sources().
+	sp_sources = _special_price_sources(so_items)
+
 	for item in doc.items:
 		so_item = so_map.get(getattr(item, "sales_order_item", None))
 		if not so_item:
 			continue
 		so_doc = so_doc_map.get(so_item.parent) or frappe._dict()
+		src = sp_sources.get(so_item.name) or frappe._dict()
 		item.custom_special_price = _convert_txn_amount(
-			so_item.custom_special_price,
-			so_doc.currency, so_doc.conversion_rate,
+			src.value, src.currency, src.rate,
 			doc.currency, doc.conversion_rate,
 		)
-		item.custom_special_price_note = so_item.custom_special_price_note
+		item.custom_special_price_note = src.note
 		# Rahul 2026-10-13: same currency rule as Special Price.
 		item.custom_shipping_per_unit = _convert_txn_amount(
 			so_item.custom_shipping_per_unit,
@@ -360,30 +495,11 @@ def get_special_prices_for_currency(sales_order_items, currency=None, conversion
 	if not sales_order_items:
 		return {}
 
-	so_rows = frappe.db.get_all(
-		"Sales Order Item",
-		filters={"name": ["in", sales_order_items]},
-		fields=["name", "parent", "custom_special_price"],
-	)
-
-	so_parents = {so.parent for so in so_rows if so.parent}
-	so_doc_map = {}
-	if so_parents:
-		so_doc_map = {
-			so.name: so for so in frappe.db.get_all(
-				"Sales Order",
-				filters={"name": ["in", list(so_parents)]},
-				fields=["name", "currency", "conversion_rate"],
-			)
-		}
-
+	# #0599: same source as the save-time sync (inter-company hop / Quotation).
 	out = {}
-	for so in so_rows:
-		so_doc = so_doc_map.get(so.parent) or frappe._dict()
-		out[so.name] = _convert_txn_amount(
-			so.custom_special_price,
-			so_doc.currency, so_doc.conversion_rate,
-			currency, conversion_rate,
+	for name, src in _special_price_sources(sales_order_items).items():
+		out[name] = _convert_txn_amount(
+			src.value, src.currency, src.rate, currency, conversion_rate,
 		)
 	return out
 
@@ -492,13 +608,13 @@ def update_eta(item):
 			"Purchase Order", po_parent, ["currency", "conversion_rate"], as_dict=True
 		) if po_parent else None
 		po_doc = po_doc or frappe._dict()
+		sp_src = _special_price_sources([item.sales_order_item]).get(item.sales_order_item) or frappe._dict()
 		frappe.db.set_value("Purchase Order Item", item.name, {
 			"custom_special_price": _convert_txn_amount(
-				so_child_doc.custom_special_price,
-				so_doc.currency, so_doc.conversion_rate,
+				sp_src.value, sp_src.currency, sp_src.rate,
 				po_doc.currency, po_doc.conversion_rate,
 			),
-			"custom_special_price_note": so_child_doc.custom_special_price_note,
+			"custom_special_price_note": sp_src.note,
 			"custom_shipping_per_unit": _convert_txn_amount(
 				so_child_doc.custom_shipping_per_unit,
 				so_doc.currency, so_doc.conversion_rate,
@@ -761,25 +877,18 @@ def _refresh_po_line_from_so_item(item_name, sales_order, sales_order_item):
 	PO line now pointing at it. ERPNext only updates ordered_qty on PO
 	submit/cancel, so a link made after submit must do it here — otherwise
 	"make Purchase Order" from the SO would offer the qty again."""
-	so_item = frappe.db.get_value(
-		"Sales Order Item", sales_order_item,
-		["custom_special_price", "custom_special_price_note"], as_dict=True,
-	)
+	so_item = _special_price_sources([sales_order_item]).get(sales_order_item)
 	po_parent = frappe.db.get_value("Purchase Order Item", item_name, "parent")
 	if so_item and po_parent:
-		so_doc = frappe.db.get_value(
-			"Sales Order", sales_order, ["currency", "conversion_rate"], as_dict=True
-		) or frappe._dict()
 		po_doc = frappe.db.get_value(
 			"Purchase Order", po_parent, ["currency", "conversion_rate"], as_dict=True
 		) or frappe._dict()
 		frappe.db.set_value("Purchase Order Item", item_name, {
 			"custom_special_price": _convert_txn_amount(
-				so_item.custom_special_price,
-				so_doc.currency, so_doc.conversion_rate,
+				so_item.value, so_item.currency, so_item.rate,
 				po_doc.currency, po_doc.conversion_rate,
 			),
-			"custom_special_price_note": so_item.custom_special_price_note,
+			"custom_special_price_note": so_item.note,
 		}, update_modified=False)
 
 	ordered = frappe.db.sql(

@@ -670,3 +670,5 @@ avientek.patches.project_status_mandatory
 avientek.patches.reset_stale_quotation_ordered_qty
 # #0601: Singapore GST 7% -> 9% on the Singapore tax templates.
 avientek.patches.singapore_gst_9_percent_0601
+# #0599: Special Price on PO lines of inter-company / older orders.
+avientek.patches.backfill_po_special_price_0599
