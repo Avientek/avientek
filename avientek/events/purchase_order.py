@@ -654,6 +654,12 @@ def update_eta(item):
 	po_eta_history = append_to_eta_list(eta, item.eta_history, eta_date)
 	po_values = {
 		"avientek_eta": eta,
+		# #0603 (Orders.Mea, PO-FZCO-26-01607): the ETA Date was written to
+		# the linked Sales Order line and to the history, but never to this PO
+		# line. On a submitted PO "Set SO ETA" then reloaded the form and the
+		# date just typed disappeared — the history showed 30-11-2026, the ETA
+		# Date field (and every report reading it) stayed blank.
+		"eta": eta_date,
 		"eta_history": json.dumps(po_eta_history),
 		"eta_history_text": set_history(po_eta_history),
 	}
