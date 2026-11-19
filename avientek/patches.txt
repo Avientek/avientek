@@ -674,3 +674,5 @@ avientek.patches.singapore_gst_9_percent_0601
 avientek.patches.backfill_po_special_price_0599
 # #0601: zero-rated Sales tax template for the Singapore company.
 avientek.patches.singapore_gst_zero_rated_template_0601
+# #0603: ETA Date lost on PO lines by Set SO ETA.
+avientek.patches.backfill_po_eta_date_0603
