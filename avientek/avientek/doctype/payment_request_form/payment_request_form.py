@@ -5513,6 +5513,10 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         _quote_pos = [po_name]
     if _quote_pos:
         linked_quotations = _aggregate_quotations_for_pos(_quote_pos)
+    elif actual_doctype == "Journal Entry":
+        # #0606 (Jithin): Reward & Incentive JVs — show the Quotation the
+        # JV was booked against, the same way supplier payments do.
+        linked_quotations = _get_quotations_for_journal_entry(reference_name)
 
     return {
         "attachment_images": att_images,
@@ -5529,6 +5533,42 @@ def get_invoice_preview_data(reference_doctype, reference_name, max_pages=3, par
         "resolved_exists": resolved_exists,
         "stated_doctype": reference_doctype or "",
     }
+
+
+def _get_quotations_for_journal_entry(jv_name):
+	"""Quotation(s) behind a Reward & Incentive Journal Entry (#0606).
+
+	The JV holds no Link to the Quotation (sales_invoice_reward_incentive
+	cannot use reference rows on expense / liability accounts). It records:
+	  * user_remark  "... booking for <SI> (against <Quotation>) [...]"
+	                 (also on credit-note reversals);
+	  * cheque_no    the Sales Invoice (or Credit Note) it was booked for.
+	Use the remark first, then walk the invoice's lines to their Sales
+	Orders' Quotations. Other JVs return [].
+	"""
+	import re
+
+	if not jv_name or not frappe.db.exists("Journal Entry", jv_name):
+		return []
+	remark, invoice = frappe.db.get_value("Journal Entry", jv_name, ["user_remark", "cheque_no"])
+	quotations = []
+	for qn in re.findall(r"\(against ([^)\s]+)\)", remark or ""):
+		if qn not in quotations and frappe.db.exists("Quotation", qn):
+			quotations.append(qn)
+	if quotations or not invoice or not frappe.db.exists("Sales Invoice", invoice):
+		return quotations
+	sales_orders = frappe.get_all(
+		"Sales Invoice Item", filters={"parent": invoice, "sales_order": ["is", "set"]},
+		pluck="sales_order", distinct=True, order_by="idx asc",
+	)
+	for so in sales_orders:
+		for qn in frappe.get_all(
+			"Sales Order Item", filters={"parent": so, "prevdoc_docname": ["is", "set"]},
+			pluck="prevdoc_docname", distinct=True, order_by="idx asc",
+		):
+			if qn not in quotations and frappe.db.exists("Quotation", qn):
+				quotations.append(qn)
+	return quotations
 
 
 def _pdf_url_to_images(file_url, max_pages=3):
