@@ -2613,8 +2613,15 @@ function update_custom_service_totals(frm) {
     // vs stored 21542.998113) marked submitted quotes "Not Saved", which
     // hides the workflow Approve buttons. Compare at the DB's 9 decimals
     // and only write when the value really changed.
+    // #0607 (QN-WLL-26-01088): 9 decimals was still too fine — the stored
+    // 15404.53072605 vs the recomputed 15404.530726051 differ only in the
+    // 9th decimal, so the quote again opened "Not Saved" after Update and
+    // the Update button stayed. Compare at the field's own display
+    // precision (2 for these currency totals): a real change in the
+    // service lines always shows there.
     const set_if_changed = (field, value) => {
-        if (flt(frm.doc[field], 9) !== flt(value, 9)) frm.set_value(field, flt(value, 9));
+        const p = cint(precision(field, frm.doc)) || 2;
+        if (flt(frm.doc[field], p) !== flt(value, p)) frm.set_value(field, flt(value, 9));
     };
     set_if_changed('custom_total_qty', total_qty);
     set_if_changed('custom_total', total_amount);
