@@ -38,6 +38,14 @@ def after_migrate():
 		("create_asset_dam_fields", _create_asset_dam_fields),
 		("create_so_po_special_price_fields", _create_so_po_special_price_fields),
 		("create_po_stock_availability_field", _create_po_stock_availability_field),
+		# #0608 (Jithin): Brand on Purchase Invoice lines is a standard field,
+		# filled on every line, but hidden — and the report column picker
+		# leaves hidden fields out. Show it so Purchase Invoice reports can
+		# add a Brand column. Read-only: it comes from the Item.
+		("pi_item_brand_visible", lambda: [
+			make_property_setter("Purchase Invoice Item", "brand", prop, "0" if prop == "hidden" else "1",
+			                     "Check", for_doctype=False, validate_fields_for_doctype=False)
+			for prop in ("hidden", "read_only")]),
 		("create_margin_markup_carry_fields", _create_margin_markup_carry_fields),
 		("prf_bank_fields_allow_on_submit", _prf_bank_fields_allow_on_submit),
 		("so_po_item_derived_fields_allow_on_submit", _so_po_item_derived_fields_allow_on_submit),
